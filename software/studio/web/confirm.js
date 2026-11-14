@@ -1,9 +1,9 @@
-// 两步确认（第三批代码审查 D4）：所有「点两下才算」的按钮共用这一个——交还主程序、测急停的跳过，以后的也用它。
-// 以前是原按钮原地变成「确定……？」，双击一下就直接过了（第二下正好点在变好的按钮上）。现在：
-// - 第一下：原按钮不动，旁边新出现一个确认按钮（双击的第二下落在原按钮上）；
-// - 出现后 700 ms 内的点击一律不算（双击、手快、确认按钮刚好冒到指针底下都不会误触）；
-// - 3 秒没点确认就复原；700 ms 以后再点一下原按钮也是收起。
-// 不用浏览器的 confirm 弹窗（会挡住整页，手机上还会把顶上的卸力按钮也挡住）。
+// Two-step confirmation (third code review D4): every "takes two clicks" button shares this one: hand back to the main program, skipping the e-stop test, and future ones too.
+// Previously the button itself turned into "Sure...?" in place, so a double click went straight through (the second click landed right on the changed button). Now:
+// - first click: the original button stays put, and a new confirm button appears next to it (the second click of a double click lands on the original button);
+// - any click within 700 ms after it appears is ignored (double clicks, quick hands, or the confirm button popping up right under the pointer can't trigger it by accident);
+// - if confirm isn't clicked within 3 s it reverts; clicking the original button again after 700 ms also dismisses it.
+// The browser's confirm dialog isn't used (it blocks the whole page, and on phones it also covers the torque-release button at the top).
 import { html, useState, useEffect, useRef } from './vendor/preact-htm.module.js';
 
 export const ARM_GUARD_MS = 700;

@@ -1,22 +1,22 @@
-"""Studio 的网页服务：静态页面、登录、日志、诊断包、WebSocket 枢纽。
+"""Studio's web service: static pages, login, logs, diagnostic bundle, WebSocket hub.
 
-WebSocket /ws（握手先查 Host、Origin：不对就拒绝握手；没登录则先 accept 再用 4401 关掉，
-页面才看得到 4401、跳登录页——握手阶段就关，浏览器只会看到 1006，会一直重连）：
-    Studio → 页面：{"t":"hello",...}  {"t":"state",...}（页面可见时 10 Hz）  {"t":"hb"}（看不见时 1 Hz）
+WebSocket /ws (the handshake checks Host and Origin first and rejects the handshake if wrong; if not logged in, accept first and then close with 4401,
+so the page can see 4401 and jump to the login page; closing during the handshake makes the browser see only 1006 and reconnect forever):
+    Studio → page: {"t":"hello",...}  {"t":"state",...} (10 Hz while the page is visible)  {"t":"hb"} (1 Hz while not visible)
                    {"t":"log","entry":{...}}  {"t":"result","id":...,"ok":...,"reason":...}
-    页面 → Studio：{"t":"hb","seq":N,"visible":true,"route":"/","pad_visible":false}（每秒一次）  {"t":"cmd","id":...,"name":"relax"}
-pad_visible：手柄那一块在不在屏幕上（总览重排审查 O1：手柄并进了总览，地址是 #/pad 不代表看得到）。在的页面 10 Hz 推手柄快照，
-不在 1 Hz（仪表带的手柄格要用）；老页面的心跳没带这个字段，才按 route == "/pad" 兜底。
+    page → Studio: {"t":"hb","seq":N,"visible":true,"route":"/","pad_visible":false} (once per second)  {"t":"cmd","id":...,"name":"relax"}
+pad_visible: whether the gamepad section is on screen (overview re-layout review O1: the gamepad was merged into the overview, so an address of #/pad does not mean it is visible). Pages where it is get gamepad snapshots at 10 Hz,
+others at 1 Hz (needed by the gamepad cell in the instrument strip); only if an old page's heartbeat lacks this field do we fall back to route == "/pad".
 
-舵机会话（第三批代码审查 D1、D2、D3、D9）：
-- **Studio 退出不卸力**：退出时只关串口，舵机保持着的照样保持（用户定过「离开舵机页保持使能」，退出也一样）。
-  开总线时在 state 目录原子写 servo-session.json（串口、开始时间、谁开的），交还成功才删；Studio 起来时见到它、
-  robotd 又不在 → 自动重新接管总线（只读打开，不改扭矩），恢复会话和提示条；接管不上 → 提示条写「上次退出时可能还有
-  舵机保持着，去舵机页接管后才能卸力」，卸力按钮引导去舵机页。robotd 在 → 它起来时已经全部松开了，删掉标记。
-- 离开 / 交还：舵机操作在事件循环里先记账（op_begin），交还先置 closing、等在路上的做完、当场读扭矩（servo.py）；
-  离开时还有别的页面在舵机页、校准 / 运动在跑、读不到扭矩的，都不交还。
-- 会话期间每 5 秒看一眼 robotd 的 socket：连得上 = 被手动起来了（它会把舵机全部松开、跟 Studio 抢串口），
-  记错误、Studio 关总线（不写舵机），提示条变红。
+Servo session (third code review batch D1, D2, D3, D9):
+- **Studio exiting does not relax**: on exit only the serial port is closed, and servos that were holding keep holding (the user decided "leaving the servo page keeps torque enabled", and exiting is the same).
+  When the bus is opened, servo-session.json (serial port, start time, who opened it) is written atomically in the state directory and deleted only after a successful hand-back; if Studio finds it on startup
+  and robotd is not running → automatically retake the bus (opened read-only, torque unchanged), restoring the session and the hint bar; if the takeover fails → the hint bar says "servos may still be holding
+  since the last exit; take over on the servo page before you can relax", and the relax button leads to the servo page. If robotd is running → it already released everything when it started, so delete the marker.
+- Leaving / hand-back: servo operations are booked in the event loop first (op_begin); hand-back first sets closing, waits for in-flight operations to finish, and reads torque right then (servo.py);
+  on leaving, if another page is still on the servo page, calibration / motion is running, or torque cannot be read, do not hand back.
+- During a session, check robotd's socket every 5 seconds: if it connects = it was started manually (it will release all servos and fight Studio for the serial port),
+  so log an error, Studio closes the bus (without writing to the servos), and the hint bar turns red.
 """
 import asyncio
 import contextlib
@@ -43,12 +43,12 @@ from . import helper
 from .rpc import open_conn
 from .servo import boot_id, view_from_robotd
 from .sshkeys import BadKey, SshKeys
-try:                      # https 之后手机要用到的两个功能，详见 phone_bridge 的注释
+try:                      # two features the phone needs after https; see the comments in phone_bridge
     from . import phone_bridge
-except Exception:         # 模块不在就只是这两个功能没有，别把整个网页拖垮
+except Exception:         # if the module is missing only these two features are absent; do not drag down the whole web page
     phone_bridge = None
 from .state import summarize
-from .pad import Refused as PadRefused, robot_view  # 手柄页
+from .pad import Refused as PadRefused, robot_view  # gamepad page
 from .ai_connections import AiError
 from .ai_service import AiService
 from .updates import Updates, UpdateError, handle as handle_updates, safe_during_update
@@ -63,20 +63,20 @@ MODEL_UPLOAD_LIMIT = 64 * 1024 * 1024
 MODEL_OP_LIMIT = 32768
 STATE_HZ = 10
 COMMANDS = {"relax", "servo.open", "servo.close", "servo.op", "servo.ports", "imu.op", "calib.op", "pad.op", "onboard.op", "battery.op", "tune.op", "net.op"}
-HB_QUIET_S = 5.0         # 页面这么久没发心跳：当作看不见（停推状态、可能退订）
-HB_DEAD_S = 30.0         # 这么久没任何消息：当作半开的连接（手机走出 WiFi），直接关掉
+HB_QUIET_S = 5.0         # page has sent no heartbeat for this long: treat as not visible (stop pushing state, maybe unsubscribe)
+HB_DEAD_S = 30.0         # no message at all for this long: treat as a half-open connection (phone walked out of Wi-Fi) and close it
 MUSIC_PONG_TIMEOUT_S = 5.0
-SERVO_IDLE_S = 60.0      # 舵机页没人在看（页面关了、断网、切走了没交还）这么久、又没有舵机保持着：自动交还主程序
-ONBOARD_TICK_S = 0.5     # 上手清单多久判一次（站起来过 3 秒、走过 2 秒按这个粒度数）
-SERVO_MARKER = "servo-session.json"   # 舵机会话开着的标记（state 目录；交还成功才删：审查 D1）
-ROBOTD_PROBE_S = 5.0     # 舵机会话期间多久看一眼 robotd 起没起来（审查 D9）
-# 手柄快照里带说明文字的长列表：没变就不每帧推（总览重排审查 O12：一帧 4.8 KB，WiFi 跟蓝牙是同一颗芯片）。
-# 每 1 秒还是整份推一次，页面按缺了哪个就沿用上一份
+SERVO_IDLE_S = 60.0      # nobody watching the servo page (page closed, network lost, switched away without handing back) for this long and no servo holding: automatically hand back to the main program
+ONBOARD_TICK_S = 0.5     # how often the getting-started checklist is evaluated (stood for 3 seconds, walked for 2 seconds are counted at this granularity)
+SERVO_MARKER = "servo-session.json"   # marker that a servo session is open (state directory; deleted only after a successful hand-back: review D1)
+ROBOTD_PROBE_S = 5.0     # how often to check whether robotd has started during a servo session (review D9)
+# Long lists with descriptive text in the gamepad snapshot: not pushed every frame if unchanged (overview re-layout review O12: one frame is 4.8 KB, and Wi-Fi and Bluetooth share one chip).
+# The whole thing is still pushed once every 1 second, and the page keeps the previous copy for whatever is missing
 PAD_HEAVY = ("skills", "actions", "combos", "sounds")
 
 
 class HostGuard:
-    """ASGI 中间件：Host 不认识的请求直接 421（挡 DNS 重绑定）。WebSocket 不认识就关掉。"""
+    """ASGI middleware: requests with an unrecognized Host get 421 immediately (blocks DNS rebinding). Unrecognized WebSockets are closed."""
 
     def __init__(self, app, guard, log):
         self.app, self.guard, self.log = app, guard, log
@@ -94,7 +94,7 @@ class HostGuard:
             host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
             local_ip = (scope.get("server") or (None,))[0]
             if not self.guard.host_ok(host, local_ip):
-                # 措辞固定、Host 值放原文：别人换着 Host 刷，也只会被去重合并成一行
+                # Fixed wording with the Host value in the original text: even if someone floods with changing Hosts, it gets deduplicated into one line
                 self.log.warn("拒绝了一个 Host 不对的请求", cat="连接", raw=repr(host[:100]),
                               hint="正常用不会遇到；如果你用的是新地址，在启动参数 --name 里加上它")
                 if scope["type"] == "http":
@@ -106,7 +106,7 @@ class HostGuard:
 
 
 class AppStatic(StaticFiles):
-    """页面自己的文件每次都问一下有没有更新（改了马上生效）；vendor、model 这些不会变的缓存一天。"""
+    """The page's own files are revalidated every time (changes take effect immediately); unchanging vendor and model files are cached for a day."""
 
     def file_response(self, full_path, stat_result, scope, status_code=200):
         resp = super().file_response(full_path, stat_result, scope, status_code)
@@ -126,8 +126,8 @@ def _client_desc(conn):
 
 
 def _bus_take(by, servo=None):
-    """停主程序、把舵机总线拿过来（进舵机页时调，放线程里）。小助手在就调它（bus-take：不卸力、立旗）；
-    不在（电脑上开发、台架、演示）当没做——servo.open 自己的 robotd_active 检查会接着报错。回 (ok, 原因)。"""
+    """Stop the main program and take over the servo bus (called when entering the servo page, in a thread). If the helper is present, call it (bus-take: no relaxing, raise the flag);
+    if absent (development on a computer, bench, demo) treat it as a no-op; servo.open's own robotd_active check will report the error next. Returns (ok, reason)."""
     if not helper.available():
         if servo is not None:
             servo.helper_available = False
@@ -141,8 +141,8 @@ def _bus_take(by, servo=None):
 
 
 def _bus_give_back(by, servo=None):
-    """交还以后起主程序（点「交还主程序」/ 离开舵机页时调，放线程里）。小助手在就调它
-    （bus-give-back soft：撤旗、起 robotd、等启动四步成功）；不在当没做。回 (ok, 原因)。"""
+    """Start the main program after hand-back (called on "Hand back to the main program" / leaving the servo page, in a thread). If the helper is present, call it
+    (bus-give-back soft: clear the flag, start robotd, wait for the four startup steps to succeed); if absent, treat it as a no-op. Returns (ok, reason)."""
     if not helper.available():
         if servo is not None:
             servo.helper_available = False
@@ -151,7 +151,7 @@ def _bus_give_back(by, servo=None):
         servo.helper_available = True
     ok, result, detail = helper.bus_give_back(by, soft=True, timeout=60)
     if servo is not None:
-        # 主程序其实在回话、只是一直报启动阶段（旧 fork 的标定模式）：交还后的提示不能叫人手动起 robotd
+        # The main program is actually replying but keeps reporting a startup phase (the old fork's calibration mode): the post-hand-back hint must not tell people to start robotd manually
         servo.giveback_stuck = bool(isinstance(detail, dict) and detail.get("still_starting"))
     if ok:
         return True, None
@@ -185,20 +185,20 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             return {'ready':False,'error':'请结束舵机、标定、录制、回放和动作会话后重试'}
         return {'ready':True}
     if imu is not None and commit is not None:
-        imu.commit = commit                          # 标定模式「站姿使能」：跟写进主程序同一套方向
+        imu.commit = commit                          # calibration mode "Enable standing": the same orientation set as writing to the main program
     if onboard is not None:
-        # 上手清单的两条记录从这两处来：测急停过了（pad.py 测急停线程）、IMU 页站着核过（imu.py）
+        # The two getting-started checklist records come from these two places: e-stop test passed (pad.py e-stop test thread), checked standing on the IMU page (imu.py)
         if pad is not None:
             pad.on_estop_passed = onboard.note_estop
         if imu is not None:
             imu.on_check = onboard.note_imu_check
         if commit is not None:
-            onboard.commit_service = commit          # 第 3 步「写进主程序」的准备情况 / 完成判定
-            commit.onboard = onboard                 # 第 1 / 2 步用户标了「已完成」「跳过」：准备情况那两项要知道
+            onboard.commit_service = commit          # readiness / completion check for step 3, "Write to main program"
+            commit.onboard = onboard                 # when the user marks steps 1 / 2 "done" or "skipped", those two readiness items need to know
     web_dir = Path(web_dir)
     clients = {}           # websocket -> {"visible": bool, "by": str, "hb_at": monotonic}
     login_gate = asyncio.Semaphore(1)
-    servo_gate = asyncio.Lock()         # 开 / 关舵机总线一次一个
+    servo_gate = asyncio.Lock()         # opening / closing the servo bus one at a time
     model_upload_gate = asyncio.Lock()
     def mapping_readiness():
         # Called in a pad worker: cached flags only. Robot poll latency must
@@ -212,12 +212,12 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     or getattr(imu,'blocks_updates',lambda:False)()))):
             raise MappingError('请先结束舵机、标定和模型更新会话，再重新映射手柄')
     if pad is not None:pad.mapping_guard=mapping_readiness
-    # 舵机会话的标记（审查 D1）：没给 state 目录（测试）就不写
-    marker = Path(state_dir) / SERVO_MARKER if state_dir and servo is not None else None   # 登录一个一个来：退避不会被并发绕过，scrypt 也不会同时吃掉几份 16 MB
+    # Servo session marker (review D1): not written if no state directory is given (tests)
+    marker = Path(state_dir) / SERVO_MARKER if state_dir and servo is not None else None   # logins one at a time: backoff cannot be bypassed by concurrency, and scrypt will not eat several 16 MB at once
 
     dev_sess = {"csrf": "dev", "auth_at": time.time(), "remember": False}
-    # 用户 10-18：「不用设管理员密码，直接启动连就行」。没设密码 = 开放：同一个网络里打开就能用（跟 servo-web 一样）。
-    # 设了密码才要登录（设置里以后能加）。Host / Origin 校验照旧：别的网站没法借你的浏览器控制鸭子
+    # User, 10-18: "no need to set an admin password, just start it and connect". No password set = open: anyone opening it on the same network can use it (same as servo-web).
+    # Login is only required once a password is set (can be added in settings later). Host / Origin checks still apply: other websites cannot use your browser to control the duck
     open_sess = {"csrf": "open", "auth_at": time.time(), "remember": False}
     if dev_autologin:
         log.warn("开发模式：本机来的请求不用登录", cat="系统", hint="只在电脑上截图测试用，鸭子上不要开")
@@ -299,15 +299,15 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         if not isinstance(body, dict):
             body = {}
         pw = str(body.get("password", ""))
-        # 请求体从来不写日志，不用 log.hide(pw)（代码审查 #12：每个试过的密码都进打码表，
-        # 试过 "true" 以后日志里所有 true 都会变成 [已隐藏]）
+        # Request bodies are never logged, so log.hide(pw) is unnecessary (code review #12: every attempted password went into the redaction table,
+        # and after trying "true" every true in the log became [已隐藏] (hidden))
         async with login_gate:
             token, why, wait = await asyncio.to_thread(auth.login, pw, ip, bool(body.get("remember")))
         if not token:
             return JSONResponse({"ok": False, "error": why, "wait": wait}, status_code=401)
         resp = JSONResponse({"ok": True})
-        # SameSite=Lax：从微信、聊天软件点链接进来也能带上登录（Strict 会每次都要求重新登录）；
-        # 跨站请求由 Origin 校验和 CSRF 令牌挡
+        # SameSite=Lax: login is carried even when following a link from WeChat or chat apps (Strict would require logging in again every time);
+        # cross-site requests are blocked by the Origin check and the CSRF token
         resp.set_cookie(COOKIE, token, max_age=REMEMBER_S if body.get("remember") else None,
                         httponly=True, samesite="lax", path="/")
         return resp
@@ -322,7 +322,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return resp
 
     async def api_password(request):
-        """在网页上设 / 改 / 清管理员密码。写的就是 run.py set-password 用的 password.json。"""
+        """Set / change / clear the admin password on the web page. Writes the same password.json used by run.py set-password."""
         token, sess = session_of(request)
         if not origin_ok(request):
             return JSONResponse({"ok": False, "error": "请求来源不对"}, status_code=403)
@@ -368,10 +368,10 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return resp
 
     ssh_gate = asyncio.Lock()
-    ssh_keys = SshKeys(ssh_home)        # Studio 以 radxa 身份跑：~/.ssh/authorized_keys 是它自己的文件，不用小助手
+    ssh_keys = SshKeys(ssh_home)        # Studio runs as radxa: ~/.ssh/authorized_keys is its own file, no helper needed
 
     async def ssh_view(detail=None):
-        """密码登录开没开、ssh 服务（小助手 ssh-status；读不到就是 None）+ 登记的钥匙（Studio 自己读）。"""
+        """Whether password login is on, the ssh service (helper ssh-status; None if unreadable) + registered keys (read by Studio itself)."""
         if detail is None and await asyncio.to_thread(helper.available):
             ok, _, d = await asyncio.to_thread(helper.ssh_status)
             detail = d if ok else None
@@ -384,9 +384,9 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 "ssh_active": d.get("ssh_active"), "keys": len(keys), "key_list": keys, "user": d.get("user") or "radxa"}
 
     async def api_ssh(request):
-        """「更多」页的 SSH：status / on（用户自己定的密码）/ off / add_key（贴自己的公钥）/ remove_key。
-        镜像出厂只认钥匙、不带任何人的钥匙，也没有人人都知道的默认密码。打开密码登录、登记钥匙都要先设网页登录密码：
-        不然连上热点（密码公开）的人都能打开网页、顺手打开 SSH 拿到 root。密码只交给小助手的 stdin，不进日志。"""
+        """SSH on the "More" page: status / on (with the user's own password) / off / add_key (paste your own public key) / remove_key.
+        The factory image accepts keys only, ships with nobody's key, and has no default password known to everyone. Enabling password login or registering keys both require the web login password to be set first:
+        otherwise anyone on the hotspot (whose password is public) could open the web page and turn on SSH to get root. The password is only passed to the helper's stdin, never logged."""
         _, sess = session_of(request)
         if not origin_ok(request):
             return JSONResponse({"ok": False, "error": "请求来源不对"}, status_code=403)
@@ -464,18 +464,18 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return JSONResponse({"ok": True, "items": log.recent(limit=limit)})
 
     async def api_diag(request):
-        """诊断包：最近两天的日志 + 当时的状态 + 版本 + robotd 的系统日志。发群里求助用。"""
+        """Diagnostic bundle: the last two days of logs + current state + versions + robotd's system log. For asking for help in the group chat."""
         _, sess = session_of(request)
         if not sess:
             return JSONResponse({"ok": False}, status_code=401)
         log.info(f"导出诊断包（{_client_desc(request)}）", cat="系统")
-        # 状态在事件循环里取好再交给线程（不跨线程读正在变的东西）
+        # Grab the state in the event loop before handing off to the thread (do not read changing things across threads)
         snap = summarize(robotd, duck, servo, ob=onboard, bat=battery, net=net, commit=commit, auth=auth)
         raw = {"hello": robotd.hello.value, "health": robotd.health.value, "busStatus": robotd.bus.value,
                "policies": robotd.policies.value, "calibration": robotd.calib.value,
                "pad": robotd.pad.value, "system": robotd.sysinfo.value}
         if onboard is not None:
-            raw["onboarding_records"] = dict(onboard.rec)        # 上手清单记下的（时间、哪只手柄、指纹）
+            raw["onboarding_records"] = dict(onboard.rec)        # what the getting-started checklist recorded (time, which gamepad, fingerprint)
         if pad is not None:
             try:
                 raw["pad_page"] = pad.diag()
@@ -483,7 +483,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 raw["pad_page"] = f"出错：{type(e).__name__}: {e}"
         if tune is not None:
             try:
-                raw["tune"] = tune.diag()                          # 调参快照（调参方案 §5：文件、回读）
+                raw["tune"] = tune.diag()                          # tuning snapshot (tuning plan §5: files, readback)
             except Exception as e:  # noqa: BLE001
                 raw["tune"] = f"出错：{type(e).__name__}: {e}"
         data = await asyncio.to_thread(_diag_zip, log, snap, raw)
@@ -492,7 +492,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     async def api_profile(request):
-        """导出鸭子档案（给训练用，调参方案 T3）：只读汇总，JSON 下载。"""
+        """Export the duck profile (for training, tuning plan T3): read-only summary, downloaded as JSON."""
         _, sess = session_of(request)
         if not sess:
             return JSONResponse({"ok": False}, status_code=401)
@@ -549,7 +549,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         except ValueError as e:
             return model_response({"ok": False, "error": str(e), "code": getattr(e, "code", "invalid")},
                                   getattr(e, "status", 400))
-        except Exception as e:  # 不把上传内容写进日志
+        except Exception as e:  # do not write uploaded content to the log
             log.error("模型管理操作失败", cat="模型", raw=f"{type(e).__name__}: {e}", exc=True)
             return model_response({"ok": False, "error": "模型管理暂时出错，请查看日志后重试"}, 500)
 
@@ -599,7 +599,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         refused = model_access(request, write=True)
         if refused is not None:
             return refused
-        # 原文件名仅用于判定格式。暂存文件采用系统随机名，永不拼接用户路径。
+        # The original file name is only used to determine the format. Staged files use random system names and never concatenate user paths.
         filename = request.query_params.get("filename", "")
         if not filename or len(filename) > 200 or any(c in filename for c in ("/", "\\", ":", "\x00")):
             return model_response({"ok": False, "error": "请选择模型部署包文件"}, 400)
@@ -639,7 +639,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     await asyncio.to_thread(Path(temporary).unlink, missing_ok=True)
 
     async def meshes(request):
-        """3D 模型 2.8 MB：预先压好的 .gz 直接给（不在板子上现压），浏览器缓存一天。"""
+        """The 3D model is 2.8 MB: serve the pre-compressed .gz directly (no compressing on the board), browser-cached for a day."""
         raw = web_dir / "model" / "meshes.bin"
         gz = raw.with_suffix(".bin.gz")
         headers = {"Cache-Control": "public, max-age=86400", "Vary": "Accept-Encoding"}
@@ -656,7 +656,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
     tune_err = {"logged": False}
 
     def tune_view():
-        """调参卡的快照；出错只记一次日志、回 None（不能因为它把整条页面连接弄断）。"""
+        """Tuning card snapshot; on error log once and return None (it must not break the whole page connection)."""
         try:
             v = tune.view()
             tune_err["logged"] = False
@@ -694,7 +694,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         async def send(obj):
             async with send_lock:
                 await ws.send_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
-        loop = asyncio.get_running_loop()      # 写主程序在后台线程跑，进度从这里推回页面
+        loop = asyncio.get_running_loop()      # writing to the main program runs in a background thread; progress is pushed back to the page from here
 
         async def sender():
             await send({"t": "hello", "version": VERSION, "duck": duck})
@@ -702,9 +702,9 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             last_imu = 0.0
             last_tune = 0.0
             pad_tick = 0
-            pad_lists = None                    # 上一次推出去的手柄长列表（没变就不再推：审查 O12）
+            pad_lists = None                    # the gamepad long lists last pushed (not pushed again if unchanged: review O12)
             state_tick = 0
-            onb_sent = None                     # 上一次推出去的上手清单（没变就不再带：代码审查 C5）
+            onb_sent = None                     # the getting-started checklist last pushed (not carried again if unchanged: code review C5)
             while True:
                 quiet = time.monotonic() - me["hb_at"]
                 if quiet > HB_DEAD_S:
@@ -723,12 +723,12 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         await ws.close(code=4408)
                         return
                 if me["visible"] and quiet > HB_QUIET_S:
-                    me["visible"] = False          # 没心跳了：先当看不见，别让 robotd 白组帧
+                    me["visible"] = False          # no heartbeat: treat as not visible for now, so robotd does not assemble frames for nothing
                     update_viewers()
                 if me["visible"]:
                     st = summarize(robotd, duck, servo, ob=onboard, bat=battery, net=net, commit=commit, auth=auth)
-                    # 上手清单一份 1 KB 左右：没变就不每帧带（页面沿用上一份），每秒还是整份带一次（代码审查 C5，
-                    # 跟手柄快照的长列表一个办法）
+                    # The getting-started checklist is about 1 KB: not carried every frame if unchanged (the page keeps the previous copy), but still carried in full once per second (code review C5,
+                    # same approach as the gamepad snapshot's long lists)
                     state_tick += 1
                     onb = st.get("onboarding")
                     if onb is not None and onb == onb_sent and state_tick % STATE_HZ != 0:
@@ -737,30 +737,30 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     else:
                         onb_sent = onb
                     await send(st)
-                    # 舵机表一帧 5.6 KB，只有舵机页用：只在舵机页、或者总线接管着的时候推（总览重排审查 O12）
+                    # The servo table is 5.6 KB per frame and only used by the servo page: only pushed while on the servo page or while the bus is taken over (overview re-layout review O12)
                     if servo is not None and (me.get("route") == "/servos" or servo.state in ("open", "opening")):
-                        # 接管了总线：推总线上读到的整张表；没接管：用主程序的数据拼一张只读的表
+                        # Bus taken over: push the whole table read from the bus; not taken over: assemble a read-only table from the main program's data
                         await send(servo.snapshot() if servo.state == "open"
                                    else view_from_robotd(robotd, servo.directions, servo.state,
                                                          servo.error, servo.sim))
                     if imu is not None and time.monotonic() - last_imu >= 0.5:
-                        last_imu = time.monotonic()        # IMU 页要的芯片、安装方向、读数状态：半秒一次够了
+                        last_imu = time.monotonic()        # chip, mounting orientation and reading status for the IMU page: twice a second is enough
                         await send(imu.view())
                     if (tune is not None and time.monotonic() - last_tune >= 1.0
-                            and me.get("route") in ("/", "/pad", "/settings")):     # 还没收到心跳（不知道在哪页）先不推
-                        last_tune = time.monotonic()       # 总览下面的「运行和调参」、设置页的模型：1 秒一次（调参方案 T1–T3）
+                            and me.get("route") in ("/", "/pad", "/settings")):     # no heartbeat received yet (page unknown): do not push yet
+                        last_tune = time.monotonic()       # "Run and tuning" below the overview, the model on the settings page: once per second (tuning plan T1–T3)
                         tv = tune_view()
                         if tv is not None:
                             await send(tv)
                     if pad is not None:
-                        # 手柄那一块在屏幕上的页面 10 Hz，别的 1 Hz（够仪表带的手柄格用）。只看心跳里的 pad_visible；
-                        # 老页面没带才按路由兜底（审查 O1：#/pad 现在是总览上的锚点，地址是它不代表看得到）
+                        # Pages with the gamepad section on screen get 10 Hz, others 1 Hz (enough for the instrument strip's gamepad cell). Only pad_visible in the heartbeat is used;
+                        # only old pages lacking it fall back to the route (review O1: #/pad is now an anchor on the overview, so that address does not mean it is visible)
                         pad_tick += 1
                         hot = me["pad_visible"] if me.get("pad_visible") is not None else me.get("route") == "/pad"
                         full = pad_tick % STATE_HZ == 0
                         if hot or full:
                             try:
-                                snap = pad.safe_snapshot(conn=pad_conn)    # 自己不抛；同一种错只记一次日志
+                                snap = pad.safe_snapshot(conn=pad_conn)    # never raises itself; the same kind of error is logged only once
                             except Exception:  # noqa: BLE001
                                 snap = None
                             if snap is not None:
@@ -779,7 +779,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     await asyncio.sleep(1.0)
                 if time.monotonic() - last_check > 5:
                     last_check = time.monotonic()
-                    # 只查不续期：页面开着不等于有人在用，12 小时没操作照样过期
+                    # Check only, do not renew: a page being open does not mean someone is using it; 12 hours without activity still expires
                     if session_of(ws, touch=False)[1] is None:
                         await ws.close(code=4401)
                         return
@@ -796,22 +796,22 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pad.note_relax(by)
             try:
                 if servo is not None and servo.state == "open":
-                    # 调舵机时 robotd 停着：卸力直接走总线，回读确认（servo.relax_all）
+                    # robotd is stopped during servo tuning: relax goes straight over the bus with readback confirmation (servo.relax_all)
                     accepted, reason = await asyncio.to_thread(servo.relax_all, by)
                 elif servo is not None and servo.orphan and robotd.present is not True:
-                    # 上次退出时会话开着、这次没接管上（审查 D1）：robotd 不在，发给它也没用；总线上卸要先接管
+                    # The session was open at the last exit and was not taken over this time (review D1): robotd is not running so sending to it is useless; relaxing over the bus requires taking over first
                     log.warn("卸力：上次退出时舵机会话开着、这次没接管上，没法在总线上卸", cat="安全", raw=f"by={by}",
                              hint="去舵机页接管总线后再按卸力；急的话关电源")
                     accepted, reason = False, "上次 Studio 退出时可能还有舵机保持着：先去舵机页接管总线才能卸力（急的话关电源）"
                 else:
                     accepted, reason = await robotd.relax(by)
-            except Exception as e:  # noqa: BLE001 —— 不该发生；发生了也要给页面一个回执
+            except Exception as e:  # noqa: BLE001 — should not happen; if it does, the page still gets an acknowledgment
                 log.error("处理卸力命令时 Studio 出错", cat="命令", raw=f"{type(e).__name__}: {e}", exc=True,
                           hint="这是 Studio 自己的 bug；先用手柄 − 或关电源，再把诊断包发出来")
                 accepted, reason = False, f"Studio 出错：{type(e).__name__}"
             try:
                 await send({"t": "result", "id": cid, "ok": accepted, "reason": reason})
-            except Exception:  # noqa: BLE001 —— 页面已经断了：卸力照样发出去了，回执送不到无所谓
+            except Exception:  # noqa: BLE001 — the page has already disconnected: the relax was sent anyway, so it does not matter if the acknowledgment cannot be delivered
                 pass
 
         async def run_servo(name, cid, args=None):
@@ -820,18 +820,18 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 return
             async with servo_gate:
                 if name == "servo.open":
-                    # 用户 10-18：点进舵机页就自动接管。鸭子在走 / 策略在跑 / 正在站起来时不接管：关节会冻在半步
+                    # User, 10-18: entering the servo page takes over automatically. Do not take over while the duck is walking / the policy is running / it is standing up: the joints would freeze mid-step
                     pose = summarize(robotd, duck, net=net, auth=auth)["posture"] if servo.state != "open" else None
                     if pose in ("walking", "policy", "homing"):
                         ok, why = False, "鸭子在走或者策略在跑：先停下或坐下，再进舵机页（现在只读）"
                     else:
                         was_open = servo.state == "open"
                         if was_open:
-                            # 会话一直开着、本来就是 paused：成功失败都不碰轮询（审查 #3）
+                            # The session has stayed open and is already paused: do not touch polling on success or failure (review #3)
                             ok, why = await asyncio.to_thread(servo.open, by, (args or {}).get("port"))
                         else:
-                            # 一键接管：先停主程序（小助手 bus-take，不卸力、立旗）。小助手没装就交给
-                            # servo.open 自己的 robotd_active 检查去报错
+                            # One-click takeover: stop the main program first (helper bus-take, no relaxing, raise the flag). If the helper is not installed, leave it to
+                            # servo.open's own robotd_active check to report the error
                             robotd.set_paused(True, "调舵机")
                             taken, take_why = await asyncio.to_thread(_bus_take, by, servo)
                             if not taken:
@@ -843,7 +843,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                                 ok, why = await asyncio.to_thread(servo.open, by, (args or {}).get("port"))
                                 if not ok:
                                     robotd.set_paused(False)
-                                    # 主程序停了、总线却没开成：起回来，别留个旗让主程序一直起不来
+                                    # The main program stopped but the bus failed to open: start it back up, do not leave a flag that keeps the main program from starting
                                     asyncio.create_task(asyncio.to_thread(_bus_give_back, by, servo))
                                 else:
                                     servo.orphan = servo.conflict_at = None
@@ -851,10 +851,10 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                                     servo.handback_note = servo.giveback_error = servo.giveback_hint = None
                                     await remember_marker(by)
                 elif (args or {}).get("if_idle"):
-                    # 离开舵机页：有舵机保持着（当场读）、读不到扭矩、校准 / 运动在跑、别的页面还在舵机页，都不交还
-                    # （用户 10-18：「舵机这个页面出去的时候应该保持住使能，不应该泄力」；审查 D2、D3）。
-                    # fork 的 robotd 一起来就先全部卸力（duck-control feetech.rs:1495 confirm_startup_limp），交还必然软，
-                    # 所以只能留着总线会话；要交还点「交还主程序」（不带 if_idle）
+                    # Leaving the servo page: do not hand back if any servo is holding (read right then), torque cannot be read, calibration / motion is running, or another page is still on the servo page
+                    # (user, 10-18: "when leaving the servo page torque should stay enabled, it should not go limp"; review D2, D3).
+                    # The fork's robotd relaxes everything as soon as it starts (duck-control feetech.rs:1495 confirm_startup_limp), so a hand-back is always soft,
+                    # so the only option is to keep the bus session; to hand back, click "Hand back to the main program" (without if_idle)
                     done, kept = await leave_servos(f"离开舵机页（{by}）", ws, by)
                     if done:
                         ok, why = True, None
@@ -870,14 +870,14 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def run_servo_op(cid, args):  # noqa: C901
-            """舵机页的操作（扭矩、滑块、运动、校准、扫描、寄存器……）：servo_ops.handle 在线程里跑。"""
+            """Servo page operations (torque, sliders, motion, calibration, scan, registers…): servo_ops.handle runs in a thread."""
             from .servo_ops import Refused
             data, ok, reason = None, True, None
             ops = servo.ops if servo is not None else None
             if ops is None:
                 ok, reason = False, "舵机总线还没接管：刷新舵机页重试"
             else:
-                # 在事件循环里、进线程之前就记账（审查 D2）：「保持」跟「离开」同一个包里到，交还也会等它做完再读扭矩
+                # Book it in the event loop before entering the thread (review D2): "hold" and "leave" arrive in the same packet, and hand-back also waits for it to finish before reading torque
                 try:
                     tok = servo.op_begin(args.get("op"))
                 except Refused as e:
@@ -899,7 +899,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def run_imu_op(cid, args):
-            """IMU 页的操作：现在只有 solve（算安装方向）；写入、粗校、换芯片要上鸭子再接。"""
+            """IMU page operations: currently only solve (compute the mounting orientation); writing, coarse calibration and chip switching will be hooked up on the duck."""
             from .imu import Refused as ImuRefused
             data, ok, reason = None, True, None
             if imu is None:
@@ -919,7 +919,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def run_calib_op(cid, args):
-            """上手清单第 3 步：「先看看要写什么」= 小助手 dry_run；「写进主程序」= 校验准备情况后交给小助手写、重启主程序。"""
+            """Step 3 of the getting-started checklist: "preview what will be written" = helper dry_run; "Write to main program" = check readiness, then hand to the helper to write and restart the main program."""
             from .commit import Refused as CommitRefused
             op = args.get("op") if isinstance(args, dict) else None
             if commit is None:
@@ -956,7 +956,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     reason += "…"
                 await send({"t": "result", "id": cid, "ok": False, "reason": reason, "data": {"readiness": view}})
                 return
-            # 先回执「开始写」，后面全在后台线程里：页面不能被 90 秒的重启卡住，卸力也照常能点
+            # Acknowledge "writing started" first; everything after runs in a background thread: the page must not be stuck behind a 90-second restart, and relax stays clickable
             await send({"t": "commit", "phase": "started", "msg": "开始写进主程序：会重启主程序（约 20 秒），鸭子会先卸力"})
             await send({"t": "result", "id": cid, "ok": True, "data": {"started": True, "readiness": view}})
 
@@ -966,7 +966,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     item["detail"] = detail
                 try:
                     asyncio.run_coroutine_threadsafe(send(item), loop)
-                except Exception:  # noqa: BLE001 —— 页面断了不影响写
+                except Exception:  # noqa: BLE001 — the page disconnecting does not affect the write
                     pass
 
             try:
@@ -979,7 +979,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         "reason": res.get("reason"), "detail": res.get("detail") or {}})
 
         async def run_tune_op(cid, args):
-            """调参卡 / 设置页模型的操作：这一版只有 save_body（导出档案用的重量，只存在 Studio 里）；改鸭子的一律拒。"""
+            """Tuning card / settings page model operations: this version only has save_body (weight for the exported profile, stored only in Studio); anything changing the duck is refused."""
             from .tune import Refused as TuneRefused
             data, ok, reason = None, True, None
             if tune is None:
@@ -999,7 +999,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def run_pad_op(cid, args):
-            """手柄页的操作：pad.handle 在线程里跑（搜索、配对、动作自己开后台线程，这里马上回）。"""
+            """Gamepad page operations: pad.handle runs in a thread (scan, pairing and actions start their own background threads, so this returns immediately)."""
             data, ok, reason = None, True, None
             if pad is None:
                 ok, reason = False, "这只鸭子没开手柄页的后端（台架模式）"
@@ -1019,13 +1019,13 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def onboard_op(cid, args):
-            """上手清单上的按钮（只记一笔，不碰鸭子）：
-                confirm_servo              舵机零位「已经校过，核对一下」（审查 O4；页面现在用「已完成」，老接口留着）
-                done {step, confirmed}     「已完成」：我以前做过（用户 10-20：「去做、已完成、跳过，有三个也行」）
-                skip {step, confirmed}     「跳过」：先不做（用户 10-18：「应该允许跳过、允许重新做」）
-                undone / unskip {step, confirmed}   取消
-            每一行任何时候都能点；有后果的（主程序明说没做完、读不到、测出了问题、测急停、调舵机时）要点两次，
-            页面第二下才带 confirmed: true，后端按现在的情况再判一遍，没带就拒（不能只靠页面）"""
+            """Buttons on the getting-started checklist (only record a mark, never touch the duck):
+                confirm_servo              servo zero position "already calibrated, check it" (review O4; the page now uses "done", the old interface is kept)
+                done {step, confirmed}     "done": I did this before (user, 10-20: "do it, done, skip, three options is fine")
+                skip {step, confirmed}     "skip": not now (user, 10-18: "skipping and redoing should be allowed")
+                undone / unskip {step, confirmed}   cancel
+            Every row can be clicked at any time; ones with consequences (main program explicitly says not done, unreadable, a problem was found, e-stop test, during servo tuning) need two clicks,
+            the page only sends confirmed: true on the second, and the backend re-judges by the current situation and refuses without it (cannot rely on the page alone)"""
             op = args.get("op")
             if onboard is None:
                 return {"t": "result", "id": cid, "ok": False, "reason": "这只鸭子没开上手清单"}
@@ -1042,14 +1042,14 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             else:
                 ok, why = onboard.unmark(step, "skip" if op == "unskip" else "done", by, servo, confirmed)
             if ok:
-                onboard.tick(robotd, pad, servo)               # 马上重判一次，页面不用等下一拍
+                onboard.tick(robotd, pad, servo)               # re-judge right away so the page need not wait for the next tick
                 await asyncio.to_thread(onboard.save)
             else:
                 log.info(f"上手清单{what}没记：{why}", cat="校准", step=step or "上手清单")
             return {"t": "result", "id": cid, "ok": ok, "reason": why}
 
         async def run_battery_op(cid, args):
-            """设置页「电池」一栏：get / set / calibrate（studio/battery_svc.py）。只改 Studio 自己的设置，不碰鸭子。"""
+            """The settings page "Battery" section: get / set / calibrate (studio/battery_svc.py). Only changes Studio's own settings, never touches the duck."""
             data, ok, reason = None, True, None
             if battery is None:
                 ok, reason = False, "这只鸭子没开电量估算"
@@ -1068,7 +1068,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 pass
 
         async def run_net_op(cid, args):
-            """配网页：scan / connect / forget。connect 先回「开始切换」，真正关热点、连 WiFi 在后台做。"""
+            """Network setup page: scan / connect / forget. connect first replies "switching started"; actually shutting the hotspot and connecting Wi-Fi happen in the background."""
             from .net import Refused as NetRefused, validate_connect
             if net is None:
                 await send({"t": "result", "id": cid, "ok": False, "reason": "这只鸭子没开配网"})
@@ -1097,7 +1097,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 if not started:
                     await send({"t": "result", "id": cid, "ok": False, "reason": "正在连，等一下"})
                     return
-                # 先让页面收到回执（显示「正在切换……」），2 秒后 Net.connect 才动热点
+                # Let the page receive the acknowledgment first (showing "switching…"); Net.connect only touches the hotspot after 2 seconds
                 await send({"t": "result", "id": cid, "ok": True, "reason": "开始切换",
                             "data": {"ssid": ssid}})
 
@@ -1108,8 +1108,8 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         net.busy = None
                         log.error("连 WiFi 的后台任务出错", cat="网络", raw=f"{type(e).__name__}: {e}", exc=True,
                                   hint="这是 Studio 的问题，导出诊断包发出来")
-                # 引用挂在 net 上，不挂在这个页面的 cmd_tasks：手机断开（热点一关就会断）以后页面的处理函数结束，
-                # 后台这一路还要接着连完、写 last-try
+                # The reference hangs on net, not on this page's cmd_tasks: after the phone disconnects (it will as soon as the hotspot closes) the page's handler ends,
+                # but this background path still has to finish connecting and write last-try
                 net.connect_task = asyncio.create_task(do_connect())
                 return
             if op == "forget":
@@ -1135,7 +1135,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                     await send({"t": "result", "id": cid, "ok": False, "reason": "正在处理 WiFi，等一下"})
                     return
                 what = "开热点" if op == "hotspot-up" else "关热点"
-                # 先回执：切 AP 模式会把这台手机的连接断掉，回执要在断之前发出去
+                # Acknowledge first: switching to AP mode will drop this phone's connection, so the acknowledgment must go out before that
                 await send({"t": "result", "id": cid, "ok": True, "reason": f"正在{what}"})
                 ssid = args.get("ssid") if isinstance(args.get("ssid"), str) else None
 
@@ -1151,7 +1151,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         net.busy = None
                         log.error(f"{what}的后台任务出错", cat="网络", raw=f"{type(e).__name__}: {e}", exc=True,
                                   hint="这是 Studio 的问题，导出诊断包发出来")
-                # 跟 connect 一样：手机断线以后页面的处理函数结束，后台这一路还要跑完
+                # Same as connect: after the phone disconnects the page's handler ends, but this background path still has to run to completion
                 net.connect_task = asyncio.create_task(do_hotspot())
                 return
             await send({"t": "result", "id": cid, "ok": False, "reason": f"不认识的配网操作：{op}"})
@@ -1238,7 +1238,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         task.add_done_callback(cmd_tasks.discard)
                         continue
                     if name == "onboard.op":
-                        # 不在这里 await：写盘慢的时候也不能挡住后面来的卸力（代码审查 #6 同一个道理）
+                        # Not awaited here: a slow disk write must not block a relax arriving later (same reasoning as code review #6)
                         task = asyncio.create_task(run_onboard_op(cid, msg.get("args") or {}))
                         cmd_tasks.add(task)
                         update_commands.add(task)
@@ -1246,7 +1246,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         task.add_done_callback(cmd_tasks.discard)
                         continue
                     if name == "net.op":
-                        # 扫 WiFi 最坏约 10 秒、连 WiFi 在后台跑：都不挡住同一页面的卸力
+                        # Wi-Fi scan takes about 10 seconds at worst and Wi-Fi connect runs in the background: neither blocks relax from the same page
                         task = asyncio.create_task(run_net_op(cid, msg.get("args") or {}))
                         cmd_tasks.add(task)
                         update_commands.add(task)
@@ -1282,14 +1282,14 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                         task.add_done_callback(cmd_tasks.discard)
                         continue
                     if name == "relax":
-                        # 卸力不在这里 await（代码审查 #6）：同一页面连按不排队，页面断了也不会把它取消
+                        # Relax is not awaited here (code review #6): repeated presses on the same page do not queue, and a page disconnecting does not cancel it
                         task = asyncio.create_task(run_relax(cid))
                         cmd_tasks.add(task)
                         update_commands.add(task)
                         task.add_done_callback(update_commands.discard)
                         task.add_done_callback(cmd_tasks.discard)
                         continue
-                    # 进了 COMMANDS 却忘了写分支：明说，别默认当卸力（手柄页审查：每秒 10 次的 move 会全变成卸力）
+                    # Added to COMMANDS but the branch was forgotten: say so explicitly rather than defaulting to relax (gamepad page review: 10 moves per second would all become relaxes)
                     log.error(f"指令「{name}」在 COMMANDS 里但没有处理分支", cat="系统", hint="这是 Studio 的 bug，导出诊断包发出来")
                     await send({"t": "result", "id": cid, "ok": False, "reason": f"Studio 没写「{name}」怎么处理（bug）"})
 
@@ -1311,11 +1311,11 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             update_viewers()
             log.info(f"页面断开（{by}，还剩 {len(clients)} 个）", cat="连接", dedup=False)
 
-    # ---- 舵机会话：标记文件（审查 D1）、交还、离开、看 robotd（审查 D9） ----
+    # ---- Servo session: marker file (review D1), hand-back, leaving, watching robotd (review D9) ----
 
     def marker_write(by):
-        """开总线时写（线程里调）：先写临时文件再改名。回 True / False；写不进去只记 warn
-        （重启以后就不知道上次还开着，但会话不能因此关掉：舵机可能正保持着）。"""
+        """Written when the bus opens (called in a thread): write a temp file then rename. Returns True / False; if it cannot be written, only log a warn
+        (after a restart we would not know it was still open last time, but the session cannot be closed because of this: servos may be holding)."""
         if marker is None:
             return True
         data = {"v": 1, "port": servo.port, "sim": bool(servo.sim), "at": time.time(), "by": by,
@@ -1332,7 +1332,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             return False
 
     async def remember_marker(by):
-        """写会话标记并把它写没写进去记到 servo.marker_error（页面提示条用）。"""
+        """Write the session marker and record whether it was written into servo.marker_error (for the page's hint bar)."""
         ok = await asyncio.to_thread(marker_write, by)
         servo.marker_error = None if ok else (
             "会话标记没写进去：Studio 重启后不知道这里还开着。别重启 Studio，用完点「交还主程序」")
@@ -1350,7 +1350,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                      hint="下次 Studio 起来会以为上次还开着、去接管一次总线；看看 state 目录的权限")
 
     def marker_read():
-        """(在不在, 内容)：内容 None = 文件坏了（读不出、不是 JSON 对象）。"""
+        """(present or not, content): content None = file corrupt (unreadable, not a JSON object)."""
         if marker is None:
             return False, None
         try:
@@ -1366,13 +1366,13 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return True, d if isinstance(d, dict) else None
 
     async def robotd_up():
-        """robotd 的 socket 连得上吗（连上就关，不说话）。台架模式没有 robotd。"""
+        """Can robotd's socket be connected (close right after connecting, without talking). Bench mode has no robotd."""
         addr = getattr(robotd, "addr", "none")
         if not addr or addr == "none":
             return False
         try:
             _, w = await asyncio.wait_for(open_conn(addr), 1.0)
-        except Exception:  # noqa: BLE001 —— 连不上、超时都算不在
+        except Exception:  # noqa: BLE001 — connection failure or timeout both count as absent
             return False
         try:
             w.close()
@@ -1381,15 +1381,15 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return True
 
     async def handed_back(why, by=None):
-        """总线已经卸力、关了：恢复跟主程序的轮询、起主程序、按结果删 / 留标记、记一行（每次都记：审查 D13）。"""
+        """The bus has been relaxed and closed: resume polling of the main program, start the main program, delete / keep the marker by the result, log one line (always logged: review D13)."""
         servo.handed_back_at = time.monotonic()
         servo.orphan = None
         servo.marker_error = None
         servo.giveback_error = servo.giveback_hint = None
         robotd.set_paused(False)
         log.info(f"交还主程序：{why}", cat="总线", dedup=False)
-        # 一键交还：起主程序（小助手 bus-give-back soft：撤旗、起 robotd、等启动四步成功）。
-        # 标记等起完再删：没起来、旗还在的话留着，Studio 重启才能接着管（审查 #4）
+        # One-click hand-back: start the main program (helper bus-give-back soft: clear the flag, start robotd, wait for the four startup steps to succeed).
+        # Delete the marker only after startup completes: if it did not start and the flag is still there, keep it so a Studio restart can carry on managing it (review #4)
         ok, gb_why = await asyncio.to_thread(_bus_give_back, by or "Studio", servo)
         if ok:
             await asyncio.to_thread(marker_drop)
@@ -1412,21 +1412,21 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             log.error(f"主程序没起来：{gb_why}", cat="总线", dedup=False, hint=servo.giveback_hint)
 
     async def hand_back(why, by=None):
-        """点「交还主程序」：先置 closing、等在路上的舵机操作做完（等不到不交还），再在总线上全部卸力并回读确认
-        （不指望主程序启动时卸力，审查 S1），再关总线、起主程序（handed_back，审查 D2）。"""
+        """Clicking "Hand back to the main program": first set closing and wait for in-flight servo operations to finish (no hand-back if that times out), then relax everything on the bus and confirm by readback
+        (not relying on the main program relaxing at startup, review S1), then close the bus and start the main program (handed_back, review D2)."""
         if servo is None or servo.state != "open":
             return True, None
         ok, reason = await asyncio.to_thread(servo.hand_back_bus, why, before_close=lambda: robotd.set_paused(False))
         if not ok:
             log.error("没交还主程序", cat="总线", raw=reason, hint="等校准 / 动作做完再点「交还主程序」", dedup=False)
             return False, reason
-        servo.handback_note = reason          # 成功时第二个值是「哪几颗没确认卸力」的提示；全确认是 None
+        servo.handback_note = reason          # on success the second value is a note on "which servos were not confirmed relaxed"; None if all confirmed
         await handed_back(why, by)
         return True, None
 
     async def leave_servos(why, ws=None, by=None):
-        """离开舵机页 / 没人在看：别的页面还在舵机页、校准 / 运动在跑、当场读到有保持的或读不到的 → 不交还，回 (False, 原因)；
-        否则卸力、关总线、起主程序，回 (True, None)（审查 D2、D3）。"""
+        """Leaving the servo page / nobody watching: if another page is still on the servo page, calibration / motion is running, or servos read right then are holding or unreadable → no hand-back, return (False, reason);
+        otherwise relax, close the bus, start the main program, return (True, None) (review D2, D3)."""
         others = sum(1 for w, c in clients.items() if w is not ws and c.get("route") == "/servos")
         if others:
             return False, f"还有 {others} 个页面在舵机页"
@@ -1439,8 +1439,8 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         return False, info["why"]
 
     async def robotd_conflict():
-        """会话期间 robotd 被手动起来了（审查 D9）：它起来就把舵机全部松开、还跟 Studio 抢同一个串口。
-        Studio 关总线（不写舵机）、删标记、恢复轮询，提示条变红。"""
+        """robotd was started manually during the session (review D9): when it starts it releases all servos and fights Studio for the same serial port.
+        Studio closes the bus (without writing to the servos), deletes the marker, resumes polling, and the hint bar turns red."""
         async with servo_gate:
             if servo.state != "open" or servo.closing:
                 return
@@ -1453,8 +1453,8 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                   hint="Studio 已经关掉舵机总线（没写舵机）。下次别手动起 robotd：先在页面上点「交还主程序」", dedup=False)
 
     async def servo_restore():
-        """Studio 起来时：上次退出时舵机会话开着（有标记）→ robotd 不在就重新接管总线（只读打开，不改扭矩），恢复会话
-        和提示条；接管不上 → 记成 orphan（提示条、卸力按钮引导去舵机页）；robotd 在 → 它起来时已经全部松开，删标记（审查 D1）。"""
+        """When Studio starts: the servo session was open at the last exit (marker present) → if robotd is not running, retake the bus (opened read-only, torque unchanged) and restore the session
+        and hint bar; if the takeover fails → record as orphan (hint bar and relax button lead to the servo page); if robotd is running → it already released everything at startup, delete the marker (review D1)."""
         if servo is None:
             return
         if updates.installing():
@@ -1482,14 +1482,14 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             if servo.state == "open":
                 return
             robotd.set_paused(True, "调舵机（接着上次的会话）")
-            # 恢复会话跟网页进舵机页一个样：先 bus_take 立旗（robotd 起不来、管理锁在、确认串口空），再开串口。
-            # 不立旗就开串口，robotd 一起来会跟 Studio 抢同一个总线
+            # Restoring the session works the same as the web page entering the servo page: first bus_take raises the flag (robotd cannot start, management lock held, serial port confirmed free), then open the serial port.
+            # Opening the serial port without raising the flag would make robotd fight Studio for the same bus as soon as it starts
             taken, take_why = await asyncio.to_thread(_bus_take, "Studio 重启后接着管", servo)
             if not taken:
                 ok, why = False, take_why
                 servo.orphan = {"why": take_why, "at": time.monotonic()}
                 robotd.set_paused(False)
-                # bus-take 半路失败可能已经把旗立了：起主程序回滚（撤旗 + 起 robotd），别留个旗让主程序一直起不来
+                # bus-take failing midway may already have raised the flag: start the main program to roll back (clear the flag + start robotd), do not leave a flag that keeps the main program from starting
                 asyncio.create_task(asyncio.to_thread(_bus_give_back, "Studio 重启后接着管", servo))
             else:
                 ok, why = await asyncio.to_thread(servo.open, "Studio 重启后接着管", port, True)
@@ -1501,7 +1501,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 else:
                     servo.orphan = {"why": why, "at": time.monotonic()}
                     robotd.set_paused(False)
-                    # 主程序停了、总线却没开成：起回来，别留个旗让主程序一直起不来
+                    # The main program stopped but the bus failed to open: start it back up, do not leave a flag that keeps the main program from starting
                     asyncio.create_task(asyncio.to_thread(_bus_give_back, "Studio 重启后接着管", servo))
         if ok:
             log.info(f"会话恢复：上次 Studio 退出时舵机会话开着，重新接管了总线（只读打开，没改扭矩；{servo.holding()} 颗保持着）",
@@ -1511,12 +1511,12 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                       hint="去舵机页接管后才能卸力；急的话关电源")
 
     async def servo_watch():
-        """每秒一拍：
-        - 舵机页没人在看超过 SERVO_IDLE_S：没有舵机保持着（当场读，读不到的当在保持）就自动交还（页面关了、断网时主程序
-          别一直停着、手柄一直不能用）。有保持着的：不交还、不卸力（用户定过「没人操作不自动卸力」；交还会让 robotd 起来时
-          全部松开），只记一行 warn（同一句 1 分钟只记一次）；
-        - 会话期间 5 秒看一眼 robotd 起没起来（审查 D9）；
-        - 交还以后 / 没接管上的标记：主程序连上（交还之后有新回包）才清掉提示（审查 D12）。"""
+        """One tick per second:
+        - nobody has watched the servo page for more than SERVO_IDLE_S: if no servo is holding (read right then; unreadable counts as holding), hand back automatically (when the page is closed or the network drops, the main program
+          should not stay stopped and the gamepad unusable forever). If some are holding: no hand-back and no relaxing (the user decided "no automatic relaxing when nobody is operating"; a hand-back would make robotd
+          release everything when it starts), only log a warn line (the same sentence at most once per minute);
+        - during a session, check every 5 seconds whether robotd has started (review D9);
+        - after hand-back / a marker that failed to take over: only clear the hint once the main program connects (new replies after the hand-back) (review D12)."""
         since = None
         last_probe = last_try = 0.0
         while True:
@@ -1528,11 +1528,11 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 since = None
                 fresh = robotd.present is True and robotd.bus.at is not None
                 if servo.handed_back_at is not None and fresh and robotd.bus.at > servo.handed_back_at and not robotd.paused:
-                    servo.handed_back_at = None                    # 主程序连上了：「已交还……手动起 robotd」那句收起来
+                    servo.handed_back_at = None                    # the main program connected: put away the "handed back… start robotd manually" line
                     servo.handback_note = None
                     servo.giveback_error = servo.giveback_hint = None
                 if servo.orphan and fresh and robotd.bus.at > servo.orphan["at"] and not robotd.paused:
-                    servo.orphan = None                            # 主程序起来了（它会全部松开）：不用再去接管
+                    servo.orphan = None                            # the main program is up (it will release everything): no need to take over anymore
                     await asyncio.to_thread(marker_drop)
                     log.info("上次退出时开着的舵机会话：主程序起来了（它会把舵机全部松开），不用再接管", cat="总线", dedup=False)
                 continue
@@ -1548,7 +1548,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             elif since is None:
                 since = now
             elif now - since > SERVO_IDLE_S and now - last_try >= 5.0:
-                last_try = now                                     # 有保持着的时候 5 秒再看一次（当场读扭矩）
+                last_try = now                                     # when some are holding, check again in 5 seconds (reading torque right then)
                 async with servo_gate:
                     if servo.state != "open":
                         continue
@@ -1560,7 +1560,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                              hint="要交还点页面顶上的「交还主程序」；交还以后舵机会全部松开，先扶住")
 
     async def pad_feed():
-        """robotd 的回读 10 Hz 交给手柄页的后端，不管有没有页面在看（测急停、动作、卸力后 2 秒的保护都靠它）。"""
+        """robotd readback at 10 Hz is handed to the gamepad page backend whether or not any page is watching (the e-stop test, actions and the 2-second protection after relax all depend on it)."""
         while True:
             await asyncio.sleep(1 / STATE_HZ)
             try:
@@ -1574,15 +1574,15 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                 await asyncio.sleep(1.0)
 
     async def onboard_loop():
-        """上手清单、主板温度的回差：0.5 秒判一次（只改内存），记录变了在线程里写盘（审查 O6：只在这一处判、只在这里写）。"""
+        """Hysteresis for the getting-started checklist and board temperature: evaluated every 0.5 seconds (memory only), with records written to disk in a thread when they change (review O6: judged only here, written only here)."""
         while True:
             await asyncio.sleep(ONBOARD_TICK_S)
             try:
-                # 读文件（servo-calib 目录、robotd 不报温度时的 /sys/class/thermal）放线程里：SD 卡一卡不能挡住
-                # 同一个事件循环里的卸力（代码审查 C9-1）。tick 本身只用内存
+                # File reads (the servo-calib directory, /sys/class/thermal when robotd does not report temperature) go in a thread: an SD card stall must not block
+                # relax in the same event loop (code review C9-1). tick itself uses only memory
                 await asyncio.to_thread(onboard.io, onboard.need_board(robotd))
                 if pad is not None:
-                    pad.battery_shutdown = onboard.battery_shutdown   # 手柄页的低电文案照 robotd 配置说（任务 1 附）
+                    pad.battery_shutdown = onboard.battery_shutdown   # the gamepad page's low-battery wording follows robotd's configuration (task 1 addendum)
                 if onboard.tick(robotd, pad, servo):
                     await asyncio.to_thread(onboard.save)
             except Exception as e:  # noqa: BLE001
@@ -1596,14 +1596,14 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         watch = asyncio.create_task(servo_watch())
         feed = asyncio.create_task(pad_feed()) if pad is not None else None
         ob_task = asyncio.create_task(onboard_loop()) if onboard is not None else None
-        bat_task = asyncio.create_task(battery.loop()) if battery is not None else None   # 电量估算 1 Hz（审查 B-R7）
-        tune_task = asyncio.create_task(tune.loop()) if tune is not None else None     # 调参卡读文件 2 秒一次（线程里）
+        bat_task = asyncio.create_task(battery.loop()) if battery is not None else None   # battery estimation at 1 Hz (review B-R7)
+        tune_task = asyncio.create_task(tune.loop()) if tune is not None else None     # tuning cards read files every 2 seconds (in a thread)
         robotd.start()
         if net is not None:
             net.start()
-        restore = asyncio.create_task(servo_restore())        # 上次退出时舵机会话开着：接着管（审查 D1）
+        restore = asyncio.create_task(servo_restore())        # the servo session was open at the last exit: carry on managing it (review D1)
         if phone_bridge is not None:
-            # 后台先加载语音模型：第一句话不该自带 5~25 秒的冷启动
+            # Load the voice model in the background first: the first utterance should not come with a 5~25 second cold start
             asr_warm = asyncio.create_task(asyncio.to_thread(phone_bridge.warmup))
         log.info(f"Studio {VERSION} 启动 · Python {platform.python_version()} · {platform.node()}", cat="系统",
                  dedup=False)
@@ -1622,7 +1622,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
             feed.cancel()
             await asyncio.to_thread(pad.close)
         if servo is not None and servo.state != "closed":
-            # Studio 退出不卸力（审查 D1）：只关串口，保持着的舵机照样保持；标记留着，下次起来接着管
+            # Studio exiting does not relax (review D1): only close the serial port, holding servos keep holding; the marker stays so the next startup carries on managing it
             n = servo.holding()
             await asyncio.to_thread(servo.close)
             log.info(f"Studio 退出：舵机会话开着（{n} 颗保持着），不卸力；下次起来会接着管", cat="总线", dedup=False)
@@ -1633,9 +1633,9 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         log.info("Studio 停止", cat="系统", dedup=False)
         log.flush()
 
-    # ---- 手机走 https 后必须补的两件事 ----
-    # 摄像头：mediad 的信令是明文 ws，https 页面直连会被当混合内容挡掉。
-    # 这里挂一个同域同协议的 /media-ws，由 Studio 转发到本机 mediad 的信令端口。
+    # ---- Two things that must be added once the phone uses https ----
+    # Camera: mediad's signaling is plaintext ws, and an https page connecting directly gets blocked as mixed content.
+    # So a same-origin, same-protocol /media-ws is mounted here, which Studio forwards to the local mediad signaling port.
     async def media_ws_proxy(ws: WebSocket):
         if phone_bridge is None:
             await ws.close(code=1011)
@@ -1656,8 +1656,8 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         except Exception as exc:
             log.info(f"摄像头信令转发结束（{_client_desc(ws)}）：{exc}", cat="连接")
 
-    # 手机说话：浏览器语音识别在安卓上走谷歌服务，国内基本不通。把手机录的 PCM 传回来，
-    # 用板上 duck-echo 同一套 Vosk 中文模型来认，效果跟对着鸭子说话一致。
+    # Phone speech: browser speech recognition on Android goes through Google services, which are mostly unreachable in mainland China. Send the PCM recorded on the phone back here
+    # and recognize it with the same Vosk Chinese model as the onboard duck-echo, so results match speaking to the duck directly.
     async def api_asr(request):
         no_store = {"Cache-Control": "no-store"}
         _, sess = session_of(request)
@@ -1668,12 +1668,12 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         if phone_bridge is None:
             return JSONResponse({"ok": False, "error": "这块板子没有装语音识别模块"}, 503, headers=no_store)
         body = await request.body()
-        if len(body) < 3200:          # 16 kHz / 16 bit：0.1 秒都不到，什么也认不出来
+        if len(body) < 3200:          # 16 kHz / 16 bit: under 0.1 seconds, nothing can be recognized
             return JSONResponse({"ok": False, "error": "这段太短了，再说一次"}, 400, headers=no_store)
         if len(body) > 12 * 1024 * 1024:
             return JSONResponse({"ok": False, "error": "这段录音太长了"}, 413, headers=no_store)
-        # free=1：不用命令词表，走通用解码。自检页用它看「板子到底听到什么」，
-        # 也用来区分「没听清」和「词不在词表里」。慢得多，只给排查用。
+        # free=1: no command vocabulary, general decoding. The self-check page uses it to see "what the board actually hears",
+        # and to tell "not heard clearly" from "word not in the vocabulary". Much slower, for troubleshooting only.
         free = (request.query_params.get("free") or "").lower() in ("1", "true", "yes")
         detail = await asyncio.get_running_loop().run_in_executor(
             None, phone_bridge.transcribe_detail, body, not free)
@@ -1684,7 +1684,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
                                                     "info": detail.get("info") or {}}},
                             headers=no_store)
 
-    # 手机装一次本地 CA 才会信任 https://10.42.0.1:8000 并放出麦克风。这个文件要在登录前就能下载。
+    # The phone must install the local CA once before it trusts https://10.42.0.1:8000 and grants the microphone. This file must be downloadable before login.
     async def api_ca(request):
         no_store = {"Cache-Control": "no-store"}
         if not ca_cert:
@@ -1717,7 +1717,7 @@ def build_app(*, auth, robotd, log, web_dir, duck, names=(), state_dir=None, dev
         Route("/api/models/import", api_model_import, methods=["POST"]),
         Route("/model/meshes.bin", meshes),
         Route("/m", lambda request: RedirectResponse("/m.html", status_code=307)),
-        # 手机走 https 之后才用得上：本地 CA 下载、摄像头信令同域转发、手机录音转文字
+        # Only useful once the phone uses https: local CA download, same-origin forwarding of camera signaling, phone recording to text
         Route("/ca.crt", api_ca),
         Route("/api/asr", api_asr, methods=["POST"]),
         WebSocketRoute("/media-ws", media_ws_proxy),
@@ -1760,7 +1760,7 @@ def _diag_zip(log, snap, raw):
 
 
 def precompress(web_dir):
-    """meshes.bin 先压一份 .gz（只在 .gz 比原文件旧时重压）。"""
+    """Pre-compress meshes.bin to a .gz (recompressed only when the .gz is older than the original)."""
     raw = Path(web_dir) / "model" / "meshes.bin"
     gz = raw.with_suffix(".bin.gz")
     try:
@@ -1768,6 +1768,6 @@ def precompress(web_dir):
             with open(raw, "rb") as f, gzip.open(gz, "wb", compresslevel=9) as g:
                 g.write(f.read())
     except OSError:
-        # 网页目录只读（装到 /opt、换专用用户以后）：不压了，直接给原文件
+        # Web directory is read-only (after installing to /opt and switching to a dedicated user): skip compressing and serve the original file
         return None
     return gz

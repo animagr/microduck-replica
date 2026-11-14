@@ -1,9 +1,9 @@
-// 电池（battery-plan.md v2 §5、§4）的端到端：连本机无头 Edge（CDP），打开 Studio（假 robotd 回放二号鸭 + 电池剧本，
-// Studio 的估算器 20 倍速快进），看总览电池格的各种状态、点开的详情、待办，再到设置页改提醒线 / 红线、
-// 「我量了电池电压」、切到台架电源。每一步的结果用 JSON 打到 stdout，由 tests/test_battery_e2e.py 判断。
-// 单独跑（先起好假 robotd、Studio（STUDIO_BATTERY_SPEED=20）、无头 Edge）：
-//   node tests/battery_e2e.mjs --url http://127.0.0.1:18103/ --cdp 9353 --fake 17056 [--shots <截图目录>]
-// Node ≥ 22（自带 WebSocket），不需要装任何包。
+// End-to-end test for the battery (battery-plan.md v2 §5, §4): connect to a local headless Edge (CDP), open Studio (fake robotd replaying duck #2 + a battery script,
+// Studio's estimator fast-forwarded at 20x), check the various states of the overview battery cell, the expanded details and the to-dos, then on the settings page change the warning line / red line,
+// "我量了电池电压" (I measured the battery voltage), and switch to bench power. The result of each step is printed to stdout as JSON and judged by tests/test_battery_e2e.py.
+// To run on its own (start the fake robotd, Studio (STUDIO_BATTERY_SPEED=20) and headless Edge first):
+//   node tests/battery_e2e.mjs --url http://127.0.0.1:18103/ --cdp 9353 --fake 17056 [--shots <screenshot dir>]
+// Node ≥ 22 (built-in WebSocket); no packages need to be installed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -64,7 +64,7 @@ async function open(hash, w = 1440, h = 900, mobile = false) {
   await setView(w, h, mobile);
   await send('Page.navigate', { url: `${BASE}${hash}` });
 }
-// 截图：sels 里几个元素的外接框（详情弹窗是绝对定位的，跟电池格一起框）
+// Screenshots: bounding box of several elements in sels (the details popup is absolutely positioned, so it is boxed together with the battery cell)
 async function shot(name, ...sels) {
   if (!SHOTS) return;
   const r = await js(`(() => { const rs = ${JSON.stringify(sels)}.map((s) => document.querySelector(s)).filter(Boolean).map((e) => e.getBoundingClientRect());
@@ -77,7 +77,7 @@ async function shot(name, ...sels) {
 }
 const mode = (m) => `document.querySelector('.bat-cell')?.dataset.mode === ${JSON.stringify(m)}`;
 const todoText = () => js(`(document.querySelector('.todo')?.innerText || '').replace(/\\s+/g, ' ')`);
-// 估算器 20 倍速：读不到 10 秒（真时间 0.5 秒）就重新起步。用它把上一段的「最近 5 分钟」清掉，换一个新电压
+// Estimator at 20x: unreadable for 10 seconds (0.5 seconds real time) restarts it. Used to clear the previous segment's "last 5 minutes" and switch to a new voltage
 async function restart(battery) {
   await fakeSet({ battery: { gone: true } });
   await waitFor(mode('no_data'), '读不到电压', 8000);
@@ -86,7 +86,7 @@ async function restart(battery) {
 
 const out = { errors, steps: {} };
 
-// ---- 1. 总览：静置 7.62 V ----
+// ---- 1. Overview: resting at 7.62 V ----
 // Studio may have accumulated the recorded fixture's 7.54 V while Edge was
 // starting. Explicitly clear that history before testing the scripted 7.62 V.
 await fakeSet({ battery: { gone: true } });
@@ -99,7 +99,7 @@ await sleep(400);
 out.steps.calm = { text: await cellText(), cls: await js(`document.querySelector('.bat-cell').className`) };
 await shot('battery-calm.png', '.band');
 
-// ---- 2. 点开看怎么算的 ----
+// ---- 2. Expand to see how it is computed ----
 await js(`document.querySelector('.bat-hit').click()`);
 await waitFor(`!!document.querySelector('.bat-pop')`, '详情弹出来');
 out.steps.detail = { lines: await js(`[...document.querySelectorAll('.bat-pop li')].map((l) => l.textContent)`),
@@ -108,7 +108,7 @@ await shot('battery-detail.png', '.band', '.bat-pop');
 await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
 await waitFor(`!document.querySelector('.bat-pop')`, '按 Esc 收起');
 
-// ---- 3. 读不到 → 重新起步「估算中」 ----
+// ---- 3. Unreadable → restarts as "估算中" (estimating) ----
 await fakeSet({ battery: { gone: true } });
 await waitFor(mode('no_data'), '读不到电压', 8000);
 out.steps.nodata = { text: await cellText() };
@@ -118,18 +118,18 @@ await waitFor(mode('estimating'), '估算中', 8000, 40);
 out.steps.estimating = { text: await cellText(), todo: await todoText() };
 await shot('battery-estimating.png', '.band');
 
-// ---- 4. 黄：7.40 V（约 28%） ----
+// ---- 4. Yellow: 7.40 V (about 28%) ----
 await waitFor(`document.querySelector('.bat-cell')?.classList.contains('warn')`, '黄条', 15000);
 out.steps.warn = { text: await cellText(), todo: await todoText() };
 await shot('battery-warn.png', '.band', '.todo');
 
-// ---- 5. 红：7.15 V（约 9%） ----
+// ---- 5. Red: 7.15 V (about 9%) ----
 await restart({ v: 7.15 });
 await waitFor(`document.querySelector('.bat-cell')?.classList.contains('bad') && /电量只剩约/.test(document.querySelector('.todo')?.innerText || '')`, '红线', 15000);
 out.steps.red = { text: await cellText(), todo: await todoText() };
 await shot('battery-red.png', '.band', '.todo');
 
-// ---- 6. 电压很低：负载把电压拉到 6.8 V 左右 ----
+// ---- 6. Very low voltage: load pulls the voltage down to around 6.8 V ----
 await restart({ v: 7.60 });
 await waitFor(mode('calm'), '重新出数');
 await fakeSet({ battery: { sag: 0.8 } });
@@ -138,7 +138,7 @@ out.steps.lowvolt = { text: await cellText(), todo: await todoText(), badge: awa
 await shot('battery-lowvolt.png', '.band', '.todo');
 await fakeSet({ battery: { sag: 0 } });
 
-// ---- 7. 手机宽度：电池格 + 详情不出横向滚动 ----
+// ---- 7. Phone width: battery cell + details cause no horizontal scrolling ----
 await restart({ v: 7.62 });
 await open('#/', 390, 844, true);
 await waitFor(mode('calm'), '手机上出数');
@@ -148,7 +148,7 @@ out.steps.mobile = await js(`({ sw: document.documentElement.scrollWidth, cw: do
   popRight: Math.round(document.querySelector('.bat-pop').getBoundingClientRect().right) })`);
 await shot('battery-mobile.png', '.band', '.bat-pop');
 
-// ---- 8. 设置页：电池一栏 ----
+// ---- 8. Settings page: battery section ----
 await open('#/settings');
 await waitFor(`!!document.querySelector('.bset input[name=bat-preset]')`, '设置页的电池一栏');
 await sleep(300);
@@ -161,7 +161,7 @@ const setNum = (label, v) => js(`(() => { const e = document.querySelector('.bse
 const clickBtn = (text) => js(`(() => { const b = [...document.querySelectorAll('.bset button')].find((x) => x.textContent.trim().startsWith(${JSON.stringify(text)}));
   if (!b || b.disabled) return false; b.click(); return true; })()`);
 const bmsg = () => js(`[...document.querySelectorAll('.bset .msg')].map((e) => e.textContent.replace(/\\s+/g, ' ')).join(' | ')`);
-// 不合法：红线 28%（没比提醒线 30% 低 5%）
+// Invalid: red line 28% (not 5% below the warning line of 30%)
 await setNum('red_pct', 28);
 await clickBtn('保存');
 await waitFor(`/没存/.test(document.querySelector('.bset').innerText)`, '拒掉不合法的');
@@ -170,7 +170,7 @@ await setNum('red_pct', 20);
 await clickBtn('保存');
 await waitFor(`/已保存/.test(document.querySelector('.bset').innerText)`, '存好');
 out.steps.saved = { msg: await bmsg(), logs: (await studioLogs()).filter((m) => m.startsWith('电池设置改了')) };
-// 我量了电池电压：鸭子卸力静置（假 robotd 一开始就是软着的）
+// I measured the battery voltage: duck relaxed and resting (the fake robotd starts out limp)
 await sleep(2500);
 await setNum('万用表读数', 7.80);
 await clickBtn('算一下');
@@ -181,7 +181,7 @@ await clickBtn('用这个校准');
 await waitFor(`/已保存/.test(document.querySelector('.bset').innerText) && /校准 \\+0\\.18 V/.test(document.querySelector('.bset').innerText)`, '校准存好', 8000);
 out.steps.calibrated = { now: await js(`document.querySelector('.bset .now').textContent`) };
 
-// ---- 9. 台架电源 ----
+// ---- 9. Bench power ----
 await js(`document.querySelector('.bset input[value=bench]').click()`);
 await sleep(200);
 out.steps.benchForm = { text: await js(`document.querySelector('.bset').innerText.replace(/\\s+/g, ' ')`) };
@@ -192,12 +192,12 @@ await open('#/');
 await waitFor(mode('bench'), '总览变成台架电源');
 await sleep(400);
 out.steps.bench = { text: await cellText(), todo: await todoText() };
-// 手机那一步弹出来的详情还开着（换页只换地址，总览一直挂着）：没开才点
+// The details opened in the phone step are still open (changing pages only changes the URL; the overview stays mounted): click only if not open
 await js(`document.querySelector('.bat-pop') || document.querySelector('.bat-hit').click()`);
 await waitFor(`!!document.querySelector('.bat-pop')`, '台架电源的详情');
 out.steps.bench.lines = await js(`[...document.querySelectorAll('.bat-pop li')].map((l) => l.textContent)`);
 await shot('battery-bench.png', '.band', '.bat-pop');
-// 收尾：回到 2S 锂电（别把设置留在台架电源）
+// Wrap-up: back to 2S lithium (don't leave the setting on bench power)
 await open('#/settings');
 await waitFor(`!!document.querySelector('.bset input[value="2s_liion"]')`, '设置页');
 await js(`document.querySelector('.bset input[value="2s_liion"]').click()`);

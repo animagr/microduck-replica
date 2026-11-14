@@ -1,5 +1,5 @@
-// 数字步进控件的纯逻辑测试：取整、夹边界、按住连加/连减的节奏（假时钟）。
-// 跑法：node --test tests/stepper.test.mjs
+// Pure-logic tests for the numeric stepper control: rounding, clamping to bounds, the rhythm of press-and-hold repeat increment/decrement (fake clock).
+// How to run: node --test tests/stepper.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

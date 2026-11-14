@@ -1,10 +1,10 @@
-// 网页手柄（手柄页第三轮：图上的键能按）的端到端：连本机无头 Edge（CDP），打开 Studio 的手柄页（假 robotd 回放二号鸭的
-// 数据），在图上点键、拖摇杆、按键盘、手机上两个手指一起拖，再看假 robotd 记下来的「收到了什么」（dev/fake_robotd.py --record）。
-// 每一步收到的东西用 JSON 打到 stdout，由 tests/test_vpad_e2e.py 判断对不对。用的是真页面、真 Studio 后端，只有 robotd 是假的。
+// End-to-end test of the web gamepad (gamepad page round 3: the buttons on the picture can be pressed): connects to a local headless Edge (CDP), opens Studio's gamepad page (the fake robotd replays duck #2's
+// data), clicks buttons on the picture, drags the sticks, presses keyboard keys, drags with two fingers at once on a phone, then looks at what the fake robotd recorded as "received" (dev/fake_robotd.py --record).
+// What was received at each step is printed as JSON to stdout, and tests/test_vpad_e2e.py judges whether it's right. Real page, real Studio backend; only robotd is fake.
 //
-// 单独跑（先起好假 robotd、Studio、无头 Edge；端口别跟别人的撞）：
-//   node tests/vpad_e2e.mjs --url http://127.0.0.1:18090/#/pad --cdp 9343 --record <rd.jsonl> --fake 17022 [--shots <截图目录>]
-// Node ≥ 22（自带 WebSocket），不需要装任何包。
+// To run it alone (start the fake robotd, Studio and headless Edge first; don't let the ports clash with anyone else's):
+//   node tests/vpad_e2e.mjs --url http://127.0.0.1:18090/#/pad --cdp 9343 --record <rd.jsonl> --fake 17022 [--shots <screenshot dir>]
+// Node ≥ 22 (built-in WebSocket), no packages need to be installed.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -19,8 +19,8 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => process.stderr.write(`[vpad-e2e] ${a.join(' ')}\n`);
 
-// ---------------- 假 robotd 记下的东西 ----------------
-// Studio 平时一直在问的（状态、绑定这些）不算：只看「让鸭子动 / 出声」的
+// ---------------- What the fake robotd recorded ----------------
+// Things Studio keeps asking all the time (status, bindings, etc.) don't count: only look at "make the duck move / make a sound"
 const POLL = new Set(['hello', 'robot.health', 'robot.busStatus', 'robot.policies', 'robot.busCommand', 'pad.status', 'system.info',
   'robot.subscribe', 'pad.bindings', 'fake.set']);
 const recs = () => readFileSync(REC, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => !POLL.has(r.method));
@@ -34,7 +34,7 @@ const fakeSet = (params) => new Promise((resolve, reject) => {
 });
 
 // ---------------- CDP ----------------
-// 自己开一个标签页（别借别的会话的页面：视口会互相改）
+// Open our own tab (don't borrow another session's page: the viewports would change each other)
 const page = await (await fetch(`http://127.0.0.1:${CDP}/json/new?about:blank`, { method: 'PUT' })).json();
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r, { once: true }));
@@ -60,11 +60,11 @@ const waitFor = async (expr, what, timeout = 6000) => {
   const now = await js(`[document.visibilityState, document.hasFocus(), document.querySelector('.pd-vbar')?.textContent, document.querySelector('.pd-pose')?.textContent,
     [...document.querySelectorAll('.pd-big')].map((b) => b.textContent).join(' | ')].join(' ／ ').replace(/\\s+/g, ' ')`);
   let fk = null;
-  try { fk = (await fakeSet({})).result?.posture; } catch { /* 假 robotd 不在 */ }
+  try { fk = (await fakeSet({})).result?.posture; } catch { /* fake robotd not running */ }
   throw new Error(`${timeout / 1000} 秒没等到：${what}。页面上现在：${now}；假 robotd 的姿势：${fk}`);
 };
 const vbar = () => js(`document.querySelector('.pd-vbar')?.textContent?.replace(/\\s+/g, ' ') || ''`);
-// 元素中心（先滚到屏幕中间）
+// Element center (scroll it to the middle of the screen first)
 const box = (sel) => js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null;
   e.scrollIntoView({ block: 'center', inline: 'nearest' }); const r = e.getBoundingClientRect();
   return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; })()`);
@@ -79,7 +79,7 @@ async function hold(sel, ms, during) {
   await sleep(ms);
   await mouse('mouseReleased', b.x, b.y, 0);
 }
-// 拖摇杆：在 (中心 + off) 按下，分几步拖到 +d，停 ms，松开
+// Drag a stick: press at (center + off), drag to +d in a few steps, pause ms, release
 async function drag(sel, d, ms, { off = [0, 0], during } = {}) {
   const b = await box(sel);
   const x0 = b.x + off[0], y0 = b.y + off[1];
@@ -93,7 +93,7 @@ async function drag(sel, d, ms, { off = [0, 0], during } = {}) {
 async function shot(name, sel, toSel) {
   if (!SHOTS) return;
   let clip;
-  if (toSel) {                                     // 从 sel 的上沿截到 toSel 的下沿
+  if (toSel) {                                     // crop from the top edge of sel to the bottom edge of toSel
     const r = await js(`(() => { const a = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();
       const b = document.querySelector(${JSON.stringify(toSel)}).getBoundingClientRect();
       return { x: a.x + scrollX - 8, y: a.y + scrollY - 8, width: a.width + 16, height: b.bottom - a.y + 16 }; })()`);
@@ -112,7 +112,7 @@ async function shot(name, sel, toSel) {
   log('截图', name);
 }
 async function open(w, h, mobile) {
-  // 无头 Edge 里新开的标签页可能被当成「在后台」：页面就报 visible:false，Studio 停推状态。拉到前面、模拟有焦点
+  // A newly opened tab in headless Edge may be treated as "in the background": the page reports visible:false and Studio stops pushing status. Bring it to the front and emulate focus
   await send('Page.bringToFront');
   await send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile });
@@ -125,8 +125,8 @@ async function open(w, h, mobile) {
   await sleep(600);
 }
 
-// 只为镜像那两张截图：电脑上没有 padd 旁路，图上看不到实体手柄按了什么。window.__fakeLive 设了的时候，
-// 把推来的 {t:'pad'} 里的 live 换成一份假的实体手柄按键（只改页面显示；Studio 后端判「实体手柄连着」用的是假 configd 的 pad.status，是真的）
+// Only for the two mirroring screenshots: there's no padd tap on a computer, so the picture can't show what was pressed on the physical gamepad. When window.__fakeLive is set,
+// replace live in the pushed {t:'pad'} with fake physical-gamepad key presses (only changes the page display; the Studio backend decides "physical gamepad connected" from the fake configd's pad.status, which is real)
 const INJECT = `(() => {
   const NWS = window.WebSocket;
   class W extends NWS {
@@ -158,29 +158,29 @@ async function step(name, fn, settle = 500) {
   log(name, out.steps[name].recs.length, '条');
 }
 
-// ================= 电脑宽度 =================
+// ================= Computer width =================
 await open(1280, 900, false);
 await shot('desktop-1-idle.png');
 out.start0 = await vbar();
 
-// 摇杆是相对的：按下的那一点是中心，按下不动不走（审查三 V2）
+// Sticks are relative: the point where you press is the center; pressing without moving doesn't walk (round-3 review V2)
 await step('stick_press_only', () => drag(key('ls'), [0, 0], 300, { off: [12, 0] }));
-// 图上的左摇杆往上拖：走（vx > 0），松手发一次 0
+// Drag the left stick on the picture up: walk (vx > 0), release sends 0 once
 await step('stick_drag', () => drag(key('ls'), [0, -40], 600));
-// A：低头捡（robot.do 请求）
+// A: lower head to pick up (robot.do request)
 await step('key_a', () => hold(key('south'), 80), 700);
-// X 按住：先发一次请求，之后连着发通知（连滚）
+// X held: one request first, then continuous notifications (roll)
 await step('x_hold', () => hold(key('west'), 800), 600);
-// LT 按住：张嘴、一直 wheee；松开合嘴、wheee 停（截一张「按着键」的图）
+// LT held: open mouth, continuous wheee; release closes mouth, wheee stops (take a "key held" screenshot)
 await step('lt_hold', () => hold(key('lt'), 600, async () => {
   await sleep(250);
   const b = await box(key('ls'));
   await shot('desktop-2-pressed.png', '.pd-live', '.pd-vbar');
   return b;
 }), 700);
-// RT 点一下：嘎一声
+// RT tap: a quack
 await step('rt_tap', () => hold(key('rt'), 120), 600);
-// Y：头模式；右摇杆往上 = 脖子（neck_pitch 为正）；松手头回正；再按 Y 回走路
+// Y: head mode; right stick up = neck (neck_pitch positive); release returns head to center; press Y again to return to walking
 await step('head', async () => {
   await hold(key('north'), 80);
   await waitFor(`/摇杆管：头模式/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '进了头模式');
@@ -190,7 +190,7 @@ await step('head', async () => {
   await waitFor(`/摇杆管：走路/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '回到走路');
   return { bar: await vbar() };
 });
-// B：身体模式；左摇杆往下 = 蹲（z < 0）；松手回中（还在身体模式）；再按 B 退出（active:false）
+// B: body mode; left stick down = crouch (z < 0); release returns to center (still in body mode); press B again to exit (active:false)
 await step('body', async () => {
   await hold(key('east'), 80);
   await waitFor(`/摇杆管：身体模式/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '进了身体模式');
@@ -199,7 +199,7 @@ await step('body', async () => {
   await hold(key('east'), 80);
   await waitFor(`/摇杆管：走路/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '回到走路');
 });
-// 键盘：没点过图时按 W 不走；点一下图（遥控区拿到焦点）再按 W 走；方向键不走（审查三 V2）
+// Keyboard: W doesn't walk if the picture hasn't been clicked; after clicking the picture (remote area gets focus) W walks; arrow keys don't walk (round-3 review V2)
 await step('keyboard_unfocused', async () => {
   await js('document.activeElement && document.activeElement.blur()');
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyW', key: 'w', windowsVirtualKeyCode: 87 });
@@ -208,7 +208,7 @@ await step('keyboard_unfocused', async () => {
 });
 await step('keyboard', async () => {
   const b = await box('.pd-svgzone');
-  await mouse('mousePressed', b.x, b.y - b.h * 0.42);               // 点图的上沿空白处（不是键）
+  await mouse('mousePressed', b.x, b.y - b.h * 0.42);               // click the blank area at the top edge of the picture (not a button)
   await mouse('mouseReleased', b.x, b.y - b.h * 0.42, 0);
   const focused = await js(`document.activeElement?.classList.contains('pd-zone')`);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyW', key: 'w', windowsVirtualKeyCode: 87 });
@@ -223,7 +223,7 @@ await step('keyboard', async () => {
   await send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowUp', key: 'ArrowUp', windowsVirtualKeyCode: 38 });
   return { focused, w_recs: n };
 });
-// 按着摇杆时窗口失焦：马上停，手还按着也不再发
+// Window loses focus while the stick is held: stop immediately, and send nothing more even though the finger is still down
 await step('blur', async () => {
   const b = await box(key('ls'));
   await mouse('mouseMoved', b.x, b.y, 0);
@@ -240,12 +240,12 @@ await step('blur', async () => {
   await mouse('mouseReleased', b.x, b.y - 45, 0);
   return { before, atBlur, after };
 });
-// Start：在走（准备好走）→ 停下（站好）；假 robotd 变成「站着保持」以后再按 → 开始走
+// Start: walking (ready to walk) → stop (stand); after the fake robotd becomes "standing and holding", press again → start walking
 await step('start_stop', () => hold(key('start'), 80), 900);
 await waitFor(`/Start 现在会：开始走/.test(document.querySelector('.pd-vbar')?.textContent || '')`, 'Start 变成「开始走」');
 await step('start_walk', () => hold(key('start'), 80), 900);
 await waitFor(`/Start 现在会：停下/.test(document.querySelector('.pd-vbar')?.textContent || '')`, 'Start 变回「停下」');
-// 图上的 Select = 急停：按下就卸力（不等松手）
+// Select on the picture = e-stop: releases torque on press (doesn't wait for release)
 await step('select', async () => {
   const b = await box(key('select'));
   await mouse('mouseMoved', b.x, b.y, 0);
@@ -257,8 +257,8 @@ await step('select', async () => {
   return { whilePressed };
 }, 400);
 await fakeSet({ posture: 'policy' });
-await sleep(2600);                                                     // 卸力后 2 秒的保护过去
-// 十字上（照官方）：按不到 3 秒不切；按满 3 秒发 robot.setMode。假 robotd 先没装轮滑模型（拒，页面写原因），装上再按就切，再按切回走路
+await sleep(2600);                                                     // the 2 s guard after torque release has passed
+// D-pad up (follows official): a press under 3 s doesn't switch; a full 3 s sends robot.setMode. The fake robotd first has no roller model installed (rejected, the page shows the reason); after installing it, pressing again switches, and pressing again switches back to walking
 const vmsg = () => js(`document.querySelector('.pd-vmsg')?.textContent || ''`);
 const duSays = (word) => `(document.querySelector('${key('du')} title')?.textContent || '').includes(${JSON.stringify(word)})`;
 await step('dpad_up_short', () => hold(key('du'), 1000), 300);
@@ -278,15 +278,15 @@ await step('dpad_up_back', async () => {
   await waitFor(`/切到走路/.test(document.querySelector('.pd-vmsg')?.textContent || '')`, '页面说切到走路');
 }, 300);
 await fakeSet({ roller_models: false });
-// 十字右（照官方）：按一下就发 robot.rebootMotors，不用确认；之后跟卸力一样软下来
+// D-pad right (follows official): one press sends robot.rebootMotors, no confirmation; afterwards it goes limp just like a torque release
 await step('dpad_right', async () => {
   await hold(key('dr'), 80);
   await waitFor(`/重启舵机发出去了/.test(document.querySelector('.pd-vmsg')?.textContent || '')`, '页面说重启舵机发出去了');
 }, 300);
 await fakeSet({ posture: 'policy' });
 await sleep(2600);
-// 离开手柄区（身体模式开着）：身体退出（active:false）。手柄并进了总览以后，#/ 是同一页（可能还看得到手柄那一块），
-// 所以切到日志页才是「离开」（总览重排审查 O1；滚出视口的那种在 tests/overview_e2e.mjs 里测）
+// Leaving the gamepad area (with body mode on): body exits (active:false). Since the gamepad was merged into the overview, #/ is the same page (the gamepad block may still be visible),
+// so switching to the log page is what counts as "leaving" (overview rearrangement review O1; the scrolled-out-of-viewport case is tested in tests/overview_e2e.mjs)
 await step('leave_page', async () => {
   await hold(key('east'), 80);
   await waitFor(`/摇杆管：身体模式/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '进了身体模式');
@@ -297,9 +297,9 @@ await step('leave_page', async () => {
   await waitFor(`/Start 现在会：[^—]/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '回到手柄页');
   await sleep(500);
 });
-// 回到手柄页以后摇杆照样能用（drive open 解开了「离开了」）
+// After returning to the gamepad page the sticks still work (drive open lifted the "left" state)
 await step('back_again', () => drag(key('ls'), [0, -40], 400));
-// 实体手柄连着（镜像）：图上按的、拖的都不发；Select 照样卸力
+// Physical gamepad connected (mirroring): presses and drags on the picture aren't sent; Select still releases torque
 await fakeSet({ pad_connected: true });
 await waitFor(`!!document.querySelector('.pd-remote .banner') && /实体手柄连着/.test(document.querySelector('.pd-remote')?.textContent || '')`, '镜像', 8000);
 await step('mirror', async () => {
@@ -322,11 +322,11 @@ await fakeSet({ pad_connected: false, posture: 'policy' });
 await waitFor(`!/实体手柄连着/.test(document.querySelector('.pd-vbar')?.textContent || '')`, '镜像结束', 8000);
 await sleep(2600);
 
-// ================= 手机宽度 390 =================
+// ================= Phone width 390 =================
 await open(390, 844, true);
 out.phone = await js(`({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth })`);
 await shot('phone-1-idle.png', 'full');
-// 两个手指一起拖手柄图上的两个摇杆（触屏必须从透明起手区 .pd-ov-stick 按下）：左的往上（前进）、右的往右（右转）
+// Two fingers drag both sticks on the gamepad picture at once (on touch, the press must start in the transparent start area .pd-ov-stick): left up (forward), right to the right (turn right)
 await step('two_fingers', async () => {
   const [L, Rr] = await js(`(() => {
     const ls = document.querySelector('.pd-svgbox .pd-ov-stick[data-ov="ls"]');
@@ -335,7 +335,7 @@ await step('two_fingers', async () => {
     const a = ls.getBoundingClientRect(), b = rs.getBoundingClientRect();
     return [{ x: a.x + a.width / 2, y: a.y + a.height / 2 }, { x: b.x + b.width / 2, y: b.y + b.height / 2 }];
   })()`);
-  await sleep(650);                    // 页面刚滚过 0.5 秒内的触摸不认（防惯性滑动里误触：总览重排审查 O2）
+  await sleep(650);                    // touches within 0.5 s after the page scrolled are ignored (prevents accidental taps during inertial scrolling: overview rearrangement review O2)
   const pts = (dy, dx) => [{ x: L.x, y: L.y - dy, id: 1 }, { x: Rr.x + dx, y: Rr.y, id: 2 }];
   await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(0, 0) });
   for (let i = 1; i <= 5; i++) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(9 * i, 9 * i) }); await sleep(30); }
@@ -343,10 +343,10 @@ await step('two_fingers', async () => {
   await shot('phone-2-two-sticks.png', '.pd-svgzone');
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 });
-// 手机上点图上的 Y：头模式
+// Tap Y on the picture on the phone: head mode
 await step('phone_head', async () => {
   const b = await box(key('north'));
-  await sleep(650);                    // 同上：滚完 0.5 秒以后再点
+  await sleep(650);                    // same as above: tap 0.5 s after scrolling ends
   await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: b.x, y: b.y, id: 3 }] });
   await sleep(80);
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });

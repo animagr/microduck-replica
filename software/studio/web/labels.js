@@ -1,6 +1,6 @@
-// 3D 上的舵机标注：编号 + 中文 + 英文，引线指到实际舵机外壳中心，与点选/高亮共用映射。
-// 用户 10-18：只在舵机页、点「零位」参考姿势时出现；右腿红、左腿蓝、头颈黄（照他给的那张实物标注图的分法）。
-// 看不见的（藏在外壳或别的零件后面）画虚线、空心点：相机到舵机中心的连线上，前面 3 cm 以外先碰到别的零件就算挡住。
+// Servo labels on the 3D view: number + Chinese + English, with leader lines pointing to the actual servo housing center; shares the mapping with click-select/highlight.
+// User, Oct 18: only shown on the servo page when the "zero position" (「零位」) reference pose is clicked; right leg red, left leg blue, head/neck yellow (following the split in the labeled photo of the real robot he provided).
+// Hidden ones (behind the housing or other parts) are drawn with dashed lines and hollow dots: on the line from the camera to the servo center, hitting another part more than 3 cm before it counts as occluded.
 import * as THREE from './vendor/three/three.module.js';
 
 export const TAGS = {
@@ -15,7 +15,7 @@ export const TAGS = {
 };
 const COLOR = { R: '#E5484D', L: '#2F7CF6', H: '#F5B400' };
 
-/** 在 box（舞台元素）里画标注。duck 是已经 load 完的 Duck3D。返回一个清理函数。 */
+/** Draw labels in box (the stage element). duck is a fully loaded Duck3D. Returns a cleanup function. */
 export function drawServoLabels(duck, box) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'sv-lines');
@@ -36,7 +36,7 @@ export function drawServoLabels(duck, box) {
       const servo = duck.servoOf[name];
       if (!servo) continue;
       const world = new THREE.Box3().setFromObject(servo).getCenter(new THREE.Vector3());
-      // 遮挡判断（射线碰 40 多万面）只在不转的时候做；转动中沿用上一次的，不然拖起来卡
+      // occlusion check (raycasting against 400k+ faces) only when not rotating; while rotating, reuse the previous result, otherwise dragging lags
       if (!dragging || !(id in hiddenCache)) {
         const dir = world.clone().sub(duck.camera.position);
         const dist = dir.length();
@@ -47,8 +47,8 @@ export function drawServoLabels(duck, box) {
       const v = world.clone().project(duck.camera);
       pts.push({ id, cn, en, side, hidden: hiddenCache[id], x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H });
     }
-    // 右腿一列、左腿一列（哪边在屏幕左边看实际投影）；头颈按头中线分到两列；
-    // 头颈在上、按高低排（线不交叉），腿按编号排（10、11、12…，好对号）
+    // one column for the right leg, one for the left (which side is on the screen's left depends on the actual projection); head/neck split into the two columns by the head's center line;
+    // head/neck on top, sorted by height (so lines don't cross); legs sorted by number (10, 11, 12…, easy to match)
     const avg = (s) => { const xs = pts.filter((p) => p.side === s).map((p) => p.x); return xs.reduce((a, b) => a + b, 0) / (xs.length || 1); };
     const rightOnLeft = avg('R') < avg('L'), headX = avg('H');
     const cols = [[], []];

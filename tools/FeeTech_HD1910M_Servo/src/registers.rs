@@ -1,26 +1,26 @@
-//! registers.rs —— HD1910M 舵机内存表的完整“数据化”定义
+//! registers.rs: complete "data-driven" definition of the HD1910M servo memory table
 //!
-//! 内存表就是舵机内部的一张“参数登记表”：每个地址存放一项功能参数。
-//! 这张表来自飞特官方文档（doc.feetech.cn 的 HLS_2 内存表），分为 5 个区域：
+//! The memory table is the servo's internal "parameter register": each address stores one functional parameter.
+//! The table comes from Feetech's official docs (the HLS_2 memory table on doc.feetech.cn) and has 5 areas:
 //!
-//!   地址 0 ~ 4    版本信息    （只读：固件版本号等）
-//!   地址 5 ~ 39   EPROM 配置  （可读写，配合“锁标志”可掉电保存）
-//!   地址 40 ~ 55  SRAM 控制   （可读写，实时控制区，掉电丢失）
-//!   地址 56 ~ 75  SRAM 反馈   （只读：当前位置/速度/电压/温度/电流…）
-//!   地址 77 ~ 86  出厂参数    （只读：工厂标定值）
+//!   Addresses 0 ~ 4    Version info     (read-only: firmware version etc.)
+//!   Addresses 5 ~ 39   EPROM config     (read/write; with the "lock flag" it can persist across power loss)
+//!   Addresses 40 ~ 55  SRAM control     (read/write, real-time control area, lost on power loss)
+//!   Addresses 56 ~ 75  SRAM feedback    (read-only: current position/speed/voltage/temperature/current...)
+//!   Addresses 77 ~ 86  Factory params   (read-only: factory calibration values)
 //!
-//! 【Rust 知识点：把“文档表格”变成“编译期常量”】
-//! 我们把整张表写成一个 `&'static [Register]` 常量数组。
-//! 'static 生命周期表示这些数据从程序启动到结束一直存在，
-//! 不占堆内存，访问零开销。命令行工具通过查这张表来校验参数、打印说明，
-//! 新增寄存器只需要在表里加一行。
+//! [Rust concept: turning a "doc table" into "compile-time constants"]
+//! We write the whole table as a `&'static [Register]` constant array.
+//! The 'static lifetime means the data exists from program start to end,
+//! uses no heap memory, and has zero access overhead. The CLI tool looks up this table to validate arguments and print descriptions;
+//! adding a register only needs one more line in the table.
 
-/// 寄存器读写权限
+/// Register read/write access
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// 只读（反馈量、版本号、出厂标定值）
+    /// Read-only (feedback values, version numbers, factory calibration values)
     ReadOnly,
-    /// 可读写（配置项、控制项）
+    /// Read/write (configuration and control items)
     ReadWrite,
 }
 
@@ -33,14 +33,14 @@ impl Access {
     }
 }
 
-/// 内存表分区
+/// Memory table areas
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Area {
-    Version,      // 版本信息
-    Eprom,        // EPROM 配置（可掉电保存）
-    SramControl,  // SRAM 实时控制
-    SramFeedback, // SRAM 实时反馈
-    Factory,      // 出厂标定参数
+    Version,      // version info
+    Eprom,        // EPROM config (can persist across power loss)
+    SramControl,  // SRAM real-time control
+    SramFeedback, // SRAM real-time feedback
+    Factory,      // factory calibration parameters
 }
 
 impl Area {
@@ -55,40 +55,40 @@ impl Area {
     }
 }
 
-/// 一条寄存器定义（对应官方内存表中的一行）。
+/// One register definition (corresponds to one row in the official memory table).
 ///
-/// 【Rust 知识点：&'static str】
-/// 字符串字面量（如 "目标位置"）直接编译进可执行文件，
-/// 生命周期为 'static（与程序同寿），存进结构体不需要堆分配。
+/// [Rust concept: &'static str]
+/// String literals (like "目标位置") are compiled directly into the executable,
+/// with a 'static lifetime (lives as long as the program), so storing them in a struct needs no heap allocation.
 pub struct Register {
-    /// 起始地址（十进制，与官方文档一致）
+    /// Start address (decimal, same as the official docs)
     pub addr: u8,
-    /// 命令行使用的英文键名（如 "pos-p"），全小写
+    /// English key name used on the command line (e.g. "pos-p"), all lowercase
     pub key: &'static str,
-    /// 中文名称（与官方文档一致）
+    /// Chinese name (same as the official docs)
     pub cn: &'static str,
-    /// 占用字节数：1 或 2（2 字节数据低字节在前 = 小端存储）
+    /// Number of bytes: 1 or 2 (2-byte data stores the low byte first = little-endian)
     pub size: u8,
     pub access: Access,
     pub area: Area,
-    /// 物理单位（每个 LSB 代表多少），如 "0.1V"、"6.5mA"
+    /// Physical unit (what each LSB represents), e.g. "0.1V", "6.5mA"
     pub unit: &'static str,
-    /// 合法取值范围（写入前做校验，防止写坏舵机配置）
+    /// Valid value range (checked before writing to avoid corrupting the servo configuration)
     pub min: i64,
     pub max: i64,
-    /// 符号-幅值编码的符号位位置：
-    ///   None     —— 无符号数
-    ///   Some(15) —— BIT15 是方向位（位置/速度/电流等）
-    ///   Some(10) —— BIT10 是方向位（当前负载）
-    /// 飞特协议用“符号位 + 绝对值”表示负数，而不是常见的二进制补码！
+    /// Position of the sign bit in sign-magnitude encoding:
+    ///   None     : unsigned
+    ///   Some(15) : BIT15 is the direction bit (position/speed/current etc.)
+    ///   Some(10) : BIT10 is the direction bit (current load)
+    /// The Feetech protocol represents negative numbers as "sign bit + absolute value", not the usual two's complement!
     pub sign_bit: Option<u8>,
-    /// 备注说明
+    /// Remarks
     pub desc: &'static str,
 }
 
 impl Register {
-    /// 写入前的取值范围校验：越界返回 Err，在发送前拦截错误。
-    /// write_reg / sync_write / set --defer 等所有写入路径共用这一份校验。
+    /// Range check before writing: returns Err when out of range, catching errors before sending.
+    /// All write paths (write_reg / sync_write / set --defer etc.) share this single check.
     pub fn check_value(&self, value: i64) -> crate::error::Result<()> {
         if value < self.min || value > self.max {
             return Err(crate::error::ServoError::InvalidParam(format!(
@@ -100,19 +100,19 @@ impl Register {
     }
 }
 
-/// 整张内存表（与官方 HLS_2 文档逐行对应）。
+/// The full memory table (matches the official HLS_2 doc row by row).
 ///
-/// 【Rust 知识点：常量数组】
-/// 用 const 声明，编译期就确定全部内容。遍历时就是普通的数组迭代。
+/// [Rust concept: constant arrays]
+/// Declared with const, so the entire content is fixed at compile time. Traversal is just ordinary array iteration.
 pub const REGISTERS: &[Register] = &[
-    // ---------------- 2.1 版本信息（只读） ----------------
+    // ---------------- 2.1 Version info (read-only) ----------------
     Register { addr: 0,  key: "fw-major",    cn: "固件主版本号", size: 1, access: Access::ReadOnly,  area: Area::Version, unit: "",      min: 0, max: 255,   sign_bit: None, desc: "固件主版本号" },
     Register { addr: 1,  key: "fw-minor",    cn: "固件次版本号", size: 1, access: Access::ReadOnly,  area: Area::Version, unit: "",      min: 0, max: 255,   sign_bit: None, desc: "固件次版本号" },
     Register { addr: 2,  key: "endian",      cn: "END",         size: 1, access: Access::ReadOnly,  area: Area::Version, unit: "",      min: 0, max: 255,   sign_bit: None, desc: "0 表示小端存储结构" },
     Register { addr: 3,  key: "servo-major", cn: "舵机主版本号", size: 1, access: Access::ReadOnly,  area: Area::Version, unit: "",      min: 0, max: 255,   sign_bit: None, desc: "舵机主版本号" },
     Register { addr: 4,  key: "servo-minor", cn: "舵机次版本号", size: 1, access: Access::ReadOnly,  area: Area::Version, unit: "",      min: 0, max: 255,   sign_bit: None, desc: "舵机次版本号" },
 
-    // ---------------- 2.2 EPROM 配置（读写，可掉电保存） ----------------
+    // ---------------- 2.2 EPROM config (read/write, can persist across power loss) ----------------
     Register { addr: 5,  key: "id",              cn: "主ID",           size: 1, access: Access::ReadWrite, area: Area::Eprom, unit: "号",     min: 0, max: 253,   sign_bit: None, desc: "总线上唯一的主ID（出厂默认1），对主ID写入会同步修改副ID" },
     Register { addr: 6,  key: "baud",            cn: "波特率",         size: 1, access: Access::ReadWrite, area: Area::Eprom, unit: "",      min: 0, max: 7,     sign_bit: None, desc: "0~7 = 1000000/500000/250000/128000/115200/76800/57600/38400" },
     Register { addr: 7,  key: "id2",             cn: "副ID",           size: 1, access: Access::ReadWrite, area: Area::Eprom, unit: "号",     min: 0, max: 253,   sign_bit: None, desc: "第二标识，适用于写/异步写/异步执行/同步写指令" },
@@ -144,7 +144,7 @@ pub const REGISTERS: &[Register] = &[
     Register { addr: 38, key: "overcur-time",    cn: "过流保护时间",   size: 1, access: Access::ReadWrite, area: Area::Eprom, unit: "10ms",  min: 0, max: 254,   sign_bit: None, desc: "电流超限持续该时间后进入过流保护" },
     Register { addr: 39, key: "vel-i",           cn: "速度闭环I积分系数", size: 1, access: Access::ReadWrite, area: Area::Eprom, unit: "",   min: 0, max: 254,   sign_bit: None, desc: "电机恒速模式(模式1)下速度环积分系数，上电赋值给52号Ki" },
 
-    // ---------------- 2.3 SRAM 控制（读写，掉电丢失） ----------------
+    // ---------------- 2.3 SRAM control (read/write, lost on power loss) ----------------
     Register { addr: 40, key: "torque-switch", cn: "扭矩开关",   size: 1, access: Access::ReadWrite, area: Area::SramControl, unit: "",     min: 0, max: 2,     sign_bit: None, desc: "0:关闭扭力输出 1:打开扭力输出 2:阻尼输出" },
     Register { addr: 41, key: "acc",           cn: "加速度",     size: 1, access: Access::ReadWrite, area: Area::SramControl, unit: "8.7度/秒²", min: 0, max: 254, sign_bit: None, desc: "运行加/减速度，0表示最大加速度" },
     Register { addr: 42, key: "goal-pos",      cn: "目标位置",   size: 2, access: Access::ReadWrite, area: Area::SramControl, unit: "0.087度", min: -32767, max: 32767, sign_bit: Some(15), desc: "绝对位置控制，BIT15为方向位；多圈模式可超4095" },
@@ -158,7 +158,7 @@ pub const REGISTERS: &[Register] = &[
     Register { addr: 54, key: "reserved-54",   cn: "无定义(54)", size: 1, access: Access::ReadWrite, area: Area::SramControl, unit: "",     min: 0, max: 255,   sign_bit: None, desc: "官方文档未定义，谨慎修改" },
     Register { addr: 55, key: "lock",          cn: "锁标志",     size: 1, access: Access::ReadWrite, area: Area::SramControl, unit: "",     min: 0, max: 1,     sign_bit: None, desc: "0:关闭写入锁(EPROM写值掉电保存) 1:打开写入锁(掉电不保存，默认)" },
 
-    // ---------------- 2.4 SRAM 反馈（只读） ----------------
+    // ---------------- 2.4 SRAM feedback (read-only) ----------------
     Register { addr: 56, key: "pos",            cn: "当前位置",   size: 2, access: Access::ReadOnly, area: Area::SramFeedback, unit: "0.087度",  min: -32767, max: 32767, sign_bit: Some(15), desc: "当前绝对位置，BIT15为方向位（多圈模式含圈数）" },
     Register { addr: 58, key: "vel",            cn: "当前速度",   size: 2, access: Access::ReadOnly, area: Area::SramFeedback, unit: "0.732RPM", min: -32767, max: 32767, sign_bit: Some(15), desc: "当前电机转动速度，BIT15为方向位" },
     Register { addr: 60, key: "load",           cn: "当前负载",   size: 2, access: Access::ReadOnly, area: Area::SramFeedback, unit: "0.1%",     min: -1000, max: 1000,   sign_bit: Some(10), desc: "驱动电机的电压占空比，BIT10为方向位" },
@@ -172,7 +172,7 @@ pub const REGISTERS: &[Register] = &[
     Register { addr: 71, key: "reserved-71",    cn: "无定义(71)", size: 2, access: Access::ReadOnly, area: Area::SramFeedback, unit: "",       min: 0, max: 65535, sign_bit: None, desc: "官方文档未定义" },
     Register { addr: 73, key: "current-offset", cn: "电流偏置",   size: 2, access: Access::ReadOnly, area: Area::SramFeedback, unit: "",       min: 0, max: 65535, sign_bit: None, desc: "电流0点偏移值" },
 
-    // ---------------- 2.5 出厂参数（只读，工厂标定） ----------------
+    // ---------------- 2.5 Factory parameters (read-only, factory calibration) ----------------
     Register { addr: 77, key: "v-fk",            cn: "vFk(*10)",     size: 1, access: Access::ReadOnly, area: Area::Factory, unit: "", min: 0, max: 255, sign_bit: None, desc: "工厂标定参数" },
     Register { addr: 78, key: "v-kgi",           cn: "vKgI",         size: 1, access: Access::ReadOnly, area: Area::Factory, unit: "", min: 0, max: 255, sign_bit: None, desc: "工厂标定参数" },
     Register { addr: 79, key: "p-fk",            cn: "pFk(*10)",     size: 1, access: Access::ReadOnly, area: Area::Factory, unit: "", min: 0, max: 255, sign_bit: None, desc: "工厂标定参数" },
@@ -185,31 +185,31 @@ pub const REGISTERS: &[Register] = &[
     Register { addr: 86, key: "acc-multi",       cn: "加速度倍数",   size: 1, access: Access::ReadOnly, area: Area::Factory, unit: "", min: 0, max: 255, sign_bit: None, desc: "工厂标定参数" },
 ];
 
-/// 波特率索引表：内存表 6 号地址的值 0~7 对应的实际波特率。
+/// Baud rate index table: the actual baud rates for values 0~7 at memory table address 6.
 pub const BAUD_RATES: [u32; 8] = [
     1_000_000, 500_000, 250_000, 128_000, 115_200, 76_800, 57_600, 38_400,
 ];
 
-/// 按“英文键名”或“地址”查找寄存器。
+/// Look up a register by "English key name" or "address".
 ///
-/// 支持的写法（命令行友好）：
-///   - 键名： "pos-p"、"id"、"torque-limit"（大小写不敏感）
-///   - 十进制地址："21"
-///   - 十六进制地址："0x15"
+/// Supported forms (command-line friendly):
+///   - Key name: "pos-p", "id", "torque-limit" (case-insensitive)
+///   - Decimal address: "21"
+///   - Hex address: "0x15"
 ///
-/// 【Rust 知识点：Option<T>】
-/// “可能找不到”用 `Option` 表达：Some(寄存器) 或 None。
-/// 这是 Rust 替代 null 的方案 —— 编译器强制你处理“找不到”的情况，
-/// 从根源上消灭空指针异常。
+/// [Rust concept: Option<T>]
+/// "Might not be found" is expressed with `Option`: Some(register) or None.
+/// This is Rust's replacement for null: the compiler forces you to handle the "not found" case,
+/// eliminating null pointer exceptions at the root.
 ///
-/// 【Rust 知识点：迭代器链式调用】
-/// `.iter().find(...)` 是函数式风格：遍历数组，返回第一个满足条件的元素。
+/// [Rust concept: chained iterator calls]
+/// `.iter().find(...)` is functional style: iterate the array and return the first element matching the condition.
 pub fn find_register(name_or_addr: &str) -> Option<&'static Register> {
     let key = name_or_addr.to_lowercase();
 
-    // 先尝试按地址解析："0x15"（十六进制）或 "21"（十进制）
+    // First try parsing as an address: "0x15" (hex) or "21" (decimal)
     let addr: Option<u8> = if let Some(hex) = key.strip_prefix("0x") {
-        u8::from_str_radix(hex, 16).ok() // .ok() 把 Result 转成 Option
+        u8::from_str_radix(hex, 16).ok() // .ok() converts Result into Option
     } else {
         key.parse::<u8>().ok()
     };
@@ -217,20 +217,20 @@ pub fn find_register(name_or_addr: &str) -> Option<&'static Register> {
         return REGISTERS.iter().find(|r| r.addr == a);
     }
 
-    // 再按键名匹配
+    // Then match by key name
     REGISTERS.iter().find(|r| r.key == key)
 }
 
-/// 符号-幅值解码：把协议里的原始 u16 还原成有符号整数。
+/// Sign-magnitude decoding: restore the protocol's raw u16 into a signed integer.
 ///
-/// 飞特协议的负数不是补码！而是“符号位 + 绝对值”：
-///   sign_bit 位置 1 表示负，其余位是绝对值。
-///   例如位置 -100 编码为 0x8000 | 100 = 0x8064。
+/// Negative numbers in the Feetech protocol are not two's complement! They are "sign bit + absolute value":
+///   a 1 at sign_bit means negative, and the remaining bits are the absolute value.
+///   For example, position -100 is encoded as 0x8000 | 100 = 0x8064.
 pub fn decode_value(raw: u16, sign_bit: Option<u8>) -> i64 {
     match sign_bit {
         Some(bit) => {
-            let sign_mask = 1u16 << bit;        // 符号位掩码，如 0x8000
-            let mag_mask = sign_mask - 1;       // 绝对值掩码，如 0x7FFF
+            let sign_mask = 1u16 << bit;        // sign bit mask, e.g. 0x8000
+            let mag_mask = sign_mask - 1;       // magnitude mask, e.g. 0x7FFF
             let mag = (raw & mag_mask) as i64;
             if raw & sign_mask != 0 { -mag } else { mag }
         }
@@ -238,12 +238,12 @@ pub fn decode_value(raw: u16, sign_bit: Option<u8>) -> i64 {
     }
 }
 
-/// 符号-幅值编码：把有符号整数打包成协议要求的 u16。
+/// Sign-magnitude encoding: pack a signed integer into the u16 the protocol expects.
 pub fn encode_value(value: i64, sign_bit: Option<u8>) -> u16 {
     match sign_bit {
         Some(bit) => {
             let sign_mask = 1u16 << bit;
-            let mag = value.unsigned_abs() as u16; // unsigned_abs: |v| 直接得到无符号数
+            let mag = value.unsigned_abs() as u16; // unsigned_abs: |v| directly as an unsigned number
             if value < 0 { mag | sign_mask } else { mag }
         }
         None => value as u16,
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_find_by_key_and_addr() {
         assert_eq!(find_register("pos-p").unwrap().addr, 21);
-        assert_eq!(find_register("POS-P").unwrap().addr, 21); // 大小写不敏感
+        assert_eq!(find_register("POS-P").unwrap().addr, 21); // case-insensitive
         assert_eq!(find_register("21").unwrap().key, "pos-p");
         assert_eq!(find_register("0x15").unwrap().key, "pos-p");
         assert!(find_register("not-exist").is_none());
@@ -265,24 +265,24 @@ mod tests {
 
     #[test]
     fn test_sign_magnitude_roundtrip() {
-        // 位置 -100 应编码为 0x8064，解码应还原
+        // Position -100 should encode to 0x8064 and decode back
         let raw = encode_value(-100, Some(15));
         assert_eq!(raw, 0x8064);
         assert_eq!(decode_value(raw, Some(15)), -100);
-        // 无符号寄存器不受影响
+        // Unsigned registers are unaffected
         assert_eq!(decode_value(1000, None), 1000);
-        // 负载用 BIT10 做符号位：-500 → 0x0400 | 500
+        // Load uses BIT10 as the sign bit: -500 → 0x0400 | 500
         let raw = encode_value(-500, Some(10));
         assert_eq!(decode_value(raw, Some(10)), -500);
     }
 
     #[test]
     fn test_check_value() {
-        let reg = find_register("pos-p").unwrap(); // 范围 0~254
+        let reg = find_register("pos-p").unwrap(); // range 0~254
         assert!(reg.check_value(254).is_ok());
         assert!(reg.check_value(255).is_err());
         assert!(reg.check_value(-1).is_err());
-        let offset = find_register("pos-offset").unwrap(); // 范围 -4095~4095
+        let offset = find_register("pos-offset").unwrap(); // range -4095~4095
         assert!(offset.check_value(-4095).is_ok());
         assert!(offset.check_value(-4096).is_err());
     }

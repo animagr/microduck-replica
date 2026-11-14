@@ -1,13 +1,13 @@
-// WiFi 配网（任务 10b）的端到端：假 configd 写一份 hotspot 的 net.json，Studio 真跑，无头 Edge 打开手机宽度。
-// 走一遍：连 WiFi 卡片出现 → 选 Home → 填错密码 → 确认 → 「正在切换」→ last-try 红字「密码不对」。
-// 每一步的结果用 JSON 打到 stdout，由 tests/test_wifi_e2e.py 判断。
-// 任务 17：连接发出去以后页面跟鸭子断了 →「找鸭子」卡片，每 2 秒探 duck-fake / duck-fake.local 的 probe.svg；
-// 页面重新连上原来的地址（热点回来了）→ 停止探测、照旧显示失败原因；探到了 → 跳到新地址。
-// 断线用页面里的 WebSocket 小垫片做（Page.addScriptToEvaluateOnNewDocument，只在测试里装：__cut 时新连接连一个关着的端口，
-// 旧连接手动关掉）；duck-fake 解析不了，探测请求用 CDP Fetch 拦下来：要么报「找不到」，要么给一张图、给一个假页面。
-// 单独跑（先起好假 robotd、Studio、无头 Edge）：
-//   node tests/wifi_e2e.mjs --url http://127.0.0.1:18091/ --cdp 9344 [--shots <截图目录>]
-// Node >= 22（自带 WebSocket），不需要装任何包。
+// End-to-end test of WiFi provisioning (task 10b): a fake configd writes a hotspot net.json, Studio really runs, headless Edge opens at phone width.
+// Walkthrough: the Join WiFi card appears → select Home → enter a wrong password → confirm → "switching" (「正在切换」) → last-try red text "wrong password" (「密码不对」).
+// The result of each step is printed as JSON to stdout, and tests/test_wifi_e2e.py judges it.
+// Task 17: after the connect request is sent the page loses the duck → the "find the duck" (「找鸭子」) card, probing probe.svg on duck-fake / duck-fake.local every 2 s;
+// the page reconnects to the original address (hotspot came back) → stop probing, still show the failure reason; probe succeeds → redirect to the new address.
+// The disconnect is done with a small WebSocket shim in the page (Page.addScriptToEvaluateOnNewDocument, installed only in tests: while __cut, new connections go to a closed port,
+// old connections are closed by hand); duck-fake doesn't resolve, so probe requests are intercepted with CDP Fetch: either report "not found", or serve an image and a fake page.
+// To run it alone (start the fake robotd, Studio and headless Edge first):
+//   node tests/wifi_e2e.mjs --url http://127.0.0.1:18091/ --cdp 9344 [--shots <screenshot dir>]
+// Node >= 22 (built-in WebSocket), no packages need to be installed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -25,11 +25,11 @@ await new Promise((r) => ws.addEventListener('open', r, { once: true }));
 let id = 0;
 const waiting = new Map();
 const errors = [];
-// 任务 17：拦下来的 duck-fake 请求。probeMode = fail：都报「找不到」；found：duck-fake.local 的给一张图、跳过去的页面也给一个
+// Task 17: intercepted duck-fake requests. probeMode = fail: all report "not found"; found: duck-fake.local serves an image, and the page it redirects to is served too
 const probes = [];
 let probeMode = 'fail';
 const PORT = new URL(BASE).port;
-// 一个关着的端口：「断线」时页面的新 WebSocket 连它（用不到 9 这种浏览器不让连的端口）
+// A closed port: during a "disconnect" the page's new WebSocket connects to it (not a port like 9 that browsers refuse to connect to)
 const DEAD = await new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const onPaused = (p) => {
   const url = p.request.url;
@@ -134,14 +134,14 @@ out.lastTry = await js(`({ text: document.querySelector('.wifi-last-try').innerT
   sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth })`);
 await shot('wifi-last-try-phone.png');
 
-// 手机底栏只有「更多」能到设置：从那里进日志，再点导出诊断包
+// On the phone the bottom bar only reaches settings via "More" (「更多」): go to the log from there, then click export diagnostics bundle
 out.hotspotPasswordHint = await js(`document.querySelector('.wifi-card')?.innerText.includes('热点密码大家都知道')`);
 await js(`[...document.querySelectorAll('.tabbar a')].find((a) => a.textContent.trim() === '更多').click()`);
 await waitFor(`location.hash === '#/settings' && !!document.querySelector('.password-settings')`, '手机底栏进设置');
 out.mobile = await js(`({ navHidden: getComputedStyle(document.querySelector('.nav')).display === 'none',
   hasLogs: !!document.querySelector('.settings-logs'), hasDiag: !!document.querySelector('.settings-diag') })`);
 await shot('settings-mobile-links.png');
-// 「更多」页的「这只鸭子的地址」：热点模式下 IP 是 10.42.0.1，另外两个是 duck-xxxx、duck-xxxx.local，每个能复制
+// "This duck's address" (「这只鸭子的地址」) on the "More" page: in hotspot mode the IP is 10.42.0.1, the other two are duck-xxxx and duck-xxxx.local, each can be copied
 await waitFor(`document.querySelectorAll('.duck-addr .duck-addr-row').length >= 3`, '「这只鸭子的地址」');
 out.addr = await js(`({ rows: [...document.querySelectorAll('.duck-addr .duck-addr-row')].map((r) => ({ kind: r.dataset.kind,
     url: r.querySelector('a')?.textContent, copy: r.querySelector('.duck-addr-copy')?.textContent.trim() })),
@@ -161,8 +161,8 @@ await js(`window.__diagHref = ''; document.addEventListener('click', (e) => {
 await click('.logs-export');
 out.mobile.diagClicked = await js('window.__diagHref');
 
-// 设上登录密码后，热点卡片上的灰字提示消失（仍保持这台浏览器登录）
-// 两个请求要在页面里发（同源、带这台浏览器的会话），不是在 Node 里
+// After setting a login password, the gray hint on the hotspot card disappears (this browser stays logged in)
+// Both requests must be sent from within the page (same origin, with this browser's session), not from Node
 out.passwordSet = await js(`(async () => {
   const sess = await (await fetch('/api/session')).json();
   const r = await fetch('/api/password', { method: 'POST', credentials: 'same-origin',
@@ -175,7 +175,7 @@ await waitFor(`!!document.querySelector('.wifi-card') && !document.querySelector
   '设密码后热点提示消失', 10000);
 out.hotspotPasswordHintAfterSet = await js(`document.querySelector('.wifi-card').innerText.includes('热点密码大家都知道')`);
 
-// ---- 任务 17：连接发出去、页面跟鸭子断了以后自己找鸭子的新地址 ----
+// ---- Task 17: after the connect request is sent and the page loses the duck, it finds the duck's new address by itself ----
 const cut = () => js(`(() => { window.__cut = true; for (const w of window.__ws) { try { w.close(); } catch (e) { /* 关过了 */ } } return true; })()`);
 const uncut = () => js(`(() => { window.__cut = false; return true; })()`);
 const connectTo = async (ssid, psk) => {
@@ -188,7 +188,7 @@ const connectTo = async (ssid, psk) => {
   await click('.wifi-confirm .btn-danger');
   await waitFor(`!!document.querySelector('.wifi-switching')`, `${ssid} 显示正在切换`, 5000);
 };
-// A. 热点回来了：断了 → 找鸭子卡片、每 2 秒探两个地址；页面重新连上原来的地址 → 卡片收起、不再探、照旧显示失败原因
+// A. Hotspot came back: disconnected → find-the-duck card, probing two addresses every 2 s; the page reconnects to the original address → card collapses, no more probing, failure reason still shown
 probeMode = 'fail';
 await connectTo('Ghost', 'whatever1');
 await cut();
@@ -209,7 +209,7 @@ await sleep(4500);
 out.findBack = { finding: !!(await js(`!!document.querySelector('.wifi-finding')`)),
   lastTry: await js(`document.querySelector('.wifi-last-try')?.innerText.replace(/\\s+/g, ' ')`),
   probesAtBack: atBack, probesLater: probes.length };
-// B. 找到了：duck-fake.local 那个通了 → 跳过去
+// B. Found: duck-fake.local is reachable → redirect there
 probeMode = 'found';
 await connectTo('Coffee', '');
 await cut();
@@ -217,7 +217,7 @@ const end = Date.now() + 15000;
 out.found = null;
 while (Date.now() < end) {
   let href = null;
-  try { href = await js('location.href'); } catch { /* 正在跳 */ }
+  try { href = await js('location.href'); } catch { /* redirecting */ }
   if (href && href.startsWith('http://duck-fake.local')) { out.found = { href, title: await js('document.title') }; break; }
   await sleep(200);
 }

@@ -1,13 +1,13 @@
-// 总览仪表带的「电池」格（battery-plan.md v2 §5）：数从后端的估算器来（studio/battery.py，st.battery），这里只画。
-// 点开看「这个数怎么来的」（估算器给的 detail 一行一行列出来）。过红线、电压很低各响一声短音（只在浏览器里，
-// 跟 IMU 页共用静音开关 studio.imu.mute）。只警告：页面上不放任何会让鸭子动的东西。
+// The "battery" cell in the overview gauge strip (battery-plan.md v2 §5): the number comes from the backend estimator (studio/battery.py, st.battery); this only draws it.
+// Click to open "how this number was derived" (the estimator's detail listed line by line). Crossing the red line and very low voltage each play a short beep (browser only,
+// sharing the mute switch studio.imu.mute with the IMU page). Warning only: nothing on this page can make the duck move.
 import { html, useState, useEffect, useLayoutEffect, useRef } from './vendor/preact-htm.module.js';
 
-const MUTE_KEY = 'studio.imu.mute';          // 跟 IMU 页同一个（web/imu.js）
+const MUTE_KEY = 'studio.imu.mute';          // same one as the IMU page (web/imu.js)
 export function loadMute() { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } }
-export function saveMute(v) { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch { /* 隐私模式 */ } }
+export function saveMute(v) { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch { /* private mode */ } }
 
-// 浏览器要求「用户点过」才能出声：页面上第一次点击时把声音准备好
+// Browsers require "the user has clicked" before playing sound: prepare the audio on the first click on the page
 let actx = null;
 function unlock() {
   try {
@@ -24,7 +24,7 @@ function beep() {
   if (!actx || loadMute()) return;
   try {
     const t = actx.currentTime + 0.01;
-    for (const [f, dt] of [[660, 0], [440, 0.16]]) {          // 往下走的两声：跟 IMU 页「做够了」往上走的区分开
+    for (const [f, dt] of [[660, 0], [440, 0.16]]) {          // two descending tones: distinct from the ascending "done enough" tones on the IMU page
       const o = actx.createOscillator(), g = actx.createGain();
       o.frequency.value = f;
       g.gain.setValueAtTime(0.0001, t + dt);
@@ -34,10 +34,10 @@ function beep() {
       o.start(t + dt);
       o.stop(t + dt + 0.16);
     }
-  } catch { /* 出不了声就算了 */ }
+  } catch { /* if no sound can be played, never mind */ }
 }
 
-// 样式只在这个文件里（不动 styles.css）
+// Styles live only in this file (styles.css is not touched)
 const CSS = `
 .bat-cell { position: relative; }
 .bat-hit { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 8px; }
@@ -66,16 +66,16 @@ if (!document.getElementById('bat-css')) {
 
 const f2 = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—');
 
-/** 小字一行：电压 · 怎么估的 */
+/** Small one-line text: voltage · how it was estimated */
 function smallLine(b) {
   if (!b || !b.mode) return '—';
   if (b.mode === 'no_data') return '读不到电压';
   if (b.mode === 'estimating') return `估算中${typeof b.estimating_left_s === 'number' ? `，${b.estimating_left_s} 秒` : ''}`;
-  if (b.mode === 'bench') return b.why || '台架电源';         // 大字已经是电压了
+  if (b.mode === 'bench') return b.why || '台架电源';         // the large text is already the voltage
   return `${f2(b.volts)} V · ${b.why || ''}`;
 }
 
-/** 过红线 / 电压很低：从「没亮」到「亮」的那一下响一声（刚打开页面就已经亮着的不响） */
+/** Crossing the red line / very low voltage: beep once on the transition from "off" to "on" (no beep if it's already on when the page opens) */
 function useBeep(b) {
   const prev = useRef(null);
   const on = { red: !!b?.red, low: !!b?.low_volt };
@@ -91,8 +91,8 @@ export function BatteryCell({ b }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useBeep(b);
-  // 点开就挂上 Esc / 点别处收起：用 useLayoutEffect（跟弹窗同一拍挂上）。useEffect 要等下一帧（最多 100 ms），
-  // 刚点开马上按 Esc 会没反应（电池 e2e 全套跑时偶发卡在「按 Esc 收起」就是这个）
+  // Once opened, attach Esc / click-elsewhere to close: use useLayoutEffect (attached in the same tick as the popup). useEffect waits until the next frame (up to 100 ms),
+  // so pressing Esc right after opening would do nothing (this is what occasionally got stuck at "press Esc to close" in the full battery e2e run)
   useLayoutEffect(() => {
     if (!open) return undefined;
     const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };

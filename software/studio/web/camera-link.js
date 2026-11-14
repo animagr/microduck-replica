@@ -19,7 +19,7 @@ export class CameraLink {
 
   update(patch) { this.state = { ...this.state, ...patch }; this.onState(this.state); }
 
-  // 把四个回调挂到一个刚建好的 WebSocket 上。label 只用在报错文案里（端口 8443 或 /media-ws）
+  // Attach the four callbacks to a freshly created WebSocket. label is only used in error messages (port 8443 or /media-ws)
   _attach(ws, generation, label) {
     this.chain = Promise.resolve();
     this.queuedMessages = 0;
@@ -41,9 +41,9 @@ export class CameraLink {
   }
 
   /**
-   * 连摄像头信令。默认直连 mediad 的端口（8443）；传了 path 就走「同域 + 同协议」的反代路径。
-   * 为什么还要 path：https 页面里连 ws://host:8443 是明文，浏览器会把它当混合内容直接挡掉，
-   * 所以 https 下必须走同域的 /media-ws（nginx 转发到本机 8443），画面才出得来。
+   * Connect to camera signaling. By default connects directly to mediad's port (8443); if path is given, uses the "same origin + same protocol" reverse-proxy path.
+   * Why path is still needed: connecting to ws://host:8443 from an https page is plaintext, and the browser blocks it outright as mixed content,
+   * so under https it must go through the same-origin /media-ws (nginx forwards to local 8443) for the video to show up.
    */
   start(port = 8443, path = null) {
     if (path) return this.startProxy(path);
@@ -61,7 +61,7 @@ export class CameraLink {
     } catch (error) { this.fail(`摄像头连接失败：${error.message}`); }
   }
 
-  /** 走同域的反代路径（不带端口），比如 /media-ws。http 和 https 下都能这么连 */
+  /** Use the same-origin reverse-proxy path (no port), e.g. /media-ws. Works under both http and https */
   startProxy(path = '/media-ws') {
     this.stop();
     const generation = this.generation;

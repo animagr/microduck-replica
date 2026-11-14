@@ -1,16 +1,16 @@
-// 出厂场景「写进主程序」的端到端（任务 13）：连本机无头 Edge（CDP），走完标定模式 -> 运动模式。
-// 假 robotd 用 --mode commissioning --calib factory 起（出厂未标定）；Studio 由 tests/test_commit_e2e.py 用
-// 一个把 studio.helper.calib_commit 换成假实现的启动脚本拉起（电脑上没有 root 小助手）。
+// End-to-end test for the factory scenario "写进主程序" (commit to main program) (task 13): connect to a local headless Edge (CDP) and go all the way from calibration mode -> motion mode.
+// The fake robotd is started with --mode commissioning --calib factory (factory, uncalibrated); Studio is launched by tests/test_commit_e2e.py with
+// a startup script that replaces studio.helper.calib_commit with a fake implementation (there is no root helper on a computer).
 //
-// --phase factory：出厂状态的准备情况（按钮灰着）、预览能展开、每颗的方向 / 限位 / TOML 都在。
-// --phase mark   ：第 1 步点「已完成」（主程序说没标：两步确认）→ ✓，第 3 步准备情况里「舵机零位」一项变绿（任务 16）。
-// --phase imu    ：IMU 页粗校：托起摆正采静止 -> 往前低头采前倾 -> 算方向 -> 交给主程序 verify-imu。
-// --phase servo  ：舵机页一键中位（--servo-sim），然后交还主程序。
-// --phase commit ：第 3 步写进主程序；假小助手让假主程序切 motion + control，清单第 3 步 ✓、顶栏显示运动模式。
-// --phase fail   ：假小助手让标定被拒；页面要能看到失败原因，而且断线期间进度卡不能被「断线时不检查」盖掉。
-// --phase stance0：标定模式下 IMU 页的「站姿使能 / 失能」灰着、写清楚原因、能去第 3 步（任务 17）。
-// --phase stance ：运动模式下「站姿使能」发出的命令跟遥控卡「站起来」一样，「失能」跟顶上「卸力」一样（任务 17）。
-// 结果用 JSON 打到 stdout，由 tests/test_commit_e2e.py 判断。Node >= 22，不需要装包。
+// --phase factory: readiness in factory state (button grayed out), the preview can expand, each servo's direction / limits / TOML are all present.
+// --phase mark   : in step 1 click "已完成" (done) (main program says not calibrated: two-step confirmation) → ✓; in step 3's readiness the "舵机零位" (servo zero position) item turns green (task 16).
+// --phase imu    : coarse IMU calibration on the IMU page: lift and level it, sample at rest -> tilt head forward, sample forward tilt -> compute orientation -> hand to the main program's verify-imu.
+// --phase servo  : one-click centering on the servo page (--servo-sim), then hand back to the main program.
+// --phase commit : step 3 commits to the main program; the fake helper switches the fake main program to motion + control; checklist step 3 ✓, top bar shows motion mode.
+// --phase fail   : the fake helper makes calibration get rejected; the page must show the failure reason, and the progress card must not be overwritten by "no checks while disconnected" during the disconnect.
+// --phase stance0: in calibration mode the IMU page's "站姿使能 / 失能" (enable / disable standing pose) are grayed out, explain why, and can go to step 3 (task 17).
+// --phase stance : in motion mode, "站姿使能" (enable standing pose) sends the same command as the remote card's "站起来" (stand up), and "失能" (disable) is the same as the top "卸力" (relax) (task 17).
+// Results are printed to stdout as JSON and judged by tests/test_commit_e2e.py. Node >= 22; no packages need to be installed.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
@@ -25,7 +25,7 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => process.stderr.write(`[commit-e2e] ${a.join(' ')}` + '\n');
 
-// 测试控制口：给假 robotd / 假 configd 发 fake.set（同一个假对象）
+// Test control port: send fake.set to the fake robotd / fake configd (same fake object)
 const fakeRpc = (method, params) => new Promise((resolve, reject) => {
   const s = createConnection({ host: '127.0.0.1', port: FAKE }, () => {
     s.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
@@ -58,7 +58,7 @@ ws.addEventListener('message', (ev) => {
   if (m.id && waiting.has(m.id)) { waiting.get(m.id).ok(m); waiting.delete(m.id); }
   if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
   if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
-  // 浏览器自带的确认框（比如「它现在是躺着的……确定托好了吗？」）：照 overview_e2e 的做法点「确定」，记下问了什么
+  // The browser's built-in confirm dialog (e.g. "它现在是躺着的……确定托好了吗？" (It is lying down right now… are you sure you're holding it?)): click "确定" (OK) like overview_e2e does, and record what was asked
   if (m.method === 'Page.javascriptDialogOpening') { dialogs.push(m.params.message); send('Page.handleJavaScriptDialog', { accept: true }); }
 });
 const dialogs = [];
@@ -102,7 +102,7 @@ const clickHas = (sel, text) => js(`(() => { const b = [...document.querySelecto
 log('连上 Edge，开始加载页面');
 await send('Page.enable');
 await send('Runtime.enable');
-await send('Page.bringToFront');                                  // 页面要算「在前台」：后台时 Studio 1 Hz 推，清单判成断线
+await send('Page.bringToFront');                                  // the page must count as "in the foreground": in the background Studio pushes at 1 Hz and the checklist judges it disconnected
 await send('Emulation.setFocusEmulationEnabled', { enabled: true });
 await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
 await send('Page.navigate', { url: `${BASE}#/` });
@@ -129,7 +129,7 @@ const snapshot = () => js(`(() => {
   };
 })()`);
 
-// IMU 页的「站姿使能 / 失能」（任务 17）：按钮状态、旁边那行字；页面发出去的命令（拦 WebSocket.send，只记 cmd）
+// The IMU page's "站姿使能 / 失能" (enable / disable standing pose) (task 17): button states, the line of text next to them; commands sent by the page (intercept WebSocket.send, record only cmd)
 const stance = () => js(`(() => { const c = document.querySelector('.imu-stance'); if (!c) return null;
   const b = (sel) => { const e = c.querySelector(sel); return e ? { text: e.textContent.trim(), disabled: e.disabled } : null; };
   return { stand: b('.imu-stand'), relax: b('.imu-relax'),
@@ -147,7 +147,7 @@ const sentStand = () => js(`(window.__sent || []).filter((m) => m.name === 'pad.
 const remoteStand = `[...document.querySelectorAll('.pd-remote .pd-big')].find((x) => x.querySelector('b')?.textContent === '站起来')`;
 
 if (PHASE === 'ssh') {
-  // 「更多」页的 SSH 开关（10-21）：卡片在、写清出厂只认钥匙；电脑上没有 root 小助手，后端回「没装小助手」，卡片照实写，不报错
+  // The SSH switch on the "更多" (More) page (Oct 21): the card is there and says factory images only accept keys; there's no root helper on a computer, so the backend replies "没装小助手" (helper not installed) and the card states that as is, without an error
   await js(`location.hash = '#/settings'`);
   await waitFor(`!!document.querySelector('.ssh-settings')`, '更多页的 SSH 卡片', 20000);
   await waitFor(`!/正在读/.test(document.querySelector('.ssh-settings .ssh-now')?.innerText || '正在读')`, 'SSH 卡片读到状态', 20000);
@@ -159,8 +159,8 @@ if (PHASE === 'ssh') {
 }
 
 if (PHASE === 'stance0') {
-  // 标定模式也能站（用户 10-21）：「站姿使能」能点，确认框点确定以后发 imu.op hold（fork hold-home），站姿卡写「标定模式（站着）」；
-  // 「失能（卸力）」也能点，发顶上同一个 relax，卸完回「标定模式（软着）」
+  // Calibration mode can stand too (user Oct 21): "站姿使能" (enable standing pose) is clickable; after confirming the dialog it sends imu.op hold (fork hold-home), and the stance card shows "标定模式（站着）" (calibration mode (standing));
+  // "失能（卸力）" (disable (relax)) is clickable too, sends the same relax as the top bar, and after relaxing returns to "标定模式（软着）" (calibration mode (limp))
   await js(`location.hash = '#/imu'`);
   await waitFor(`!!document.querySelector('.imu-stance')`, 'IMU 页的站姿卡', 20000);
   await waitFor(`/标定模式（软着）/.test(document.querySelector('.imu-stance .imu-stance-now')?.innerText || '')`, '站姿卡写着标定模式（软着）', 10000);
@@ -183,9 +183,9 @@ if (PHASE === 'stance0') {
 }
 
 if (PHASE === 'stance') {
-  // 运动模式：软着时「站姿使能」能点，发出去的跟遥控卡「站起来」一模一样；「失能」跟顶上「卸力」一样
+  // Motion mode: while limp, "站姿使能" (enable standing pose) is clickable and sends exactly the same as the remote card's "站起来" (stand up); "失能" (disable) is the same as the top "卸力" (relax)
   await fakeSet({ mode: 'motion', calib: 'committed', posture: 'limp', restart: 0.4 });
-  await sleep(3000);       // 刚卸力 2 秒内不接受让它动的指令（按钮会灰），手柄快照也 1 秒才刷新：等它过去
+  await sleep(3000);       // within 2 seconds of relaxing, commands that make it move are not accepted (button grayed out), and the gamepad snapshot only refreshes every 1 second: wait it out
   await js(`location.hash = '#/imu'`);
   await waitFor(`!!document.querySelector('.imu-stance')`, 'IMU 页的站姿卡', 20000);
   await waitFor(`(() => { const b = document.querySelector('.imu-stance .imu-stand'); return !!b && !b.disabled; })()`,
@@ -193,23 +193,23 @@ if (PHASE === 'stance') {
   out.before = await stance();
   await shot('imu-stance-motion.png');
   await recordSends();
-  // 按钮亮着那一刻才点（在页面里等，免得查和点之间它又灰了）
+  // Click only at the moment the button is enabled (wait inside the page, so it doesn't gray out again between check and click)
   await js(`new Promise((ok) => { const t0 = Date.now(); const t = setInterval(() => {
     const b = document.querySelector('.imu-stance .imu-stand');
     if (b && !b.disabled) { clearInterval(t); b.click(); ok(true); } else if (Date.now() - t0 > 10000) { clearInterval(t); ok(false); } }, 50); })`);
-  // 假主程序不一定模拟「站起来」的过程：要验的是发出去的命令跟遥控卡「站起来」一样（那条路真机上是通的）
+  // The fake main program doesn't necessarily simulate the "stand up" process: what we verify is that the command sent is the same as the remote card's "站起来" (stand up) (that path works on real hardware)
   await waitFor(`(window.__sent || []).some((m) => m.name === 'pad.op' && m.args && m.args.op === 'stand')`, '点了站姿使能以后发出站起来', 5000);
   out.standSent = await sentStand();
   await waitFor(`/现在：站着/.test(document.querySelector('.imu-stance .imu-stance-now')?.innerText || '')`,
     '第一条站立命令实际完成，再重置遥控场景', 15000);
   out.standing = await stance();
   await fakeSet({ posture: 'limp' });
-  await sleep(3000);       // 同上：刚变软 2 秒内后端不接受站起来（按钮靠 1 秒一次的手柄快照，可能还亮着），点了会被拒
+  await sleep(3000);       // same as above: within 2 seconds of going limp the backend doesn't accept stand-up (the button relies on the once-per-second gamepad snapshot and may still be enabled), so a click would be rejected
   await js(`location.hash = '#/pad'`);
   try {
     await waitFor(`(() => { const b = ${remoteStand}; return !!b && !b.disabled; })()`, '遥控卡「站起来」能点', 20000);
   } catch (e) {
-    // 偶发（全套一起跑、机器忙时）：把遥控卡每个按钮的字、灰没灰、为什么灰都带上
+    // Occasional (when running the whole suite with a busy machine): include each remote card button's text, whether it is grayed out and why
     const why = await js(`[...document.querySelectorAll('.pd-remote .pd-big')].map((x) => (x.querySelector('b')?.textContent || '?') + '|' + (x.disabled ? '灰' : '亮') + '|' + (x.title || '')).join(' ; ')`);
     throw new Error(`${e.message} ／ 遥控卡按钮：${why}`);
   }
@@ -228,7 +228,7 @@ if (PHASE === 'stance') {
 }
 
 if (PHASE === 'mark') {
-  // 出厂：舵机零位那一行主程序说 15 颗没标（hard）。以前「跳过」灰着、也没有「已完成」；现在点两次能标（用户 10-20）
+  // Factory: the servo zero position row has the main program saying 15 servos are uncalibrated (hard). Previously "跳过" (skip) was grayed out and there was no "已完成" (done); now clicking twice marks it (user Oct 20)
   const servoRow = `document.querySelector('.onb-row[data-step="servo"]')`;
   const servoCheck = `[...(${card}?.querySelectorAll('.onb-checks li') || [])].find((li) => li.innerText.includes('舵机零位'))`;
   await waitFor(`!!${servoRow} && !!${card} && !!(${servoCheck})`, '第 1 步和第 3 步的准备情况', 20000);
@@ -239,9 +239,9 @@ if (PHASE === 'mark') {
   }
   await waitFor(`!!${servoRow}.querySelector('.two-step-ask')`, '「已完成」的第二下（写着后果）', 5000);
   out.ask = await js(`${servoRow}.querySelector('.two-step-ask').textContent`);
-  out.afterOne = await js(`${servoRow}.querySelector('.onb-mark').getAttribute('aria-label')`);   // 点一下不算
+  out.afterOne = await js(`${servoRow}.querySelector('.onb-mark').getAttribute('aria-label')`);   // a single click doesn't count
   await shot('commit-mark-servo-ask.png');
-  await sleep(900);                                                  // TwoStep 的 700 ms 保护
+  await sleep(900);                                                  // TwoStep's 700 ms guard
   await js(`${servoRow}.querySelector('.two-step-ask').click()`);
   await waitFor(`${servoRow}.querySelector('.onb-mark')?.getAttribute('aria-label') === '完成'`, '第 1 步变成 ✓', 10000);
   await waitFor(`(${servoCheck})?.classList.contains('ok')`, '第 3 步「舵机零位」变绿', 10000);
@@ -364,10 +364,10 @@ if (PHASE === 'imu' || PHASE === 'imu-hold') {
   await waitFor(`!!document.querySelector('.imu-coarse input[type=checkbox]') || /交给主程序验证/.test(document.querySelector('.imu-coarse')?.innerText || '')`,
     '粗校算出方向、等确认', 25000);
   await js(`[...document.querySelectorAll('.imu-coarse input[type=checkbox]')].forEach((x) => { if (!x.checked) x.click(); })`);
-  await fakeSet({ imu_verify_plan: 'ok' });        // 开发用剧本：主程序先看到摆正，再看到往前低头
+  await fakeSet({ imu_verify_plan: 'ok' });        // dev script: the main program first sees it level, then sees the head tilted forward
   await waitFor(`!![...document.querySelectorAll('.imu-coarse button')].find((b) => b.textContent === '交给主程序验证' && !b.disabled)`, '原粗校验证按钮就绪');
   if (!await clickHas('.imu-coarse button', '交给主程序验证')) throw new Error('找不到「交给主程序验证」');
-  // 验证成功后主程序里 verified 变成 true，粗校卡会收起：看 IMU 页顶部状态变成「方向已确认」。
+  // After verification succeeds, verified becomes true in the main program and the coarse-calibration card collapses: check that the IMU page's top status becomes "方向已确认" (orientation confirmed).
   await waitFor(`/方向已确认/.test(document.querySelector('.sv-metrics')?.innerText || '')`,
     'verify-imu 成功', 40000);
   out.imu = await js(`[document.querySelector('.sv-metrics')?.innerText || '',
@@ -416,9 +416,9 @@ if (PHASE === 'commit' || PHASE === 'fail') {
   await js(`${writeBtn}.click()`);
   await waitFor(`!!document.querySelector('[data-step="commit"] .two-step-ask')`, '二次确认', 5000);
   out.confirmText = await js(`document.querySelector('[data-step="commit"] .two-step-ask')?.textContent`);
-  await sleep(900);       // TwoStep 的 700 ms 保护
+  await sleep(900);       // TwoStep's 700 ms guard
   await js(`document.querySelector('[data-step="commit"] .two-step-ask').click()`);
-  // 写入很快时，回执会被最终结果直接替换（甚至第 3 步已经 ✓、卡片收起）：等到回执、进度卡或完成都行。
+  // When writing is fast, the receipt is replaced directly by the final result (step 3 may already be ✓ and the card collapsed): waiting for the receipt, the progress card or completion is all fine.
   await waitFor(`/已经在写|开始写/.test(document.querySelector('[data-step="commit"] .onb-commit-msg')?.innerText || '') ||
     !!document.querySelector('[data-step="commit"] .onb-commit-job') ||
     document.querySelector('[data-step="commit"] .onb-mark')?.getAttribute('aria-label') === '完成'`,
@@ -426,7 +426,7 @@ if (PHASE === 'commit' || PHASE === 'fail') {
   out.started = await snapshot();
 
   if (PHASE === 'fail') {
-    // 假小助手会让假主程序重启一下：断线期间第 3 步的进度卡要单独显示
+    // The fake helper makes the fake main program restart briefly: during the disconnect, step 3's progress card must be shown on its own
     let offline = null;
     const end = Date.now() + 25000;
     while (Date.now() < end) {
@@ -440,7 +440,7 @@ if (PHASE === 'commit' || PHASE === 'fail') {
     await shot('commit-fail-offline.png');
     await waitFor(`(() => { const m = document.querySelector('[data-step="commit"] .onb-commit-msg.bad');
       return /标定没通过主程序的检查/.test(m?.innerText || ''); })()`, '失败原因', 30000);
-    // 回滚要把主程序重新拉成标定模式：等它回来、标定读得到，第 3 步才会从「读不到」变回「该做」。
+    // Rollback has to bring the main program back into calibration mode: wait for it to come back with calibration readable; only then does step 3 change from "读不到" (unreadable) back to "该做" (to do).
     await waitFor(`document.querySelector('[data-step="commit"] .onb-mark')?.getAttribute('aria-label') === '该做'`,
       '主程序回来后第 3 步回到该做', 30000);
     out.wsCommit = await js(`(async () => {

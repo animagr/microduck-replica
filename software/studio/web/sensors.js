@@ -203,7 +203,7 @@ function useCameraSession({ api, video, active = true, inline = false }) {
           return;
         }
       }
-      // https 页面直连明文 8443 会被浏览器当混合内容挡掉，改走同域的 /media-ws（nginx 转给本机 8443）
+      // an https page connecting directly to plaintext 8443 gets blocked by the browser as mixed content, so go through the same-origin /media-ws instead (nginx forwards to local 8443)
       const proxyPath = typeof location !== 'undefined' && location.protocol === 'https:' ? '/media-ws' : null;
       transport.start(info?.signaling_port ?? 8443, proxyPath);
     };

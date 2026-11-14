@@ -1,22 +1,22 @@
-"""舵机页的全部操作：照搬 servo-web 的 server.py（同仓库 tools/servo-web v0.15.4，我们自己的代码，真机验证过）。
+"""All operations of the servo page: ported from servo-web's server.py (tools/servo-web v0.15.4 in this repo, our own code, verified on real hardware).
 
-搬过来的：
-- 扭矩开 / 关：开之前先把目标对准当前读数；
-- 拖滑块写目标；平滑 / 流式两种运动方式；目标回读、没收到的重发；「停」；
-- 官方姿势（零位 / 站 / 坐 / 折叠，折叠时膝只折 88°）；存的姿态（存、发、删进回收站）；
-- 中位校准：单颗 / 一键；先预览；探偏移符号；关扭矩回读确认；0x0B 不认就兜底写寄存器 31；补重力下垂；
-  收尾永远把目标写成当前读数；备份、撤销；校准后存的姿态跟着换算；
-- 扫描（已知 / 指定 / 全网 0–253）、导出寄存器 0–86、写寄存器（EEPROM 解锁写）、改 ID、重启 0x08、
-  sync_read 时序测试、方向 ±；
-- 灵动（头部随机小动作）：servo-web 是在网页里跑的，这里搬到后端线程里跑，页面关了也能停。
+Ported:
+- Torque on / off: before turning on, align the target with the current reading;
+- Drag a slider to write a target; smooth / streaming motion modes; target readback with resend of missed ones; "stop";
+- Official poses (zero position / stand / sit / fold; when folding the knee only folds 88°); saved poses (save, send, delete to trash);
+- Center calibration: single / one-click; preview first; probe the offset sign; confirm torque-off by readback; if 0x0B isn't recognized, fall back to writing register 31; compensate gravity droop;
+  the wrap-up always writes the target as the current reading; backup, undo; saved poses are converted along with calibration;
+- Scan (known / specified / full range 0–253), dump registers 0–86, write registers (EEPROM unlocked write), change ID, reboot 0x08,
+  sync_read timing test, direction ±;
+- Liveliness (small random head motions): servo-web runs it in the web page; here it moves to a backend thread, so it can be stopped even when the page is closed.
 
-Studio 改的（用户要求和方案审查）：
-- **卸力锁住**（session.latched）以后，上力、写目标、运动、校准、撤销、写寄存器、改 ID 一律拒绝，要人点「解除锁定」；
-- **校完自动保持**（用户：中位校准做完要立刻保持）：成功的那几颗走「对准再上力」；
-- **校准基准只用官方零位 2048**（用户：不用折叠）；
-- **上力的软硬跟主程序一样**（用户 10-19）：每条上力的路上，开扭矩之前先把 RAM 里的 P / D / 限力写成主程序上力时的
-  （参数文件，没有就 P5 · D0 · 限力 1000），写不进去不上力；见 MainGains、apply_gains；
-- 文件放在 Studio 的 state 目录（servo-calib/、servo-poses/）；模拟模式的校准备份放临时目录，不跟真舵机混。
+What Studio changed (user requests and plan review):
+- Once **relax is latched** (session.latched), torque-up, writing targets, motion, calibration, undo, register writes and ID changes are all refused, until the user clicks "解除锁定" (release lock);
+- **Hold automatically after calibration** (user: hold immediately after center calibration): the servos that succeeded go through "align, then torque up";
+- **Calibration reference is only the official zero position 2048** (user: don't use fold);
+- **Torque-up stiffness is the same as the main program** (user Oct 19): on every torque-up path, before turning torque on, the P / D / torque limit in RAM are first written to what the main program uses when torquing up
+  (the parameter file, or if absent P5 · D0 · torque limit 1000); if they can't be written, no torque-up; see MainGains, apply_gains;
+- Files live in Studio's state directory (servo-calib/, servo-poses/); calibration backups in simulation mode go to a temp directory so they don't mix with real servos.
 """
 import json
 import math
@@ -28,17 +28,17 @@ import threading
 import time
 
 from .bus import feetech
-from .servo import IDS, Refused  # noqa: F401 —— Refused 放在 servo.py（会话的 op_begin 也要抛它），这里照旧导出
+from .servo import IDS, Refused  # noqa: F401 -- Refused lives in servo.py (the session's op_begin raises it too); re-exported here as before
 
-CALIB_TOLERANCE = 2      # 校准后读数离目标多少步算到位
-DROOP_TOLERANCE = 3      # 关扭矩那几毫秒关节垂了多少步以内就不补偿
-OFFSET_LIMIT = 2047      # 偏移寄存器 31 的安全量程（|偏移| ≤ 2047 几种编码理解都一致，超出不写）
-CALIB_BIG_DEG = 30       # 摆好的位置离目标差这么多度以上：页面再确认一次，日志单独列出来（不拦）
-FOLD_KNEE_SEND = 88 * math.pi / 180     # 发「折叠」时膝只折 88°：官方 90° 会让踝顶着大腿上的舵机
+CALIB_TOLERANCE = 2      # how many steps from the target after calibration count as reached
+DROOP_TOLERANCE = 3      # if the joint droops within this many steps during the few milliseconds of torque-off, don't compensate
+OFFSET_LIMIT = 2047      # safe range of offset register 31 (with |offset| ≤ 2047 all encoding interpretations agree; beyond that, don't write)
+CALIB_BIG_DEG = 30       # if the posed position is this many degrees or more from the target: the page asks for confirmation again and the log lists it separately (not blocked)
+FOLD_KNEE_SEND = 88 * math.pi / 180     # when sending "fold" the knee only folds 88°: the official 90° makes the ankle press against the servo on the thigh
 JOINT = {20: "left_hip_yaw", 21: "left_hip_roll", 22: "left_hip_pitch", 23: "left_knee", 24: "left_ankle",
          30: "neck_pitch", 31: "head_pitch", 32: "head_yaw", 33: "head_roll", 34: "mouth",
          10: "right_hip_yaw", 11: "right_hip_roll", 12: "right_hip_pitch", 13: "right_knee", 14: "right_ankle"}
-# 官方姿势：microduck_rl scene.xml 的 keyframe（跟 servo-web 同一份），弧度、模型约定，按舵机号。嘴只有零位带
+# Official poses: keyframes from microduck_rl scene.xml (the same file as servo-web), radians, model convention, by servo ID. Only zero position includes the mouth
 OFFICIAL = {
     "zero": ("零位", {i: 0.0 for i in IDS}),
     "stand": ("站", {20: 0, 21: -0.0873, 22: -0.4579, 23: -0.0049, 24: 0.453, 30: 0.3491, 31: 0.3491, 32: 0, 33: 0,
@@ -48,28 +48,28 @@ OFFICIAL = {
     "fold": ("折叠", {20: 0, 21: 0, 22: 1.57, 23: 1.57, 24: 0, 30: 1, 31: 1, 32: 0, 33: 0,
                       10: 0, 11: 0, 12: -1.57, 13: -1.57, 14: 0}),
 }
-# 写这些寄存器后果严重：页面标红并写明后果（审查 G3）
+# Writing these registers has serious consequences: the page marks them red and states the consequence (review G3)
 DANGER = {5: "ID：改了会撞号，总线上只能接这一颗再改", 6: "波特率：改了就失联", 8: "应答级别：改成 0 写指令就不回包",
           9: "最小角度限制", 11: "最大角度限制", 19: "卸载条件（保护开关）：关掉过热过流就不自动卸",
           33: "运行模式：改成速度模式舵机会一直转", 40: "扭矩开关：用页面上的开关，别在这里写"}
 DEG = 4096 / 360
-# 灵动：每个动作 [相对中心的度数, 秒]。32 yaw、33 roll、31 头 pitch、30 颈 pitch、34 嘴（正 = 张）。{} = 停住
+# Liveliness: each action is [degrees relative to center, seconds]. 32 yaw, 33 roll, 31 head pitch, 30 neck pitch, 34 mouth (positive = open). {} = hold still
 GESTURES = [
-    (3, lambda s: [({33: 14 * s, 32: 8 * s}, 0.5), ({}, random.uniform(0.6, 1.4)), ({33: 0, 32: 0}, 0.6)]),           # 歪头
-    (3, lambda s: [({32: 30 * s, 33: -5 * s, 31: 4}, 0.6), ({}, random.uniform(0.8, 1.8)), ({32: 0, 33: 0, 31: 0}, 0.7)]),  # 看一边
-    (2, lambda s: [({32: -20}, 0.3), ({32: 20}, 0.38), ({32: -12}, 0.32), ({32: 0}, 0.35)]),                            # 摇头
-    (2, lambda s: [({31: 12}, 0.3), ({31: -7}, 0.34), ({31: 6}, 0.3), ({31: 0}, 0.35)]),                                # 点头
-    (2, lambda s: [({34: 16}, 0.22), ({34: 0}, 0.26), ({34: 13}, 0.22), ({34: 0}, 0.28)]),                              # 嘎嘎两下
-    (2, lambda s: [({33: 12 * s, 31: -8, 34: 9}, 0.55), ({}, random.uniform(0.5, 1.0)), ({34: 0}, 0.25), ({33: 0, 31: 0}, 0.6)]),  # 好奇
-    (2, lambda s: [({32: 18 * s, 31: 6}, 0.45), ({32: -18 * s, 31: 6}, 0.7), ({32: 0, 31: 0}, 0.5)]),                   # 扫视
-    (1, lambda s: [({33: 7, 32: 6}, 0.18), ({33: -7, 32: -6}, 0.2), ({33: 0, 32: 0}, 0.25)]),                           # 抖一下
+    (3, lambda s: [({33: 14 * s, 32: 8 * s}, 0.5), ({}, random.uniform(0.6, 1.4)), ({33: 0, 32: 0}, 0.6)]),           # head tilt
+    (3, lambda s: [({32: 30 * s, 33: -5 * s, 31: 4}, 0.6), ({}, random.uniform(0.8, 1.8)), ({32: 0, 33: 0, 31: 0}, 0.7)]),  # look to one side
+    (2, lambda s: [({32: -20}, 0.3), ({32: 20}, 0.38), ({32: -12}, 0.32), ({32: 0}, 0.35)]),                            # shake head
+    (2, lambda s: [({31: 12}, 0.3), ({31: -7}, 0.34), ({31: 6}, 0.3), ({31: 0}, 0.35)]),                                # nod
+    (2, lambda s: [({34: 16}, 0.22), ({34: 0}, 0.26), ({34: 13}, 0.22), ({34: 0}, 0.28)]),                              # quack twice
+    (2, lambda s: [({33: 12 * s, 31: -8, 34: 9}, 0.55), ({}, random.uniform(0.5, 1.0)), ({34: 0}, 0.25), ({33: 0, 31: 0}, 0.6)]),  # curious
+    (2, lambda s: [({32: 18 * s, 31: 6}, 0.45), ({32: -18 * s, 31: 6}, 0.7), ({32: 0, 31: 0}, 0.5)]),                   # scan around
+    (1, lambda s: [({33: 7, 32: 6}, 0.18), ({33: -7, 32: -6}, 0.2), ({33: 0, 32: 0}, 0.25)]),                           # quick shake
 ]
 CAT = {"运动": "总线", "寄存器": "总线", "方向": "校准", "姿态": "校准"}
 
 
 def enc_sm(v):
-    """符号-幅值编码：寄存器 31（偏移）、42（目标位置）、46（速度）都是 BIT15 当方向位，不是补码。
-    写 -5 要写 0x8005；写成 0xFFFB 舵机会理解成 -32763，然后满速撞限位。"""
+    """Sign-magnitude encoding: registers 31 (offset), 42 (target position) and 46 (speed) all use BIT15 as the direction bit, not two's complement.
+    To write -5, write 0x8005; written as 0xFFFB the servo reads it as -32763 and then slams into the limit at full speed."""
     v = int(v)
     return (0x8000 | (-v & 0x7FFF)) if v < 0 else (v & 0x7FFF)
 
@@ -83,13 +83,13 @@ def fmt_off(v):
 
 
 def _ack(err):
-    """写指令的应答：0 = 正常；None = 没回包；别的 = 舵机状态位有报警。"""
+    """Response to a write instruction: 0 = OK; None = no reply; anything else = the servo status bits report an alarm."""
     return "✓" if err == 0 else ("（没应答）" if err is None else f"（状态 0x{err:02X}）")
 
 
 def infer_offset_sign(before, after, d_off, slack=8):
-    """从一次校准反推偏移方向：读数从 before 变到 after，偏移变了 d_off。读数 = 原始 + s × 偏移，所以 after − before ≈ s × d_off
-    （中间关节可能又垂了几步，留 slack）。只有一个方向对得上、另一个明显对不上才算数；偏移变得太少分不清，回 None。"""
+    """Infer the offset direction from one calibration: the reading changed from before to after, and the offset changed by d_off. Reading = raw + s × offset, so after − before ≈ s × d_off
+    (the joint may have drooped a few more steps in between, so allow slack). It only counts if one direction matches and the other clearly doesn't; if the offset changed too little to tell, returns None."""
     if before is None or after is None or d_off is None or abs(d_off) < 4:
         return None
     moved = after - before
@@ -101,7 +101,7 @@ def infer_offset_sign(before, after, d_off, slack=8):
 
 
 def parse_ids(text):
-    """「20-24,30-34,10-14」→ [20..24, 30..34, 10..14]。"""
+    """"20-24,30-34,10-14" → [20..24, 30..34, 10..14]."""
     out = []
     for part in str(text or "").replace("，", ",").split(","):
         part = part.strip()
@@ -117,17 +117,17 @@ def parse_ids(text):
     return out
 
 
-# ---------------- 上力时的 P / D / 限力：跟主程序一样（用户 10-19） ----------------
-# 「P、D 那些应该跟主程序保持一致，也是默认 P5、D0、限力 1000」：Studio 给舵机上力时写的软硬，跟主程序（我们的 fork robotd）
-# 上力时写的一样，不用舵机 EEPROM 里的出厂值（P32 / D40，硬得多）。
-# 这样调舵机时的软硬跟走路时一样；以后「不卸力交接」主程序核对得过，也不用换 P（带载关节换 P 会塌一下）。
+# ---------------- P / D / torque limit at torque-up: same as the main program (user Oct 19) ----------------
+# "P, D and so on should match the main program, i.e. default P5, D0, torque limit 1000": the stiffness Studio writes when torquing up the servos is the same as what the main program (our fork of robotd)
+# writes when torquing up, not the factory values in the servo EEPROM (P32 / D40, much stiffer).
+# That way the stiffness while tuning servos is the same as while walking; and a future "hand-over without relax" will pass the main program's check without changing P (changing P on a loaded joint makes it sag briefly).
 ROBOT_ETC = "/etc/robot/feetech-ft5"
-SERVO_PARAMS = ROBOT_ETC + "/servo-test-parameters.json"       # 标定文件同目录（fork hd1910_test.rs:21-22）
-ROBOTD_TOMLS = (ROBOT_ETC + "/robotd.toml", "/etc/robot/robotd.toml")   # 跟 onboard.ROBOTD_CONFIGS 同一份
-POLICY_DIR = "/opt/robot/policies/current"                     # [policy] walk 没写时的目录（fork robotd-params lib.rs:41、1611-1666）
-DEFAULT_GAINS = (5, 0, 1000)      # V167 没参数文件：P = firmware_p() 没合约时 5（deployment.rs:78-80），D0、限力 1000（hd1910.rs:257-267）
+SERVO_PARAMS = ROBOT_ETC + "/servo-test-parameters.json"       # same directory as the calibration file (fork hd1910_test.rs:21-22)
+ROBOTD_TOMLS = (ROBOT_ETC + "/robotd.toml", "/etc/robot/robotd.toml")   # same list as onboard.ROBOTD_CONFIGS
+POLICY_DIR = "/opt/robot/policies/current"                     # directory used when [policy] walk isn't set (fork robotd-params lib.rs:41, 1611-1666)
+DEFAULT_GAINS = (5, 0, 1000)      # V167 without a parameter file: P = 5 when firmware_p() has no contract (deployment.rs:78-80), D0, torque limit 1000 (hd1910.rs:257-267)
 GAIN_REGS = {21: "EEPROM 的 P", 22: "EEPROM 的 D", 48: "限力", 49: "限力高字节", 50: "P", 51: "D"}
-GAINS_RECHECK_S = 3.0             # 页面每秒 10 帧要看「软硬」：文件最多每 3 秒 stat 一次，mtime 变了才重读
+GAINS_RECHECK_S = 3.0             # the page looks at "stiffness" at 10 frames per second: stat the file at most every 3 seconds, re-read only if mtime changed
 
 
 def _stat(path):
@@ -139,8 +139,8 @@ def _stat(path):
 
 
 def load_servo_params(path):
-    """照 fork hd1910_test.rs:21-42 读 servo-test-parameters.json：正好 kp、kd、torque_limit 三个键（deny_unknown_fields），
-    都是整数（serde 的 u8/u16 不收 5.0、true），P 1–32、D 0–64、限力 200–1000。不合法抛 ValueError（说清哪一条）。"""
+    """Reads servo-test-parameters.json the way fork hd1910_test.rs:21-42 does: exactly the three keys kp, kd, torque_limit (deny_unknown_fields),
+    all integers (serde's u8/u16 reject 5.0 and true), P 1–32, D 0–64, torque limit 200–1000. Raises ValueError if invalid (saying which rule)."""
     def pairs(items):
         keys = [k for k, _ in items]
         if len(set(keys)) != len(keys):
@@ -163,21 +163,21 @@ def load_servo_params(path):
 
 
 def _walk_contract(toml_path):
-    """robotd.toml 的 [policy] walk → 那个模型目录里的 deployment-contract.json（fork deployment.rs:147-150）。
-    walk 没写或写 "none"：按 mode 用默认（walk 模式 velstand.onnx，roller 模式 roller.onnx，在 POLICY_DIR 里）。"""
-    import tomllib     # noqa: PLC0415 —— Python 3.11+；鸭子上是 3.11
+    """robotd.toml's [policy] walk → deployment-contract.json in that model directory (fork deployment.rs:147-150).
+    If walk isn't set or is "none": use the default by mode (walk mode velstand.onnx, roller mode roller.onnx, in POLICY_DIR)."""
+    import tomllib     # noqa: PLC0415 -- Python 3.11+; the duck has 3.11
     with open(toml_path, "rb") as f:
         policy = tomllib.load(f).get("policy") or {}
     walk = policy.get("walk")
     if not isinstance(walk, str) or not walk.strip() or walk.strip().lower() == "none":
         walk = POLICY_DIR + "/" + ("roller.onnx" if policy.get("mode") == "roller" else "velstand.onnx")
     elif not (walk.startswith("/") or os.path.isabs(walk)):
-        walk = "/" + walk                 # 相对路径：robotd 在 systemd 下工作目录是 /（isabs 那半是给电脑上的测试）
+        walk = "/" + walk                 # relative path: under systemd robotd's working directory is / (the isabs half is for tests on a computer)
     return walk.rsplit("/", 1)[0] + "/deployment-contract.json"
 
 
 def contract_kp(path):
-    """走路模型合约里训练用的舵机 P：model.actuators[0].kp_fw，整数 1–32（fork deployment.rs:556-568）。不合法抛 ValueError。"""
+    """The servo P used in training from the walking model contract: model.actuators[0].kp_fw, integer 1–32 (fork deployment.rs:556-568). Raises ValueError if invalid."""
     with open(path, encoding="utf-8") as f:
         v = json.load(f)
     acts = ((v.get("model") or {}).get("actuators")) if isinstance(v, dict) else None
@@ -190,19 +190,19 @@ def contract_kp(path):
 
 
 class MainGains:
-    """主程序上力时给舵机的 P / D / 限力（fork robotd 的两条路，duck-control/src/hd1910.rs:106-191）：
-    1. 有 servo-test-parameters.json 且合法：用它（arm_with_file）；
-    2. 没有：V167 原版——P = 走路模型合约的 kp_fw（robotd selftrained_profile.rs:11-27 装进 firmware_p），D = 0，限力 = 1000；
-       合约读不到 P 按 5（firmware_p() 的默认）；
-    3. 文件坏 / 超范围：主程序会停在「等总线」、不上力（fork docs/project/replica-v167.zh-CN.md:16、39）。Studio 用 2 并记一条 warn。
-    电脑上（--bench 台架、演示舵机）没有这些文件，就是 5 / 0 / 1000。按 mtime 缓存：文件没变不重读。
-    get() 回 {"kp", "kd", "limit", "source"（「参数文件」/「主程序默认」）, "detail", "warn"}。"""
+    """The P / D / torque limit the main program gives the servos when torquing up (the two paths of the fork robotd, duck-control/src/hd1910.rs:106-191):
+    1. servo-test-parameters.json exists and is valid: use it (arm_with_file);
+    2. Absent: V167 stock -- P = the walking model contract's kp_fw (loaded into firmware_p by robotd selftrained_profile.rs:11-27), D = 0, torque limit = 1000;
+       if P can't be read from the contract, use 5 (firmware_p()'s default);
+    3. File broken / out of range: the main program stays at "waiting for bus" and doesn't torque up (fork docs/project/replica-v167.zh-CN.md:16, 39). Studio uses 2 and logs a warn.
+    On a computer (--bench mode, demo servos) none of these files exist, so it's 5 / 0 / 1000. Cached by mtime: not re-read if the file hasn't changed.
+    get() returns {"kp", "kd", "limit", "source" ("参数文件" (parameter file) / "主程序默认" (main program default)), "detail", "warn"}."""
 
     def __init__(self, params_path=SERVO_PARAMS, robotd_tomls=ROBOTD_TOMLS, log=None):
         self.params_path, self.robotd_tomls, self.log = params_path, tuple(robotd_tomls), log
         self._lock = threading.Lock()
         self._key, self._value, self._checked = None, None, 0.0
-        self._walk = (None, None)          # (robotd.toml 的 key, 合约路径)：toml 没变不重新解析
+        self._walk = (None, None)          # (key from robotd.toml, contract path): not re-parsed if the toml hasn't changed
 
     def get(self, max_age=0.0):
         with self._lock:
@@ -254,7 +254,7 @@ class MainGains:
 
 
 def gains_bytes(g):
-    """RAM 48..51 一包：[限力低, 限力高, P, D]（fork hd1910_test.rs:44-47 payload）。"""
+    """One packet for RAM 48..51: [torque limit low, torque limit high, P, D] (fork hd1910_test.rs:44-47 payload)."""
     return struct.pack("<H", g["limit"]) + bytes([g["kp"], g["kd"]])
 
 
@@ -266,22 +266,22 @@ class ServoOps:
     def __init__(self, session, state_dir):
         self.s = session
         self.state_dir = state_dir
-        self.offset_sign = None          # +1：读数 = 原始 + 偏移；-1：读数 = 原始 − 偏移。手册没写死，校准前探一次
-        self.speed_unit = 1.0            # 速度寄存器 46 一个单位 = 多少步/秒（相位 18 BIT2 决定）
-        self.max_speed_reg = 3000        # 「不限速」写多少（相位 BIT3=1 时 0 = 最快）
+        self.offset_sign = None          # +1: reading = raw + offset; -1: reading = raw − offset. The manual doesn't pin it down, so probe once before calibrating
+        self.speed_unit = 1.0            # one unit of speed register 46 = how many steps/second (determined by phase 18 BIT2)
+        self.max_speed_reg = 3000        # what to write for "no speed limit" (when phase BIT3=1, 0 = fastest)
         self.stream_last = {}
-        self.calib_lock = threading.Lock()   # 校准期间不让状态轮询抢总线（关扭矩的窗口里关节会垂）
+        self.calib_lock = threading.Lock()   # during calibration, state polling may not grab the bus (the joint droops in the torque-off window)
         self._motion = None
         self._motion_stop = threading.Event()
         self.idle_running = False
         self._idle_thread = None
         self._sim_calib_dir = None
-        # 上力用的 P / D / 限力（跟主程序一样，MainGains）；manual：寄存器面板手动写过的 P/D/限力 {id: {地址: 读回值}}
+        # P / D / torque limit for torque-up (same as the main program, MainGains); manual: P/D/torque limit written manually from the register panel {id: {address: read-back value}}
         self.gains = MainGains(log=self.log)
         self.manual = {}
         self._gains_logged = None
 
-    # ---- 小工具 ----
+    # ---- Small helpers ----
 
     @property
     def bus(self):
@@ -322,7 +322,7 @@ class ServoOps:
         return self.bus.write_u16(i, 31, enc_sm(v))
 
     def wait_off_change(self, i, was, ms=20):
-        """写完偏移就轮询它落地没有，最多等 ms 毫秒（落地通常 1~2 ms；固定睡 20 ms 等于白送重力下垂）。"""
+        """After writing the offset, poll until it lands, waiting at most ms milliseconds (it usually lands in 1~2 ms; a fixed 20 ms sleep just hands over free gravity droop)."""
         end = time.monotonic() + ms / 1000.0
         off = was
         while True:
@@ -331,7 +331,7 @@ class ServoOps:
                 return off, off != was
 
     def read_phase(self):
-        """开总线时读一次相位 18，确定速度单位；保留舵机现有的速度、加速度和目标。"""
+        """When opening the bus, read phase 18 once to determine the speed unit; keep the servo's existing speed, acceleration and target."""
         if self.s.sim:
             return
         try:
@@ -343,17 +343,17 @@ class ServoOps:
             self.log(f"读相位失败，速度单位按 1 步/秒：{type(e).__name__}: {e}", "系统", "warn")
 
     def release_speed(self, ids):
-        """放开速度上限、加速度设最大（41 = 0，46 = 不限速）。只写这两个，**不碰目标 42**。"""
+        """Lift the speed cap and set acceleration to max (41 = 0, 46 = no speed limit). Only writes these two, **doesn't touch target 42**."""
         ids = list(ids)
         if ids:
             self.bus.sync_write(41, 1, [(i, bytes([0])) for i in ids])
             self.bus.sync_write(46, 2, [(i, struct.pack("<H", enc_sm(self.max_speed_reg))) for i in ids])
 
-    # ---- 上力时的 P / D / 限力（跟主程序一样） ----
+    # ---- P / D / torque limit at torque-up (same as the main program) ----
 
     def _read_gains(self, ids):
-        """RAM 48..51 回读（跟 fork hd1910_test.rs:70-81 verify 同一个 sync_read 48×4）；没回包的逐颗再读一次（总线偶尔丢一包）。
-        回 {id: 4 字节 或 None}；读到的顺手记进 session.static（表里显示运行中的 P / D / 限力）。"""
+        """Read back RAM 48..51 (the same sync_read 48×4 as fork hd1910_test.rs:70-81 verify); servos with no reply are re-read one by one (the bus occasionally drops a packet).
+        Returns {id: 4 bytes or None}; what is read is also recorded in session.static (the table shows the running P / D / torque limit)."""
         got = self.bus.sync_read(ids, 48, 4)
         out = {}
         for i in ids:
@@ -376,21 +376,21 @@ class ServoOps:
             self.log(f"上力用的软硬：P{g['kp']} · D{g['kd']} · 限力 {g['limit']}（跟主程序一样 · {g['source']}：{g['detail']}）")
 
     def _clear_manual(self, i):
-        """这颗运行中的 P / D / 限力又跟主程序一样了：手动改过的 RAM 那几项（48–51）不再算；EEPROM 的 21 / 22 还记着。"""
+        """This servo's running P / D / torque limit match the main program again: the manually changed RAM items (48–51) no longer count; EEPROM 21 / 22 are still remembered."""
         m = self.manual.get(i)
         if m:
-            for a in (47, 48, 49, 50, 51):            # 47：从 47 起写 2 字节也盖到了 48
+            for a in (47, 48, 49, 50, 51):            # 47: writing 2 bytes from 47 also covers 48
                 m.pop(a, None)
             if not m:
                 self.manual.pop(i, None)
 
     def apply_gains(self, ids):
-        """上力前：把这几颗（扭矩关着的）P / D / 限力写成主程序上力时的值（MainGains）。照 fork 有参数文件那条路的写法
-        （duck-control/src/hd1910.rs:159-191 arm_with_file、hd1910_test.rs:44-81）：RAM 48..51 一包 4 字节
-        [限力低, 限力高, P, D]，sync_write 写，sync_read 48×4 回读核对。不碰 EEPROM 21 / 22、不碰锁标志 55
-        （RAM 不受它管，fork 也不写）、不碰 52（I）/ 41（加速度）/ 46（速度）。
-        跟 fork 不一样的一处：只写回读跟要的不一样的那几颗（fork 每次 15 颗全写），没对上的再写一次。
-        回 {id: 原因}：读不到、写了读回不对的那几颗——调用方不给它们上力。"""
+        """Before torque-up: write these (torque-off) servos' P / D / torque limit to the main program's torque-up values (MainGains). Same as the fork's parameter-file path
+        (duck-control/src/hd1910.rs:159-191 arm_with_file, hd1910_test.rs:44-81): RAM 48..51 as one 4-byte packet
+        [torque limit low, torque limit high, P, D], written with sync_write and verified by sync_read 48×4 readback. Doesn't touch EEPROM 21 / 22, doesn't touch lock flag 55
+        (RAM isn't governed by it, and the fork doesn't write it either), doesn't touch 52 (I) / 41 (acceleration) / 46 (speed).
+        One difference from the fork: only writes the servos whose readback differs from the target (the fork writes all 15 every time), and writes again those that didn't match.
+        Returns {id: reason}: servos that can't be read or read back wrong after writing -- the caller doesn't torque them up."""
         ids = [int(i) for i in ids]
         if not ids:
             return {}
@@ -434,8 +434,8 @@ class ServoOps:
         return bad
 
     def check_gains(self, ids):
-        """已经上着力的：只核对、不写（fork 扭矩开着时 arm 也只核对：hd1910.rs:116-140、169-179；
-        上着力换 P 带载关节会塌一下）。回 {id: 说明}：跟主程序不一样的那几颗（照样算上着力，页头标黄）。"""
+        """For servos already torqued: only check, don't write (the fork's arm also only checks when torque is on: hd1910.rs:116-140, 169-179;
+        changing P while torqued makes a loaded joint sag briefly). Returns {id: note}: servos that differ from the main program (still counted as torqued; the page header shows yellow)."""
         ids = [int(i) for i in ids]
         if not ids:
             return {}
@@ -458,7 +458,7 @@ class ServoOps:
         return differ
 
     def _gains_then_torque(self, i, trail, label="开扭矩"):
-        """校准 / 撤销里给这一颗恢复扭矩：先写主程序的 P/D/限力（apply_gains），写不进去就不恢复。回恢复了没有。"""
+        """Restore torque on this servo during calibration / undo: first write the main program's P/D/torque limit (apply_gains); if that can't be written, don't restore. Returns whether it was restored."""
         bad = self.apply_gains([i])
         if bad:
             trail.append(f"✗{bad[i]}，扭矩没恢复")
@@ -467,9 +467,9 @@ class ServoOps:
         return True
 
     def gains_view(self, rows=None):
-        """页头「软硬：P5 · D0 · 限力 1000（跟主程序一样 · 来源）」要的。rows（snapshot 的每一行）顺手补上运行中的
-        P / D / 限力（RAM 50 / 51 / 48，开总线时、上力前、写寄存器后读的）和 gains_ok（跟主程序一样没有；读不到 None）。
-        在事件循环里调：不碰总线，文件最多每 GAINS_RECHECK_S 秒 stat 一次。"""
+        """What the page header "软硬：P5 · D0 · 限力 1000（跟主程序一样 · 来源）" (Stiffness: P5 · D0 · torque limit 1000 (same as main program · source)) needs. Also fills rows (each row of snapshot) with the running
+        P / D / torque limit (RAM 50 / 51 / 48, read when opening the bus, before torque-up and after register writes) and gains_ok (whether it matches the main program; None if unreadable).
+        Called in the event loop: doesn't touch the bus; the file is stat'ed at most every GAINS_RECHECK_S seconds."""
         g = self.gains.get(max_age=GAINS_RECHECK_S)
         want = (g["kp"], g["kd"], g["limit"])
         differ_on = []
@@ -485,20 +485,20 @@ class ServoOps:
         return {"kp": g["kp"], "kd": g["kd"], "limit": g["limit"], "source": g["source"], "detail": g["detail"],
                 "warn": g["warn"], "manual": manual, "differ_on": differ_on}
 
-    # ---- 扭矩 ----
+    # ---- Torque ----
 
     def torque_on_aligned(self, ids):
-        """开扭矩前先把目标（42）对准当前读数：手掰过、扭矩关着时发过姿势 / 校准过，目标里还是旧值，
-        一开扭矩舵机就冲过去。读扭矩 → 关着的写 P/D/限力（跟主程序一样，apply_gains）→ 读位置 → 写目标 = 位置
-        → 读 42 核对 → 开扭矩（跟 fork 的顺序一样：arm 写增益 → 预载测到的位置 → 扭矩开，feetech.rs:1836-1873）。
-        本来就开着的不动它的目标、也不改它的 P/D/限力（只核对）。P/D/限力写不进去、读不到位置、目标写不进去的那颗不开。"""
+        """Before turning torque on, align the target (42) with the current reading: if moved by hand, or a pose / calibration was sent while torque was off, the target still holds an old value,
+        and the servo would lunge there as soon as torque is on. Read torque → write P/D/torque limit for the torque-off ones (same as the main program, apply_gains) → read position → write target = position
+        → read 42 to verify → torque on (same order as the fork: arm writes gains → preload the measured position → torque on, feetech.rs:1836-1873).
+        Servos already on keep their target and P/D/torque limit unchanged (only checked). A servo whose P/D/torque limit can't be written, position can't be read, or target can't be written is not turned on."""
         self.guard()
         bus = self.bus
         tq = bus.sync_read(ids, 40, 1)
         already = [i for i in ids if tq.get(i) and tq[i][1][0] == 1]
         need = [i for i in ids if i not in already]
         aligned, bad = {}, {}
-        # 用户 10-19：上力的软硬跟主程序一样（不用 EEPROM 里的出厂 P32 / D40）。写不进去的那颗不开
+        # User Oct 19: torque-up stiffness is the same as the main program (not the factory P32 / D40 in EEPROM). A servo that can't be written is not turned on
         bad.update({i: w + "，没开扭矩" for i, w in self.apply_gains(need).items()})
         differ = self.check_gains(already)
         need = [i for i in need if i not in bad]
@@ -522,7 +522,7 @@ class ServoOps:
                 bad[i] = f"写目标出错（{type(e).__name__}: {e}），没开扭矩"
         on = already + [i for i in need if i in aligned]
         if on:
-            self.guard()                                   # 对准的这几毫秒里有人按了卸力：不开
+            self.guard()                                   # someone pressed relax during these few milliseconds of alignment: don't turn on
             bus.sync_write(40, 1, [(i, bytes([1])) for i in on])
         self.s._read_torque()
         self.log(f"扭矩开 → {on}" + (f"；开之前目标对准当前位置：" + " ".join(f"#{i}→{p}" for i, p in aligned.items()) if aligned else "")
@@ -538,7 +538,7 @@ class ServoOps:
         self.log(f"扭矩关 → {ids}", "运动")
         return {"off": ids}
 
-    # ---- 运动 ----
+    # ---- Motion ----
 
     def goal(self, sid, pos):
         self.guard()
@@ -547,7 +547,7 @@ class ServoOps:
         return {"id": sid, "pos": pos}
 
     def goals_verify(self, want):
-        """写目标并回读核对，没收到的重发，最多 4 轮。"""
+        """Write targets and verify by readback, resending missed ones, at most 4 rounds."""
         want = {int(i): max(0, min(4095, int(p))) for i, p in want.items()}
         attempt = 0
         for attempt in range(4):
@@ -562,8 +562,8 @@ class ServoOps:
         return {"missing": sorted(want), "attempts": attempt + 1}
 
     def move(self, goals, seconds=2.0, mode="profile", acc=30):
-        """从当前位置走到 goals（{id: 读数}）。profile = 平滑（舵机自己走梯形曲线）；stream = 流式（这边 20 Hz 插值）。
-        在后台线程里走，马上返回；「停」或卸力会打断它。"""
+        """Move from the current position to goals ({id: reading}). profile = smooth (the servo runs its own trapezoidal profile); stream = streaming (interpolated here at 20 Hz).
+        Runs in a background thread and returns immediately; "stop" or relax interrupts it."""
         self.guard()
         goals = {int(i): max(0, min(4095, int(p))) for i, p in goals.items() if int(i) in IDS}
         if not goals:
@@ -606,7 +606,7 @@ class ServoOps:
             self.log(f"运动出错：{type(e).__name__}: {e}", "运动", "error", exc=True)
 
     def _profile(self, want, seconds, acc):
-        """一次写 41..47 = 加速度(1) 目标(2) 时间(2)=0 速度(2)，舵机自己走梯形曲线。"""
+        """One write of 41..47 = acceleration(1) target(2) time(2)=0 speed(2); the servo runs its own trapezoidal profile."""
         self.guard()
         acc = max(1, min(254, acc))
         st = self.bus.states(list(want))
@@ -621,7 +621,7 @@ class ServoOps:
             self.stream_last.pop(i, None)
 
     def _stream(self, want, dt):
-        """连续流：每帧给目标，同时把速度上限设成「正好在 dt 内走到」，加速度最大。"""
+        """Continuous stream: give a target every frame, and set the speed cap to "arrive exactly within dt", with max acceleration."""
         self.guard()
         fresh = [i for i in want if i not in self.stream_last]
         if fresh:
@@ -637,7 +637,7 @@ class ServoOps:
         self.bus.sync_write(41, 7, items)
 
     def stop(self, quiet=False):
-        """停：打断正在走的过渡和灵动，把目标改成当前位置（平滑模式下舵机已经拿到终点在自己走，这样它停在原地）。"""
+        """Stop: interrupt ongoing transitions and liveliness, and set targets to the current position (in smooth mode the servo already has the endpoint and is moving on its own; this makes it stop in place)."""
         self._motion_stop.set()
         self.idle_running = False
         if self._motion and self._motion.is_alive():
@@ -667,7 +667,7 @@ class ServoOps:
         self.log(f"去官方姿势「{label}」（{seconds:g} 秒，{'平滑' if mode == 'profile' else '流式'}）", "运动")
         return self.move(goals, seconds, mode, acc)
 
-    # ---- 灵动 ----
+    # ---- Liveliness ----
 
     def idle(self, on):
         if not on:
@@ -724,7 +724,7 @@ class ServoOps:
         finally:
             self.idle_running = False
 
-    # ---- 中位校准 ----
+    # ---- Center calibration ----
 
     def backup_calibration(self, ids):
         rows = {}
@@ -745,7 +745,7 @@ class ServoOps:
         return fn, rows
 
     def probe_offset_sign(self, i):
-        """探一次偏移的符号方向：偏移 +1，看读数往哪边动（只动 1 步 0.09°，在校准窗口之外做）。"""
+        """Probe the offset sign once: offset +1, see which way the reading moves (moves only 1 step, 0.09°, done outside the calibration window)."""
         if self.offset_sign is not None:
             return self.offset_sign
         try:
@@ -770,7 +770,7 @@ class ServoOps:
             return None
 
     def calibrate_by_offset(self, i, target, trail):
-        """兜底：舵机连 0x0B 也不认时，自己算偏移写寄存器 31。没成功就把原偏移写回去。"""
+        """Fallback: when the servo doesn't even recognize 0x0B, compute the offset ourselves and write register 31. If it fails, write the original offset back."""
         o0, r0 = self.read_off(i), self.read_pos(i)
         signs = [self.offset_sign] if self.offset_sign else [1, -1]
         ok, pos, off = False, r0, o0
@@ -798,18 +798,18 @@ class ServoOps:
                     self.log(f"#{i} 兜底失败后还原偏移也失败了：{type(e).__name__}: {e}", "校准", "error")
 
     def calibrate_one(self, i, before, target=2048):
-        """一颗舵机的位置校准：让它「现在这个位置」的读数变成 target（2048 = 官方零位）。
-        判据不看应答，看偏移寄存器变没变（HD-1910 不认的指令也回「成功」）。
-        关扭矩期间关节被重力压下去：下垂 d = pre − target + 符号 × Δ偏移，算出来补偿。
-        收尾永远把目标写成当前读数（不写 target，判断错了也不会拉关节），扭矩复原，加锁，恢复速度。"""
+        """Position calibration of one servo: make the reading at "its current position" become target (2048 = official zero position).
+        The check doesn't look at the response but at whether the offset register changed (HD-1910 also replies "success" to instructions it doesn't recognize).
+        While torque is off, gravity pushes the joint down: droop d = pre − target + sign × Δoffset, computed and compensated.
+        The wrap-up always writes the target as the current reading (not target, so a wrong judgment won't pull the joint), restores torque, locks, and restores speed."""
         bus = self.bus
         was_on = before.get("torque") == 1
         old_off = before.get("offset")
         trail, step, ok, pre, pos, off, why = [], "限速", False, None, None, None, ""
         method, droop = "0x0B", 0
-        gains_bad = False             # 恢复扭矩前写 P/D/限力没写进去：收尾也不再恢复
+        gains_bad = False             # writing P/D/torque limit before restoring torque failed: the wrap-up won't restore it either
         try:
-            bus.write_u8(i, 41, 10)                                    # 万一判断错了，关节也是慢慢走
+            bus.write_u8(i, 41, 10)                                    # in case the judgment is wrong, the joint still moves slowly
             bus.write_u16(i, 46, enc_sm(200))
             step = "解锁"
             trail.append("解锁" + _ack(bus.unlock(i)))
@@ -819,13 +819,13 @@ class ServoOps:
             if was_on:
                 step = "关扭矩"
                 bus.write_u8(i, 40, 0)
-                if bus.read_u8(i, 40) != 0:                           # 这包丢了的话 0x0B 会在扭矩开着时执行
+                if bus.read_u8(i, 40) != 0:                           # if this packet is lost, 0x0B would run with torque on
                     bus.write_u8(i, 40, 0)
                     if bus.read_u8(i, 40) != 0:
                         raise feetech.BusError("关扭矩没生效（回读不是 0），不敢往下做")
                 trail.append("关扭矩✓")
-            # 关扭矩以后、0x0B 之前再读一次：偏移方向没探出来时（扭矩开着探不出：舵机会顶回目标，读数不动），
-            # 拿「这一刻的读数 → 0x0B 以后的读数」跟偏移变化对一下，就知道方向（10-19 二号鸭 #24 补反了三次）
+            # Read once more after torque-off and before 0x0B: when the offset direction hasn't been probed (it can't be probed with torque on: the servo pushes back to the target and the reading doesn't move),
+            # compare "the reading at this moment → the reading after 0x0B" with the offset change to learn the direction (Oct 19: duck #2's #24 was compensated the wrong way three times)
             post = self.read_pos(i) if was_on else pre
             step = "0x0B 位置校准"
             trail.append(f"0x0B→{target}" + _ack(bus.calibrate_to(i, target)))
@@ -847,7 +847,7 @@ class ServoOps:
                         self.offset_sign = sign
                         trail.append(f"偏移方向由这次校准推出：读数 = 原始 {'+' if sign > 0 else '−'} 偏移")
                 if sign is None:
-                    # 方向不知道就不补：猜错了会把误差翻一倍（以前默认 +1，HD-1910 实际是 −）
+                    # If the direction is unknown, don't compensate: guessing wrong doubles the error (it used to default to +1, but HD-1910 is actually −)
                     droop = 0
                     if abs(pre - pos) > DROOP_TOLERANCE:
                         trail.append("偏移方向推不出来，没补下垂（校完的零位可能差几步：关扭矩、手扶到位再校一次）")
@@ -863,7 +863,7 @@ class ServoOps:
             step = "写目标"
             trail.append(f"目标{pos}" + _ack(bus.write_u16(i, 42, enc_sm(pos))))
             if was_on and not self.s.halted:
-                step = "写 P/D/限力并开扭矩"                          # 上力前先写主程序的 P/D/限力，写不进去就不开（用户 10-19）
+                step = "写 P/D/限力并开扭矩"                          # before torque-up, first write the main program's P/D/torque limit; if that fails, don't turn on (user Oct 19)
                 gains_bad = not self._gains_then_torque(i, trail)
             if not ok:
                 why = f"0x0B 和写偏移都没让偏移变（还是 {fmt_off(o_before)}），读数 {pos} 不是 {target}"
@@ -876,9 +876,9 @@ class ServoOps:
             try:
                 p = self.read_pos(i)
                 bus.write_u16(i, 42, enc_sm(p))
-                # 卸力锁住了就不恢复扭矩（servo-web 这里会恢复，审查 S4：中途按卸力会被重新上力）
+                # If relax is latched, don't restore torque (servo-web restores it here; review S4: pressing relax midway would get torqued up again)
                 if was_on and not self.s.halted and not gains_bad and bus.read_u8(i, 40) != 1:
-                    self._gains_then_torque(i, trail, "扭矩已恢复")      # P/D/限力写不进去就不恢复
+                    self._gains_then_torque(i, trail, "扭矩已恢复")      # if P/D/torque limit can't be written, don't restore
             except Exception as e:  # noqa: BLE001
                 trail.append(f"✗收尾（写目标/恢复扭矩）：{type(e).__name__}: {e}")
                 self.log(f"#{i} 收尾失败，这颗可能卸着力、目标寄存器指向旧位置：{type(e).__name__}: {e}", "校准", "error")
@@ -901,7 +901,7 @@ class ServoOps:
         return {"ok": ok, "pre": pre, "pos": pos, "target": target, "droop": droop, "method": method, "why": why}
 
     def calib_plan(self, ids):
-        """校准前给页面看：每颗现在读多少、要写成多少（官方零位 2048）、差几度。只读。"""
+        """Shown on the page before calibrating: what each servo reads now, what it will be written to (official zero position 2048), and the difference in degrees. Read-only."""
         st = self.bus.states(ids)
         rows = []
         for i in ids:
@@ -912,8 +912,8 @@ class ServoOps:
         return {"name": "官方零位 2048", "rows": rows, "big_deg": CALIB_BIG_DEG, "sim": self.s.sim}
 
     def calibrate(self, ids):
-        """把选中舵机「现在的位置」校准成 2048（官方零位）。一颗一颗来，每颗只关几毫秒扭矩。
-        校完成功的那几颗走「对准再上力」保持住（用户要求）。整段不让状态轮询抢总线。"""
+        """Calibrate the selected servos' "current position" to 2048 (official zero position). One at a time, each with torque off for only a few milliseconds.
+        Servos that succeed go through "align, then torque up" and hold (user request). State polling may not grab the bus for the whole run."""
         self.guard()
         ids = [i for i in ids if i in IDS]
         if not ids:
@@ -958,7 +958,7 @@ class ServoOps:
                     big[i] = deltas[str(i)] * 360 / 4096
             else:
                 bad[i] = r["why"]
-        # 先把「打算挪哪些姿态」落盘再真挪：反过来的话，中间崩了就再也挪不回去了
+        # First persist "which poses we intend to shift", then actually shift them: if done the other way round, a crash in between would leave them impossible to shift back
         bp = os.path.join(self.calib_dir(), fn)
         rec = _load_json(bp)
         plan = [p["file"] for p in self.list_poses() if p.get("goals")] if not sim else []
@@ -981,7 +981,7 @@ class ServoOps:
                 "big": {str(k): round(v, 1) for k, v in big.items()}}
 
     def undo(self):
-        """把最近一次备份里的偏移写回去（关扭矩 → 解锁 → 写 31 → 加锁），目标改成当前读数，扭矩状态照旧。"""
+        """Write the offsets from the most recent backup back (torque off → unlock → write 31 → lock), set targets to the current reading, keep torque state as is."""
         self.guard()
         self.stop(quiet=True)
         with self.calib_lock:
@@ -1005,7 +1005,7 @@ class ServoOps:
                 self.log(f"#{i} 备份里没有偏移（{row.get('error', '?')}），跳过", "校准", "warn")
                 continue
             trail, step, on = [], "读当前状态", False
-            gains_bad = False         # 恢复扭矩前写 P/D/限力没写进去：收尾也不再恢复
+            gains_bad = False         # writing P/D/torque limit before restoring torque failed: the wrap-up won't restore it either
             try:
                 on = bus.read_u8(i, 40) == 1
                 off0, p0 = bus.read_u16(i, 31), self.read_pos(i)
@@ -1027,7 +1027,7 @@ class ServoOps:
                 step = "写目标"
                 trail.append(f"目标{p1}" + _ack(bus.write_u16(i, 42, enc_sm(p1))))
                 if on and not self.s.halted:
-                    step = "写 P/D/限力并开扭矩"                      # 上力前先写主程序的 P/D/限力，写不进去就不开（用户 10-19）
+                    step = "写 P/D/限力并开扭矩"                      # before torque-up, first write the main program's P/D/torque limit; if that fails, don't turn on (user Oct 19)
                     gains_bad = not self._gains_then_torque(i, trail)
                 good = off1 == row["offset"]
                 if good:
@@ -1044,7 +1044,7 @@ class ServoOps:
                     p = self.read_pos(i)
                     bus.write_u16(i, 42, enc_sm(p))
                     if on and not self.s.halted and not gains_bad and bus.read_u8(i, 40) != 1:
-                        self._gains_then_torque(i, trail, "扭矩已恢复")  # P/D/限力写不进去就不恢复
+                        self._gains_then_torque(i, trail, "扭矩已恢复")  # if P/D/torque limit can't be written, don't restore
                 except Exception as e:  # noqa: BLE001
                     self.log(f"#{i} 撤销收尾失败，这颗可能卸着力：{type(e).__name__}: {e}", "校准", "error")
                 try:
@@ -1072,7 +1072,7 @@ class ServoOps:
                  "校准", "warn" if bad else "info")
         return {"ok": ok, "bad": {str(k): v for k, v in bad.items()}, "backup": fn}
 
-    # ---- 姿态 ----
+    # ---- Poses ----
 
     def list_poses(self):
         out = []
@@ -1102,7 +1102,7 @@ class ServoOps:
         return {"file": fn}
 
     def delete_pose(self, fn):
-        """不真删：挪进回收站，文件名前加时间，删错了能拿回来。"""
+        """Not really deleted: moved to trash with a timestamp prefixed to the file name, so it can be recovered if deleted by mistake."""
         fn = str(fn or "")
         if not fn or os.path.basename(fn) != fn or not fn.endswith(".json"):
             raise Refused(f"不认识的姿态文件 {fn!r}")
@@ -1123,7 +1123,7 @@ class ServoOps:
         return self.move(p["goals"], seconds, mode, acc)
 
     def shift_saved_poses(self, deltas, sign=1, only=None):
-        """重新校准后，同一个物理姿势的读数变了 delta：存的姿态跟着挪。"""
+        """After recalibration, the reading for the same physical pose changed by delta: saved poses are shifted accordingly."""
         changed = []
         d = self.poses_dir()
         if not os.path.isdir(d) or not any(deltas.values()):
@@ -1145,7 +1145,7 @@ class ServoOps:
                 changed.append(fn)
         return changed
 
-    # ---- 总线工具 ----
+    # ---- Bus tools ----
 
     def scan(self, ids):
         found = [i for i in ids if self.bus.ping(i) is not None]
@@ -1186,7 +1186,7 @@ class ServoOps:
                  + ("" if same else "（读回跟写的不一样：只读？超范围？）"), "寄存器", "info" if same else "warn")
         touched = sorted(set(range(addr, addr + size)) & set(GAIN_REGS))
         if touched:
-            # 手动改 P / D / 限力：高级用法照旧允许，页头写「手动改过，跟主程序不一样」（用户 10-19）
+            # Manually changing P / D / torque limit: still allowed as advanced usage; the page header says "手动改过，跟主程序不一样" (manually changed, differs from main program) (user Oct 19)
             self.manual.setdefault(sid, {})[addr] = new
             g = self.gains.get(max_age=GAINS_RECHECK_S)
             eeprom = all(a in (21, 22) for a in touched)
@@ -1216,10 +1216,10 @@ class ServoOps:
         return {"ok": ok}
 
     def timing(self, n=200):
-        """sync_read 全部在线舵机 n 次，看耗时和失败。"""
+        """sync_read all online servos n times and look at the time taken and failures."""
         ids = self.present()
         times, fails = [], 0
-        with self.calib_lock:                      # 测的时候轮询让开，测出来的才是总线本身
+        with self.calib_lock:                      # polling steps aside during the test, so what's measured is the bus itself
             for _ in range(int(n)):
                 t = time.perf_counter()
                 r = self.bus.sync_read(ids, 56, 15)
@@ -1240,12 +1240,12 @@ class ServoOps:
         self.log(f"方向 #{sid} → {d:+d}（已存 servo-directions.json）", "方向")
         return {"dirs": {str(k): v for k, v in self.s.directions.items()}}
 
-    # ---- 页面来的指令 ----
+    # ---- Commands from the page ----
 
     def handle(self, args, tok=None):
-        """页面的指令（在线程里跑）。返回给页面的 dict；不能做就抛 Refused（原因给页面看）。
-        进出都记账：交还 / 离开要等在路上的做完，正在交还时新来的直接拒（审查 D2）。app 在事件循环里已经记上了（tok），
-        这里就不再记；直接调的（测试）这里记。记上了的照常做完——交还 / 离开等它做完以后再当场读扭矩。"""
+        """Commands from the page (run in a thread). Returns a dict for the page; raises Refused if it can't be done (reason shown on the page).
+        Entry and exit are accounted for: hand-back / leave wait for in-flight ones to finish, and new ones arriving during hand-back are refused outright (review D2). The app already recorded it in the event loop (tok),
+        so it isn't recorded again here; direct calls (tests) are recorded here. Recorded ones finish as usual -- hand-back / leave read torque on the spot after they finish."""
         if tok is not None:
             return self._handle(args)
         with self.s.op_slot(args.get("op")):
@@ -1259,9 +1259,9 @@ class ServoOps:
         if op == "torque":
             ids = [int(i) for i in (args.get("ids") or [])] or self.present()
             if int(args.get("on", 0)) and self.s.latched and self.s.closing:
-                raise Refused("正在交还主程序：卸力锁着，不许再上力")       # 交还时卸的力不许被手动上力清掉（审查 D2）
+                raise Refused("正在交还主程序：卸力锁着，不许再上力")       # torque relaxed during hand-back must not be cleared by a manual torque-up (review D2)
             if int(args.get("on", 0)) and self.s.latched:
-                # 卸力以后，人自己点「扭矩开 / 保持」就算解除（后台的过渡、灵动、校准收尾仍然不会自己上力）
+                # After relax, the user clicking "torque on / hold" themselves counts as releasing it (background transitions, liveliness and calibration wrap-up still won't torque up on their own)
                 self.s.latched = False
                 self.log("手动上力：解除卸力锁定", "安全")
             return self.torque_on_aligned(ids) if int(args.get("on", 0)) else self.torque_off(ids)
@@ -1319,7 +1319,7 @@ class ServoOps:
 
 
 def _save_json(path, obj):
-    """先写 .tmp 再改名：写一半崩了不会留半截文件。"""
+    """Write .tmp first, then rename: a crash mid-write won't leave a half-written file."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
