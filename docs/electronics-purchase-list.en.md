@@ -121,8 +121,8 @@ The **official mainland China channels** listed on Radxa's [distributors page](h
 | Channel | Entry |
 |---|---|
 | ALLNET (安联新创) Taobao store | [allnetchina.taobao.com](https://allnetchina.taobao.com) |
-| Radxa official Taobao store | Search Taobao for 「瑞莎 Radxa」 (Radxa) and make sure it is the official store |
-| Radxa official JD store | Search JD for 「瑞莎 Radxa」 (Radxa) and make sure it is the official store |
+| Radxa official Taobao store | Search Taobao for "瑞莎 Radxa" (Radxa) and make sure it is the official store |
+| Radxa official JD store | Search JD for "瑞莎 Radxa" (Radxa) and make sure it is the official store |
 
 Overseas official channels include the [ALLNET website](https://shop.allnetchina.cn/products/copy-of-radxa-zero-3w), [Arace](https://arace.tech/), etc.
 **Check these shops for stock first and pick the "no eMMC" version**; if out of stock, wait for a restock rather than paying several times more at a small shop to get it faster.
@@ -303,7 +303,7 @@ The "cover" (盖片) is a black optical shroud mounted above the sensor (¥5 sep
 |---|---|---|---|---|
 | **NP-F battery holder (for power pickup)** | 腾壶旗舰店 (Tenghu flagship store) | ¥17.8 | 99 | [tmall 658975825526](https://detail.tmall.com/item.htm?id=658975825526) |
 | **NP-F power plate** (Type-C fast charge) | 拓普赛旗舰店 (Tuopusai flagship store) | ¥19 | 58 | [tmall 926961598924](https://detail.tmall.com/item.htm?id=926961598924) |
-| NP-F550 battery itself | 唯卓仕 (Viltrox, China CCC certified, with charge indicator) | ¥52.8 first order | 900+ | Search for 「唯卓仕 NP-F550」 (Viltrox NP-F550) |
+| NP-F550 battery itself | 唯卓仕 (Viltrox, China CCC certified, with charge indicator) | ¥52.8 first order | 900+ | Search for "唯卓仕 NP-F550" (Viltrox NP-F550) |
 
 > 💡 **These two items fill exactly the gap upstream left.** The official project only provides the printed part `power_support` (×2),
 > with **no contact model**; the power pickup was originally left for you to solve — just buy a ready-made plate.
@@ -322,8 +322,8 @@ The "cover" (盖片) is a black optical shroud mounted above the sensor (¥5 sep
 
 | Part | Spec | Price | Search term | Link |
 |---|---|---|---|---|
-| **UBEC 5V/3A** (first choice) | Input **≥ covering 6–8.4 V**, output 5 V 3 A, with shielding and ferrite ring | ¥10–15 | 「UBEC 5V 3A 2S」 | *TBD* |
-| MP1584EN module (alternative) | Input 4.5–28 V, output 5 V fixed or adjustable, rated 3 A (~2 A in practice without heatsinking) | ¥3–5 | 「MP1584EN 5V」 | *TBD* |
+| **UBEC 5V/3A** (first choice) | Input **≥ covering 6–8.4 V**, output 5 V 3 A, with shielding and ferrite ring | ¥10–15 | "UBEC 5V 3A 2S" | *TBD* |
+| MP1584EN module (alternative) | Input 4.5–28 V, output 5 V fixed or adjustable, rated 3 A (~2 A in practice without heatsinking) | ¥3–5 | "MP1584EN 5V" | *TBD* |
 
 **Before buying, look at these three numbers, not the brand:**
 
@@ -383,7 +383,7 @@ The protocol and register layout have been fully reconstructed; see [hardware re
 - **Dual protocol**: to support both Feetech and Dynamixel, **same hardware, firmware branch** —
   the physical layers are identical (half-duplex single-wire TTL / 1 Mbps / 3 wires); the only difference is the packet format
   (V2 header `FF FF FD 00` + CRC-16; Feetech `FF FF` + `~sum`)
-- ✅ **Connector and pinout confirmed by the official datasheet** — Feetech 《HL-2915-C002 串型规格书》 (HL-2915-C002 serial servo datasheet) A/0 (2026-02-27),
+- ✅ **Connector and pinout confirmed by the official datasheet** — Feetech "HL-2915-C002 串型规格书" (HL-2915-C002 serial servo datasheet) A/0 (2026-02-27),
   page 4, items 6-7: connector **`AMP-3`**, **`1=GND / 2=Vcc / 3=Signal/TTL`**, same as Dynamixel.
   In `HD-1910-C001.stp` the connector part is named `AMP-3P`, and the assembly includes `HL-2915-C002_ASM`, so the two models share a platform.
   <br>The same datasheet also confirms: half-duplex asynchronous, 8bit/1stop/no parity, **factory default 1 Mbps**, ID 0–253 (default 1),

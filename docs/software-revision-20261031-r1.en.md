@@ -10,7 +10,7 @@ The software version is **2026.10.3101**: the 01st revision on October 31, 2026.
 
 1. Follow the page's preparation checks to stop the policy, voice, music and action / servo / calibration sessions.
 2. Open **设置 → 软件更新 → 检查更新** (Settings → Software update → Check for updates) and install **2026.10.3101**.
-3. Wait for the web console to reconnect, check the version, then refresh the servo page: clicking the beak servo should select **34「嘴巴」** (34 "Beak") on the right; the yaw servo corresponds to **32「头部偏航」** (32 "Head yaw").
+3. Wait for the web console to reconnect, check the version, then refresh the servo page: clicking the beak servo should select **34 "嘴巴"** (34 "Beak") on the right; the yaw servo corresponds to **32 "头部偏航"** (32 "Head yaw").
 
 If there is no network connection, download the complete `2026.10.3101.software-update.tar` and upload it on the software update page; do not unpack it first. File size 9,287,680 bytes, SHA256:
 

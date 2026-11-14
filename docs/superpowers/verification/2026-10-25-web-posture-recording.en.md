@@ -46,7 +46,7 @@ The earlier test first reproduced the original "sitting down ends the recording"
 
 ## Device switch and user confirmation
 
-The user first replied explicitly "已停下，站着保持" (Stopped, standing still). The install script again confirmed motion/control, real-time policy_enabled=false and no servo session before switching Studio. After checking the frozen Git bytes and dependency versions, only seven files were updated:
+The user first replied explicitly "Stopped, standing still". The install script again confirmed motion/control, real-time policy_enabled=false and no servo session before switching Studio. After checking the frozen Git bytes and dependency versions, only seven files were updated:
 
 ```text
 studio/motion_posture.py    studio/motion_store.py
