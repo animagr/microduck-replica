@@ -161,7 +161,7 @@ The midpoint of the two holes (22.67, 11.05) differs from the board center (22.5
 Board outline file: `imu_to_dxl-板框-45x22-R2.dxf` (units mm, 8 closed segments: 4 straight edges + 4 90° arcs).
 
 > **Why a separate DXF**: the primitive API of this version of EasyEDA Pro (JLC EDA) only accepts copper layers;
-> creating lines/arcs on the board outline layer (layer 11) always fails with 「参数不正确」 (invalid parameter), and changing the layer or the document source is blocked too,
+> creating lines/arcs on the board outline layer (layer 11) always fails with "参数不正确" (invalid parameter), and changing the layer or the document source is blocked too,
 > so the board outline goes in via DXF import (`文件 → 导入 → DXF` (File → Import → DXF), select the **board outline layer** as the target layer, units mm, origin aligned to 0,0).
 > The two M2 holes are not in the DXF; they have already been created on the PCB as real NPTH pads.
 
@@ -238,7 +238,7 @@ and cannot replace measurements.
 
 ### To do
 
-- Run **component standardization** once before ordering (schematic DRC reported 「元件属性与供应商编号不匹配」 (component attributes do not match the supplier part number))
+- Run **component standardization** once before ordering (schematic DRC reported "元件属性与供应商编号不匹配" (component attributes do not match the supplier part number))
 - Silkscreen review: whether reference designators overlap pads, and whether the `U1` pin 1 / `D1` `D2` cathode / `J1` pin 1 markings are all present
 - **Connector height**: `J1`/`J2`/`J3` are JST EH / 2.54 header through-hole parts, with bodies about **8 mm** tall. If the torso cavity
   really has only 6.65 mm, they need to be swapped for the right-angle `S3B-EH-A`, and the footprint and BOM must change accordingly; comparing the exported STEP in
