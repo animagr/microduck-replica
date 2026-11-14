@@ -1,9 +1,9 @@
-//! main.rs —— 命令行入口：解析参数，调用舵机驱动完成测试
+//! main.rs: command-line entry point: parses arguments and calls the servo driver to run tests
 //!
-//! 【Rust 知识点：二进制目标使用本包的库目标】
-//! 本 crate 同时有 src/lib.rs（库，名为 feetech_servo）和本文件（二进制）。
-//! 二进制像“外部使用者”一样 `use feetech_servo::...` 引用库里的模块，
-//! 协议层、内存表、驱动的实现都收敛到库中，CLI 只保留命令行交互逻辑。
+//! [Rust concept: the binary target uses this package's library target]
+//! This crate has both src/lib.rs (the library, named feetech_servo) and this file (the binary).
+//! The binary references library modules via `use feetech_servo::...` just like an "external user";
+//! the protocol layer, memory table and driver implementations all live in the library, and the CLI keeps only the command-line interaction logic.
 
 use std::thread;
 use std::time::Duration;
@@ -17,13 +17,13 @@ use feetech_servo::registers::{self, find_register, Access, Area, REGISTERS, BAU
 use feetech_servo::servo::Servo;
 
 // =============================================================================
-// 命令行定义
+// Command-line definition
 // =============================================================================
 
-/// 顶层命令行：全局参数 + 一个子命令。
+/// Top-level command line: global arguments + one subcommand.
 ///
-/// global = true 表示这些参数放在子命令前后都可以，
-/// 例如 `feetech-HD1910M-tester dump -i 2` 和 `feetech-HD1910M-tester -i 2 dump` 都行。
+/// global = true means these arguments can go before or after the subcommand,
+/// e.g. both `feetech-HD1910M-tester dump -i 2` and `feetech-HD1910M-tester -i 2 dump` work.
 #[derive(Parser)]
 #[command(
     name = "feetech-HD1910M-tester",
@@ -34,27 +34,27 @@ use feetech_servo::servo::Servo;
                   寄存器可用英文名（如 pos-p）、十进制地址（21）或十六进制（0x15）指定。"
 )]
 struct Cli {
-    /// 串口设备路径
+    /// Serial device path
     #[arg(short, long, default_value = "/dev/ttyUSB0", global = true)]
     port: String,
 
-    /// 通讯波特率（出厂默认 1000000）
+    /// Baud rate (factory default 1000000)
     #[arg(short, long, default_value_t = 1_000_000, global = true)]
     baud: u32,
 
-    /// 舵机 ID（出厂默认 1）
+    /// Servo ID (factory default 1)
     #[arg(short, long, default_value_t = 1, global = true)]
     id: u8,
 
-    /// 串口收发超时（毫秒）。扫描时建议调小加快速度
+    /// Serial send/receive timeout (ms). Lower it when scanning to go faster
     #[arg(short = 't', long, default_value_t = 50, global = true)]
     timeout: u64,
 
-    /// 打印收发的原始报文（学习 FT-SCS 协议时打开它）
+    /// Print raw packets sent and received (turn this on when learning the FT-SCS protocol)
     #[arg(short, long, global = true)]
     verbose: bool,
 
-    /// TX/RX 短接的简易接法需要打开：丢弃自收自发的回显
+    /// Needed for the simple wiring with TX/RX shorted together: discard the echo of our own transmissions
     #[arg(long, global = true)]
     echo: bool,
 
@@ -62,151 +62,151 @@ struct Cli {
     cmd: Cmd,
 }
 
-/// 所有子命令。
+/// All subcommands.
 ///
-/// 【Rust 知识点：带数据的枚举 + Subcommand】
-/// 每个成员携带自己的参数结构，clap 把它们映射成子命令；
-/// 下面 run() 里用一个 match 就能分发全部命令 —— Rust 的 match
-/// 会检查“是否覆盖了所有枚举成员”，漏一个就编译失败，重构时极其安心。
+/// [Rust concept: enums with data + Subcommand]
+/// Each variant carries its own argument struct, and clap maps them to subcommands;
+/// in run() below, a single match dispatches every command. Rust's match
+/// checks "are all enum variants covered"; missing one fails compilation, which makes refactoring very safe.
 #[derive(Subcommand)]
 enum Cmd {
-    /// 扫描总线：逐个 PING ID 0~253，列出在线舵机
+    /// Scan the bus: PING IDs 0~253 one by one and list the servos online
     Scan {
-        /// 起始 ID
+        /// Start ID
         #[arg(long, default_value_t = 0)]
         from: u8,
-        /// 结束 ID
+        /// End ID
         #[arg(long, default_value_t = 253)]
         to: u8,
     },
 
-    /// 读取并打印整张内存表（分区显示，含中文说明和单位）
+    /// Read and print the entire memory table (shown by section, with Chinese descriptions and units)
     Dump,
 
-    /// 读一个寄存器：get pos-p / get 21 / get 0x15
+    /// Read one register: get pos-p / get 21 / get 0x15
     Get {
-        /// 寄存器：英文名 / 十进制地址 / 0x十六进制地址
+        /// Register: English name / decimal address / 0x hex address
         reg: String,
     },
 
-    /// 写一个寄存器（默认只改内存；EPROM 区域加 --save 才掉电保存）
+    /// Write one register (by default only changes RAM; EPROM fields need --save to persist across power loss)
     Set {
-        /// 寄存器：英文名 / 地址
+        /// Register: English name / address
         reg: String,
-        /// 要写入的值（负数也可以，如 pos-offset 允许 -4095）
+        /// Value to write (negative is allowed too, e.g. pos-offset allows -4095)
         value: i64,
-        /// 掉电保存（先解锁 EPROM → 写入 → 重新上锁）
+        /// Persist across power loss (unlock EPROM → write → lock again)
         #[arg(long)]
         save: bool,
-        /// 异步写：先缓存，之后用 action 命令统一触发（多舵机同步用）
+        /// Asynchronous write: buffer first, then trigger together with the action command (for multi-servo sync)
         #[arg(long)]
         defer: bool,
     },
 
-    /// 触发执行所有异步写（REG WRITE）缓存的内容（广播）
+    /// Trigger execution of all buffered asynchronous writes (REG WRITE) (broadcast)
     Action,
 
-    /// 同步写：一条报文给多个舵机写同一个寄存器（如 "1,2,3" goal-pos 2048）
+    /// Synchronous write: one packet writes the same register on several servos (e.g. "1,2,3" goal-pos 2048)
     Swrite {
-        /// 目标 ID 列表，逗号分隔
+        /// Target ID list, comma separated
         ids: String,
-        /// 寄存器：英文名 / 地址
+        /// Register: English name / address
         reg: String,
-        /// 要写入的值
+        /// Value to write
         value: i64,
     },
 
-    /// 设置舵机 ID（自动走解锁→写入→上锁流程，掉电保存）
+    /// Set servo ID (automatically runs unlock → write → lock, persists across power loss)
     SetId {
-        /// 新 ID（0~253）
+        /// New ID (0~253)
         new_id: u8,
     },
 
-    /// 设置通讯波特率（掉电保存；改完需要用新波特率重新连接）
+    /// Set the baud rate (persists across power loss; after changing, reconnect at the new baud rate)
     SetBaud {
-        /// 波特率索引 0~7：0=1M 1=500k 2=250k 3=128k 4=115200 5=76800 6=57600 7=38400
+        /// Baud rate index 0~7: 0=1M 1=500k 2=250k 3=128k 4=115200 5=76800 6=57600 7=38400
         index: u8,
     },
 
-    /// EPROM 写入锁：on=上锁(掉电不保存,默认) / off=解锁(写入掉电保存)
+    /// EPROM write lock: on=locked (not persisted across power loss, default) / off=unlocked (writes persist across power loss)
     Lock {
         #[arg(value_enum)]
         state: LockState,
     },
 
-    /// 恢复出厂设置（EPROM 区域全部还原默认值，慎用！）
+    /// Factory reset (restores all EPROM fields to defaults, use with care!)
     FactoryReset,
 
-    /// 重启舵机（0x08，等效断电重上电：SRAM 从 EPROM 重新加载，可验证 EPROM 写入）
+    /// Reboot the servo (0x08, equivalent to a power cycle: SRAM reloads from EPROM, can verify EPROM writes)
     Reboot,
 
-    /// 设置运行模式：0位置伺服 1电机恒速 2电机恒流 3PWM开环调速 4纯位置PD
+    /// Set operating mode: 0 position servo, 1 motor constant speed, 2 motor constant current, 3 PWM open-loop speed control, 4 pure position PD
     Mode { mode: u8 },
 
-    /// 位置模式：转动到目标位置（自动打开扭矩开关）
+    /// Position mode: rotate to target position (automatically turns on torque)
     Goto {
-        /// 目标位置：0~4095 对应 0~360°（中位 2048；多圈模式可为负数或超 4095）
+        /// Target position: 0~4095 maps to 0~360° (center 2048; may be negative or above 4095 in multi-turn mode)
         target: i64,
-        /// 可选：同时设置运行速度（0.732RPM/单位）
+        /// Optional: also set running speed (0.732 RPM/unit)
         #[arg(long)]
         speed: Option<i64>,
-        /// 可选：同时设置加速度（8.7度/秒²每单位，0=最大）
+        /// Optional: also set acceleration (8.7 deg/s² per unit, 0 = max)
         #[arg(long)]
         acc: Option<i64>,
     },
 
-    /// 角度控制：输入角度直接转到对应位置，0°=中位(2048)，支持多舵机同步
+    /// Angle control: enter an angle and go straight to the corresponding position, 0° = center (2048), supports multi-servo sync
     Angle {
-        /// 目标角度（默认单位：度；加 --rad 则按弧度解析），范围 ±180°
+        /// Target angle (default unit: degrees; with --rad it's parsed as radians), range ±180°
         angle: f64,
-        /// 输入单位是弧度（如 0.1745 ≈ 10°）
+        /// Input unit is radians (e.g. 0.1745 ≈ 10°)
         #[arg(long)]
         rad: bool,
-        /// 目标 ID 列表，逗号分隔（默认右腿 11,12）
+        /// Target ID list, comma separated (default right leg 11,12)
         #[arg(long, default_value = "11,12")]
         ids: String,
-        /// 可选：同时设置运行速度（0.732RPM/单位）
+        /// Optional: also set running speed (0.732 RPM/unit)
         #[arg(long)]
         speed: Option<i64>,
     },
 
-    /// 右腿振荡测试：多个舵机绕中位小幅正弦摆动几次，结束后回到中位
+    /// Right-leg oscillation test: several servos swing a small sine wave around center a few times, then return to center
     Swing {
-        /// 目标 ID 列表，逗号分隔（默认右腿 11,12）
+        /// Target ID list, comma separated (default right leg 11,12)
         #[arg(long, default_value = "11,12")]
         ids: String,
-        /// 摆动幅度（度，为防干涉上限 30°）
+        /// Swing amplitude (degrees, capped at 30° to avoid interference)
         #[arg(long, default_value_t = 10.0)]
         amplitude: f64,
-        /// 完整来回次数
+        /// Number of full back-and-forth cycles
         #[arg(long, default_value_t = 3)]
         cycles: u32,
-        /// 每个来回的时长（毫秒），越大越柔和
+        /// Duration of each cycle (ms); larger is gentler
         #[arg(long, default_value_t = 2000)]
         period: u64,
-        /// 可选：限制运行速度（0.732RPM/单位）
+        /// Optional: limit running speed (0.732 RPM/unit)
         #[arg(long)]
         speed: Option<i64>,
     },
 
-    /// 扭矩开关：on=打开输出 off=关闭输出(松轴) damp=阻尼模式
+    /// Torque switch: on = output enabled, off = output disabled (shaft free), damp = damping mode
     Torque {
         #[arg(value_enum)]
         state: TorqueState,
     },
 
-    /// 设置转矩限制（48号地址，0~1000，单位 0.1%）：限制堵转扭矩输出
+    /// Set torque limit (address 48, 0~1000, unit 0.1%): limits stall torque output
     TorqueLimit { value: i64 },
 
-    /// 设置目标电流（44号地址，-2047~2047，单位 6.5mA）：力控核心
+    /// Set target current (address 44, -2047~2047, unit 6.5 mA): core of force control
     GoalCurrent { value: i64 },
 
-    /// 设置运行速度（46号地址；恒速模式 BIT15 为方向位）
+    /// Set running speed (address 46; in constant-speed mode BIT15 is the direction bit)
     Speed { value: i64 },
 
-    /// 设置 PID 参数：位置环 / 速度环 / 电流环
+    /// Set PID parameters: position loop / velocity loop / current loop
     Pid {
-        /// 哪个环：position(位置环PDI) velocity(速度环PI) current(电流环PI)
+        /// Which loop: position (position loop PDI) velocity (velocity loop PI) current (current loop PI)
         #[arg(value_enum)]
         pid_loop: PidLoop,
         #[arg(long)]
@@ -215,131 +215,131 @@ enum Cmd {
         kd: Option<i64>,
         #[arg(long)]
         ki: Option<i64>,
-        /// 写运行区(50~52号地址,立即生效掉电丢失)，默认写 EPROM 配置区
+        /// Write the runtime area (addresses 50~52, takes effect immediately, lost on power loss); by default writes the EPROM config area
         #[arg(long)]
         ram: bool,
-        /// 写 EPROM 时掉电保存
+        /// Persist across power loss when writing EPROM
         #[arg(long)]
         save: bool,
     },
 
-    /// 实时监控：连续打印位置/速度/负载/电压/温度/电流（Ctrl+C 停止）
+    /// Live monitor: continuously print position/speed/load/voltage/temperature/current (Ctrl+C to stop)
     Monitor {
-        /// 刷新间隔（毫秒）
+        /// Refresh interval (ms)
         #[arg(long, default_value_t = 100)]
         interval: u64,
-        /// 打印次数（不指定则一直打印）
+        /// Number of prints (prints forever if not given)
         #[arg(long)]
         count: Option<u32>,
     },
 
-    /// 保护参数：过温/过压/欠压/过流/卸载条件/LED报警
+    /// Protection parameters: over-temperature / over-voltage / under-voltage / over-current / unload conditions / LED alarm
     Protect {
-        /// 最高温度上限 °C（13号地址）
+        /// Max temperature limit °C (address 13)
         #[arg(long)]
         max_temp: Option<i64>,
-        /// 最高输入电压，单位 0.1V（14号地址，如 100 = 10.0V）
+        /// Max input voltage, unit 0.1 V (address 14, e.g. 100 = 10.0 V)
         #[arg(long)]
         max_voltage: Option<i64>,
-        /// 最低输入电压，单位 0.1V（15号地址，如 40 = 4.0V）
+        /// Min input voltage, unit 0.1 V (address 15, e.g. 40 = 4.0 V)
         #[arg(long)]
         min_voltage: Option<i64>,
-        /// 过流保护时间，单位 10ms（38号地址，如 200 = 2秒）
+        /// Over-current protection time, unit 10 ms (address 38, e.g. 200 = 2 s)
         #[arg(long)]
         overcur_time: Option<i64>,
-        /// 卸载条件位掩码（19号地址）：BIT0电压 BIT1磁编码 BIT2过热 BIT3过流
+        /// Unload condition bitmask (address 19): BIT0 voltage BIT1 magnetic encoder BIT2 overheat BIT3 over-current
         #[arg(long)]
         unload: Option<i64>,
-        /// LED报警位掩码（20号地址）：位定义同上
+        /// LED alarm bitmask (address 20): same bit definitions as above
         #[arg(long)]
         led: Option<i64>,
-        /// 掉电保存
+        /// Persist across power loss
         #[arg(long)]
         save: bool,
     },
 
-    /// 设置角度限制（9/11号地址，掉电保存需加 --save；多圈模式两者都应为 0）
+    /// Set angle limits (addresses 9/11; add --save to persist across power loss; in multi-turn mode both should be 0)
     Limits {
-        /// 最小角度限制（默认原始单位 0~4094；加 --deg 则按角度输入）
+        /// Min angle limit (default raw units 0~4094; with --deg input as degrees)
         min: f64,
-        /// 最大角度限制（默认原始单位 1~4095；加 --deg 则按角度输入）
+        /// Max angle limit (default raw units 1~4095; with --deg input as degrees)
         max: f64,
-        /// min/max 按角度（度）输入：0~360° 对应原始值 0~4095
+        /// min/max input as angles (degrees): 0~360° maps to raw values 0~4095
         #[arg(long)]
         deg: bool,
-        /// 掉电保存（一次解锁流程写入两个寄存器）
+        /// Persist across power loss (writes both registers in one unlock sequence)
         #[arg(long)]
         save: bool,
     },
 
-    /// 零位校准（0x0B 指令）：把当前机械位置标定为中位 2048，等同飞特 FD 软件的“设置零位”
+    /// Zero calibration (0x0B instruction): calibrate the current mechanical position as center 2048, same as "Set zero" in Feetech's FD software
     ///
-    /// 用法：torque off 松轴 → 用手把关节摆到零位 → 立即执行本命令 → torque on。
-    /// 舵机自动修改 31 号位置偏移寄存器并掉电保存，校准后自动回读确认。
+    /// Usage: torque off to free the shaft → move the joint to the zero position by hand → run this command immediately → torque on.
+    /// The servo automatically updates the position offset register at address 31 and persists it; after calibration it is read back to confirm.
     Zero {
-        /// 校准目标读数（默认 2048 = 中位；范围 0~4095）。仅单圈位置模式有意义
+        /// Calibration target reading (default 2048 = center; range 0~4095). Only meaningful in single-turn position mode
         #[arg(long)]
         to: Option<i64>,
     },
 
-    /// 设置位置偏移（31号地址，-4095~4095，手动校正零位；推荐用 zero 命令自动校准）
+    /// Set position offset (address 31, -4095~4095, manual zero correction; the zero command's automatic calibration is recommended)
     Offset {
         value: i64,
-        /// 掉电保存
+        /// Persist across power loss
         #[arg(long)]
         save: bool,
     },
 }
 
-/// 锁开关的取值（clap 自动限制只能填 on/off）
+/// Values for the lock switch (clap automatically restricts to on/off)
 #[derive(Clone, Copy, ValueEnum)]
 enum LockState {
-    /// 上锁：EPROM 写入掉电不保存（出厂默认）
+    /// Locked: EPROM writes not persisted across power loss (factory default)
     On,
-    /// 解锁：EPROM 写入掉电保存
+    /// Unlocked: EPROM writes persisted across power loss
     Off,
 }
 
-/// 扭矩开关的取值
+/// Values for the torque switch
 #[derive(Clone, Copy, ValueEnum)]
 enum TorqueState {
-    /// 打开扭力输出
+    /// Enable torque output
     On,
-    /// 关闭扭力输出（可以用手转动舵机）
+    /// Disable torque output (servo can be turned by hand)
     Off,
-    /// 阻尼输出（手转有阻力，常用于示教）
+    /// Damped output (resists when turned by hand, commonly used for teaching by demonstration)
     Damp,
 }
 
-/// PID 环选择
+/// PID loop selection
 #[derive(Clone, Copy, ValueEnum)]
 enum PidLoop {
-    /// 位置环：P=21号 D=22号 I=23号（运行区 50/51/52）
+    /// Position loop: P=addr 21 D=addr 22 I=addr 23 (runtime area 50/51/52)
     Position,
-    /// 速度环：P=37号 I=39号（运行区 50/52）
+    /// Velocity loop: P=addr 37 I=addr 39 (runtime area 50/52)
     Velocity,
-    /// 电流环：P=34号 I=35号（仅 EPROM 区）
+    /// Current loop: P=addr 34 I=addr 35 (EPROM area only)
     Current,
 }
 
 // =============================================================================
-// 程序入口
+// Program entry point
 // =============================================================================
 
-/// 【Rust 知识点：fn main() -> Result】
-/// main 也可以返回 Result：返回 Err 时程序以非 0 状态码退出并打印错误，
-/// 这样 main 里也能愉快地使用 `?`。
+/// [Rust concept: fn main() -> Result]
+/// main can also return Result: when it returns Err, the program exits with a non-zero status and prints the error,
+/// so `?` can be used happily in main too.
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // 扫描命令不需要先连接指定舵机，但同样需要串口
+    // The scan command doesn't need to connect to a specific servo first, but it still needs the serial port
     let mut servo = Servo::connect(&cli.port, cli.baud, cli.timeout, cli.echo, cli.verbose)?;
     if cli.verbose {
         eprintln!("已打开 {} @ {} bps, 目标 ID = {}", cli.port, cli.baud, cli.id);
     }
 
-    // 【Rust 知识点：match 穷尽性检查】
-    // 编译器强制我们处理 Cmd 的每一个变体，新增子命令忘了处理会编译失败。
+    // [Rust concept: match exhaustiveness checking]
+    // The compiler forces us to handle every variant of Cmd; forgetting to handle a new subcommand fails compilation.
     match cli.cmd {
         Cmd::Scan { from, to } => cmd_scan(&mut servo, from, to),
         Cmd::Dump => cmd_dump(&mut servo, cli.id),
@@ -354,7 +354,7 @@ fn main() -> Result<()> {
             let reg = find_register(&reg).ok_or_else(|| {
                 ServoError::InvalidParam(format!("未知寄存器 \"{reg}\""))
             })?;
-            // 解析逗号分隔的 ID 列表："1,2,3" → vec![1, 2, 3]
+            // Parse the comma-separated ID list: "1,2,3" → vec![1, 2, 3]
             let ids: std::result::Result<Vec<u8>, _> =
                 ids.split(',').map(|s| s.trim().parse::<u8>()).collect();
             let ids = ids.map_err(|_| ServoError::InvalidParam("ID 列表格式应为 1,2,3".into()))?;
@@ -379,7 +379,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Reboot => {
-            // 有的固件重启前不应答，超时不算失败
+            // Some firmware doesn't reply before rebooting; a timeout doesn't count as failure
             match servo.reboot(cli.id) {
                 Ok(()) => println!("已发送重启指令并收到应答"),
                 Err(ServoError::Timeout) => println!("已发送重启指令（舵机未应答，可能已直接重启）"),
@@ -457,18 +457,18 @@ fn main() -> Result<()> {
 }
 
 // =============================================================================
-// 各子命令的实现
+// Implementations of each subcommand
 // =============================================================================
 
-/// 扫描总线（带进度条）
+/// Scan the bus (with a progress bar)
 ///
-/// 【Rust 知识点：使用第三方 crate indicatif】
-/// 在 Cargo.toml 里加一行依赖后，`use indicatif::...` 即可使用。
-/// ProgressBar 会在终端里实时刷新一行进度条：
-///   - ProgressStyle::with_template 定义显示模板（{bar} {pos} {msg} 等占位符）
-///   - progress_chars 自定义进度条的填充字符（用 Unicode 块字符更细腻）
-///   - enable_steady_tick 让旋转小动画在等待期间也持续转动
-///   - pb.println 在进度条上方打印一行，不会弄花进度条
+/// [Rust concept: using the third-party crate indicatif]
+/// After adding one dependency line to Cargo.toml, just `use indicatif::...`.
+/// ProgressBar refreshes a progress bar line in the terminal in real time:
+///   - ProgressStyle::with_template defines the display template (placeholders like {bar} {pos} {msg})
+///   - progress_chars customizes the bar's fill characters (Unicode block characters look finer)
+///   - enable_steady_tick keeps the spinner animating while waiting
+///   - pb.println prints a line above the progress bar without garbling it
 fn cmd_scan(servo: &mut Servo, from: u8, to: u8) -> Result<()> {
     let total = (to - from + 1) as u64;
     let pb = ProgressBar::new(total);
@@ -476,10 +476,10 @@ fn cmd_scan(servo: &mut Servo, from: u8, to: u8) -> Result<()> {
         ProgressStyle::with_template(
             "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}",
         )
-        .unwrap() // 模板是编译期写死的正确字符串，这里 unwrap 是安全的
+        .unwrap() // the template is a correct string hard-coded at compile time, so unwrap is safe here
         .progress_chars("█▉▊▋▌▍▎▏  "),
     );
-    // 每 100ms 让 spinner 转一格，否则等待超时时画面是静止的
+    // Advance the spinner every 100 ms, otherwise the screen is frozen while waiting for timeouts
     pb.enable_steady_tick(Duration::from_millis(100));
 
     let mut found = Vec::new();
@@ -489,43 +489,43 @@ fn cmd_scan(servo: &mut Servo, from: u8, to: u8) -> Result<()> {
             found.push(id);
             pb.println(format!("  ✔ 发现舵机，ID = {id}"));
         }
-        pb.inc(1); // 进度 +1
+        pb.inc(1); // progress +1
     }
 
-    // 进度条收尾：清除后打印最终结果
+    // Finish the progress bar: clear it, then print the final result
     pb.finish_and_clear();
     if found.is_empty() {
         println!("扫描完成（ID {from} ~ {to}）：没有发现任何舵机。请检查：接线 / 供电 / 波特率（-b）/ 串口（-p）");
     } else {
-        // 【Rust 知识点：迭代器 map + collect 拼字符串】
+        // [Rust concept: iterator map + collect to build a string]
         let list: Vec<String> = found.iter().map(|id| id.to_string()).collect();
         println!("扫描完成：发现 {} 个舵机，ID: {}", found.len(), list.join(", "));
     }
     Ok(())
 }
 
-/// 读取并打印整张内存表。
+/// Read and print the entire memory table.
 ///
-/// 【性能技巧：块读取】内存表有些地址是空洞（如 10、12、29 号），
-/// 逐个寄存器读要发几十条指令；改为按区域连续读 5 个大块，
-/// 再从缓冲区里按地址取值，速度快很多。
+/// [Performance tip: block reads] the memory table has gaps at some addresses (e.g. 10, 12, 29);
+/// reading register by register sends dozens of instructions; instead read 5 large contiguous blocks by region,
+/// then take values from the buffer by address, which is much faster.
 fn cmd_dump(servo: &mut Servo, id: u8) -> Result<()> {
-    // (起始地址, 读取长度)：覆盖 0~4、5~39、40~55、56~75、77~86
+    // (start address, read length): covers 0~4, 5~39, 40~55, 56~75, 77~86
     let blocks = [(0u8, 5u8), (5, 35), (40, 16), (56, 20), (77, 10)];
-    let mut image = [0u8; 128]; // 内存表镜像，下标即地址
+    let mut image = [0u8; 128]; // memory table image, index = address
     for (start, len) in blocks {
         let data = servo.read(id, start, len)?;
         if data.len() < len as usize {
             return Err(ServoError::Malformed("块读取长度不足".into()));
         }
-        // 拷贝进镜像缓冲区
+        // Copy into the image buffer
         image[start as usize..(start + len) as usize].copy_from_slice(&data[..len as usize]);
     }
 
     println!("====== HD1910M 内存表（ID={id}）======");
     let mut last_area: Option<Area> = None;
     for reg in REGISTERS {
-        // 换区时打印分区标题
+        // Print the section title when the section changes
         if last_area != Some(reg.area) {
             println!("\n----- {} -----", reg.area.as_str());
             last_area = Some(reg.area);
@@ -545,7 +545,7 @@ fn cmd_dump(servo: &mut Servo, id: u8) -> Result<()> {
     Ok(())
 }
 
-/// 读一个寄存器并友好打印
+/// Read one register and print it nicely
 fn cmd_get(servo: &mut Servo, id: u8, name: &str) -> Result<()> {
     let reg = find_register(name).ok_or_else(|| {
         ServoError::InvalidParam(format!("未知寄存器 \"{name}\"，用 dump 命令查看全部寄存器名"))
@@ -555,7 +555,7 @@ fn cmd_get(servo: &mut Servo, id: u8, name: &str) -> Result<()> {
         "[{}/0x{:02X}] {}（{}）= {} {}",
         reg.addr, reg.addr, reg.key, reg.cn, val, reg.unit
     );
-    // 对位掩码类寄存器附赠按位解释，帮助理解
+    // For bitmask registers, add a bit-by-bit explanation to help understanding
     match reg.key {
         "status" => println!("  状态解析: {}", protocol::describe_status(val as u8)),
         "unload-cond" | "led-alarm" => println!("  位含义: {}", describe_protect_bits(val as u8)),
@@ -564,7 +564,7 @@ fn cmd_get(servo: &mut Servo, id: u8, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// 写一个寄存器
+/// Write one register
 fn cmd_set(servo: &mut Servo, id: u8, name: &str, value: i64, save: bool, defer: bool) -> Result<()> {
     let reg = find_register(name).ok_or_else(|| {
         ServoError::InvalidParam(format!("未知寄存器 \"{name}\"，用 dump 命令查看全部寄存器名"))
@@ -575,7 +575,7 @@ fn cmd_set(servo: &mut Servo, id: u8, name: &str, value: i64, save: bool, defer:
         )));
     }
     if defer {
-        // 异步写：写入前同样做范围校验（之前漏了，越界值会被直接编码发出）
+        // Asynchronous write: do the same range check before writing (previously missing; out-of-range values were encoded and sent as is)
         reg.check_value(value)?;
         let val = registers::encode_value(value, reg.sign_bit);
         let bytes = if reg.size == 1 { vec![val as u8] } else { val.to_le_bytes().to_vec() };
@@ -594,7 +594,7 @@ fn cmd_set(servo: &mut Servo, id: u8, name: &str, value: i64, save: bool, defer:
     Ok(())
 }
 
-/// 写 EPROM 寄存器的辅助函数（offset 命令用）
+/// Helper for writing EPROM registers (used by the offset command)
 fn cmd_write_eprom(servo: &mut Servo, id: u8, key: &str, value: i64, save: bool) -> Result<()> {
     let reg = find_register(key).unwrap();
     if save {
@@ -604,21 +604,21 @@ fn cmd_write_eprom(servo: &mut Servo, id: u8, key: &str, value: i64, save: bool)
     }
 }
 
-/// 设置活动区间（角度限制）：9 号最小角度 + 11 号最大角度。
+/// Set the active range (angle limits): address 9 min angle + address 11 max angle.
 ///
-/// 与飞特 FD 软件的角度限制对应，支持按原始值或角度（--deg）输入。
-/// --save 时共用一次解锁/上锁流程（比逐个 save_reg 少一半 EPROM 往返），
-/// 写完回读确认 —— 飞特对不支持/未生效的写入也可能回“成功”，以回读为准。
+/// Corresponds to the angle limits in Feetech's FD software; supports input as raw values or angles (--deg).
+/// With --save, shares one unlock/lock sequence (half the EPROM round trips of calling save_reg for each),
+/// and reads back to confirm after writing: Feetech may reply "success" even for unsupported/ineffective writes, so the read-back is authoritative.
 fn cmd_limits(servo: &mut Servo, id: u8, min: f64, max: f64, deg: bool, save: bool) -> Result<()> {
-    // 角度（度）→ 原始位置值；原始输入直接取整
+    // Angle (degrees) → raw position value; raw input is rounded directly
     let (min, max) = if deg {
         ((min / DEG_PER_COUNT).round() as i64, (max / DEG_PER_COUNT).round() as i64)
     } else {
         (min as i64, max as i64)
     };
 
-    // 范围校验。注意：多圈模式要求两者都为 0，而 max-angle 的名义下限是 1，
-    // 所以 0/0 组合要特判放行（官方文档原话：“多圈绝对位置控制时此值为0”）
+    // Range check. Note: multi-turn mode requires both to be 0, while max-angle's nominal lower bound is 1,
+    // so the 0/0 combination is special-cased and allowed (the official doc says: "this value is 0 for multi-turn absolute position control")
     let multico = min == 0 && max == 0;
     if !(0..=4094).contains(&min) {
         return Err(ServoError::InvalidParam(format!("最小角度限制 {min} 超出 0~4094")));
@@ -635,7 +635,7 @@ fn cmd_limits(servo: &mut Servo, id: u8, min: f64, max: f64, deg: bool, save: bo
     let min_reg = find_register("min-angle").unwrap();
     let max_reg = find_register("max-angle").unwrap();
     if save {
-        // 一次解锁流程写两个寄存器；任何一步失败都要保证重新上锁
+        // Write two registers in one unlock sequence; whichever step fails, make sure to lock again
         let lock = find_register("lock").unwrap();
         servo.write_reg(id, lock, 0)?;
         let r1 = servo.write_reg(id, min_reg, min);
@@ -647,7 +647,7 @@ fn cmd_limits(servo: &mut Servo, id: u8, min: f64, max: f64, deg: bool, save: bo
         servo.write_reg(id, max_reg, max)?;
     }
 
-    // 回读确认
+    // Read back to confirm
     let rb_min = servo.read_reg(id, min_reg)?;
     let rb_max = servo.read_reg(id, max_reg)?;
     println!(
@@ -659,11 +659,11 @@ fn cmd_limits(servo: &mut Servo, id: u8, min: f64, max: f64, deg: bool, save: bo
     Ok(())
 }
 
-/// 零位校准（0x0B 指令）：把当前机械位置标定为 target（默认中位 2048）。
+/// Zero calibration (0x0B instruction): calibrate the current mechanical position as target (default center 2048).
 ///
-/// 【流程要点】先解锁 EPROM 再校准，保证偏移写入掉电保存；
-/// 校准后回读“当前位置 + 位置偏移”双重确认（飞特的应答“成功”不可信，
-/// 实测 HD-1910 对不支持的写 128 校准也回成功）。
+/// [Key points] unlock EPROM before calibrating so the offset write persists across power loss;
+/// after calibration, double-check by reading back "current position + position offset" (Feetech's "success" reply can't be trusted;
+/// in hardware tests the HD-1910 also replied success to an unsupported write-128 calibration).
 fn cmd_zero(servo: &mut Servo, id: u8, to: Option<i64>) -> Result<()> {
     let target = to.unwrap_or(CENTER_POS);
     if !(0..=4095).contains(&target) {
@@ -672,24 +672,24 @@ fn cmd_zero(servo: &mut Servo, id: u8, to: Option<i64>) -> Result<()> {
         )));
     }
 
-    // 校准前读一次，让用户看到“这个位置原来的读数是多少”
+    // Read once before calibrating so the user sees "what this position used to read"
     let before = servo.read_reg(id, find_register("pos").unwrap())?;
     println!(
         "校准前：当前位置 = {before}（相对中位 {:+.1}°），将标定为 {target}",
         (before - CENTER_POS) as f64 * DEG_PER_COUNT
     );
 
-    // 解锁 → 校准 → 上锁：保证 31 号位置偏移写入 EPROM 掉电保存
+    // Unlock → calibrate → lock: ensures the position offset at address 31 is written to EPROM and persists across power loss
     let lock = find_register("lock").unwrap();
     servo.write_reg(id, lock, 0)?;
     let result = servo.calibrate(id, Some(target as u16));
     let relock = servo.write_reg(id, lock, 1);
     result.and(relock)?;
 
-    // 舵机内部计算偏移并写入需要一点时间
+    // The servo needs a moment to compute and write the offset internally
     thread::sleep(Duration::from_millis(100));
 
-    // 回读确认：位置应变为 target，偏移寄存器应被舵机自动修改
+    // Read back to confirm: position should become target, and the offset register should have been updated by the servo
     let after = servo.read_reg(id, find_register("pos").unwrap())?;
     let offset = servo.read_reg(id, find_register("pos-offset").unwrap())?;
     println!("校准后：当前位置 = {after}，位置偏移(31号) = {offset}（已掉电保存）");
@@ -705,11 +705,11 @@ fn cmd_zero(servo: &mut Servo, id: u8, to: Option<i64>) -> Result<()> {
     Ok(())
 }
 
-/// 设置舵机 ID —— 最重要的配置操作，必须掉电保存
+/// Set servo ID: the most important configuration operation, must persist across power loss
 ///
-/// 【易错点】写 ID 寄存器成功后，舵机**立即**切换到新 ID 应答，
-/// 所以最后一步“重新上锁”必须发给新 ID —— 如果还发给旧 ID，
-/// 会得到超时错误（ID 其实已经改成功了，属于误报）。
+/// [Common pitfall] once the ID register write succeeds, the servo **immediately** replies on the new ID,
+/// so the final "lock again" step must be sent to the new ID: if it's still sent to the old ID,
+/// you get a timeout error (the ID actually changed successfully; it's a false alarm).
 fn cmd_set_id(servo: &mut Servo, old_id: u8, new_id: u8) -> Result<()> {
     if new_id > 253 {
         return Err(ServoError::InvalidParam("ID 必须在 0~253 之间".into()));
@@ -722,11 +722,11 @@ fn cmd_set_id(servo: &mut Servo, old_id: u8, new_id: u8) -> Result<()> {
     let lock = find_register("lock").unwrap();
     let id_reg = find_register("id").unwrap();
 
-    // 1) 解锁：让 EPROM 写入掉电保存（发给旧 ID）
+    // 1) Unlock: make EPROM writes persist across power loss (sent to the old ID)
     servo.write_reg(old_id, lock, 0)?;
-    // 2) 写入新 ID（发给旧 ID；应答一到，舵机立刻只认新 ID）
+    // 2) Write the new ID (sent to the old ID; as soon as the reply arrives, the servo only answers to the new ID)
     servo.write_reg(old_id, id_reg, new_id as i64)?;
-    // 3) 重新上锁：必须发给**新 ID**
+    // 3) Lock again: must be sent to the **new ID**
     servo.write_reg(new_id, lock, 1)?;
 
     println!("完成！以后请用 -i {new_id} 连接该舵机。例如：feetech-HD1910M-tester -i {new_id} dump");
@@ -734,7 +734,7 @@ fn cmd_set_id(servo: &mut Servo, old_id: u8, new_id: u8) -> Result<()> {
     Ok(())
 }
 
-/// 设置波特率
+/// Set the baud rate
 fn cmd_set_baud(servo: &mut Servo, id: u8, index: u8) -> Result<()> {
     if index > 7 {
         return Err(ServoError::InvalidParam("波特率索引必须在 0~7 之间".into()));
@@ -747,60 +747,60 @@ fn cmd_set_baud(servo: &mut Servo, id: u8, index: u8) -> Result<()> {
     Ok(())
 }
 
-/// 位置模式运动
+/// Position mode motion
 fn cmd_goto(servo: &mut Servo, id: u8, target: i64, speed: Option<i64>, acc: Option<i64>) -> Result<()> {
-    // 可选参数：Option<i64>，给了才写，不给不动舵机原有配置
+    // Optional arguments: Option<i64>; written only if given, otherwise the servo's existing configuration is left alone
     if let Some(a) = acc {
         servo.write_reg(id, find_register("acc").unwrap(), a)?;
     }
     if let Some(s) = speed {
         servo.write_reg(id, find_register("speed").unwrap(), s)?;
     }
-    // 打开扭矩开关，否则舵机不会保持位置
+    // Turn on torque, otherwise the servo won't hold position
     servo.write_reg(id, find_register("torque-switch").unwrap(), 1)?;
     servo.write_reg(id, find_register("goal-pos").unwrap(), target)?;
-    let deg = target as f64 * 0.0879; // 0.087度/单位（文档标称值，360°/4096≈0.0879）
+    let deg = target as f64 * 0.0879; // 0.087 deg/unit (documented nominal value, 360°/4096≈0.0879)
     println!("目标位置 = {target}（约 {deg:.1}°），舵机运动中... 可用 monitor 命令观察");
     Ok(())
 }
 
 // =============================================================================
-// 右腿测试（角度 / 振荡）：以中位 2048 为 0°，按角度而不是原始位置值控制
+// Right-leg test (angle / oscillation): center 2048 is 0°, controlled by angle rather than raw position value
 // =============================================================================
 
-/// 位置中位对应的原始值（0~4095 映射 0~360°）
+/// Raw value for the center position (0~4095 maps to 0~360°)
 const CENTER_POS: i64 = 2048;
-/// 每个位置单位对应的角度（度）：360° / 4096
+/// Angle (degrees) per position unit: 360° / 4096
 const DEG_PER_COUNT: f64 = 360.0 / 4096.0;
-/// 振荡测试允许的最大幅度（度）。右腿结构件密集，幅度太大会干涉
+/// Max amplitude (degrees) allowed for the oscillation test. The right leg's structural parts are tightly packed; too large an amplitude causes interference
 const MAX_SWING_AMPLITUDE_DEG: f64 = 30.0;
 
-/// 角度（度，相对中位）→ 舵机原始位置值
+/// Angle (degrees, relative to center) → raw servo position value
 fn deg_to_pos(deg: f64) -> i64 {
     CENTER_POS + (deg / DEG_PER_COUNT).round() as i64
 }
 
-/// 解析逗号分隔的 ID 列表："11,12" → vec![11, 12]
+/// Parse a comma-separated ID list: "11,12" → vec![11, 12]
 fn parse_ids(ids: &str) -> Result<Vec<u8>> {
     let ids: std::result::Result<Vec<u8>, _> =
         ids.split(',').map(|s| s.trim().parse::<u8>()).collect();
     ids.map_err(|_| ServoError::InvalidParam("ID 列表格式应为 11,12".into()))
 }
 
-/// 角度控制：输入多少度（或弧度），舵机就转到相对中位多少度。
-/// 多个 ID 用同步写（SYNC WRITE）一条报文同时下发，两舵机动作一致。
+/// Angle control: the servo turns to however many degrees (or radians) you enter, relative to center.
+/// Multiple IDs are sent together in one SYNC WRITE packet, so both servos move in unison.
 fn cmd_angle(servo: &mut Servo, ids: &str, angle: f64, rad: bool, speed: Option<i64>) -> Result<()> {
     let ids = parse_ids(ids)?;
-    // 统一换算成“度”，弧度 × 180/π
+    // Convert everything to degrees: radians × 180/π
     let deg = if rad { angle.to_degrees() } else { angle };
-    // 单圈位置模式下目标值只有 ±180° 是确定有意义的，超出的直接拒绝
+    // In single-turn position mode only ±180° targets are well defined; anything beyond is rejected
     if !(-180.0..=180.0).contains(&deg) {
         return Err(ServoError::InvalidParam(format!(
             "角度 {deg}° 超出 ±180° 范围（相对中位）"
         )));
     }
     let target = deg_to_pos(deg);
-    // 打开扭矩 + 可选限速 + 同步下发目标位置
+    // Turn on torque + optional speed limit + send target positions synchronously
     servo.sync_write(&ids, find_register("torque-switch").unwrap(), 1)?;
     if let Some(s) = speed {
         servo.sync_write(&ids, find_register("speed").unwrap(), s)?;
@@ -813,11 +813,11 @@ fn cmd_angle(servo: &mut Servo, ids: &str, angle: f64, rad: bool, speed: Option<
     Ok(())
 }
 
-/// 振荡测试：绕中位做平滑正弦摆动，幅度小、速度慢，避免腿部结构干涉。
+/// Oscillation test: smooth sine swing around center, small amplitude and slow, to avoid leg structure interference.
 ///
-/// 【实现思路】把每个来回切成若干小步（每步 50ms），
-/// 每步按 pos = 中位 + 幅度 × sin(相位) 计算目标位置并用同步写下发，
-/// 这样两个舵机走的是同一条平滑曲线，动作一致且柔和。
+/// [Approach] split each cycle into small steps (50 ms each);
+/// at each step compute the target as pos = center + amplitude × sin(phase) and send it with a sync write,
+/// so both servos follow the same smooth curve, moving in unison and gently.
 fn cmd_swing(
     servo: &mut Servo,
     ids: &str,
@@ -837,13 +837,13 @@ fn cmd_swing(
     }
 
     let goal_pos = find_register("goal-pos").unwrap();
-    // 打开扭矩，可选限速（小速度 = 更柔和）
+    // Turn on torque, optional speed limit (lower speed = gentler)
     servo.sync_write(&ids, find_register("torque-switch").unwrap(), 1)?;
     if let Some(s) = speed {
         servo.sync_write(&ids, find_register("speed").unwrap(), s)?;
     }
 
-    // 先回中位，停稳再开始
+    // Return to center first, wait until settled, then start
     println!("回到中位 {CENTER_POS}（0°）...");
     servo.sync_write(&ids, goal_pos, CENTER_POS)?;
     thread::sleep(Duration::from_millis(800));
@@ -851,11 +851,11 @@ fn cmd_swing(
     println!(
         "开始振荡：幅度 ±{amplitude}°，{cycles} 次，每周期 {period}ms（Ctrl+C 可随时中止）"
     );
-    const STEP_MS: u64 = 50; // 每步 50ms，足以画出平滑的正弦
+    const STEP_MS: u64 = 50; // 50 ms per step, enough to draw a smooth sine
     let steps_per_cycle = (period / STEP_MS).max(1);
     for cycle in 1..=cycles {
         for step in 0..steps_per_cycle {
-            // 相位从 0 走到 2π，正好一个完整来回
+            // Phase goes from 0 to 2π, exactly one full cycle
             let phase = 2.0 * std::f64::consts::PI * step as f64 / steps_per_cycle as f64;
             let target = deg_to_pos(amplitude * phase.sin());
             servo.sync_write(&ids, goal_pos, target)?;
@@ -864,7 +864,7 @@ fn cmd_swing(
         println!("  第 {cycle}/{cycles} 次完成");
     }
 
-    // 收尾：回到中位并读回实际位置，方便核对
+    // Finish: return to center and read back the actual position for easy checking
     servo.sync_write(&ids, goal_pos, CENTER_POS)?;
     thread::sleep(Duration::from_millis(500));
     println!("振荡结束，已回中位。实际反馈：");
@@ -876,7 +876,7 @@ fn cmd_swing(
     Ok(())
 }
 
-/// 设置 PID：按“环”选择写入哪些寄存器
+/// Set PID: choose which registers to write based on the "loop"
 fn cmd_pid(
     servo: &mut Servo,
     id: u8,
@@ -887,8 +887,8 @@ fn cmd_pid(
     ram: bool,
     save: bool,
 ) -> Result<()> {
-    // 根据环和写入区域确定寄存器键名
-    // （文档：50/51/52 号运行区在位置模式是位置环 PID，恒速模式是速度环 PI）
+    // Determine register key names from the loop and the target area
+    // (doc: addresses 50/51/52 in the runtime area are the position-loop PID in position mode, and the velocity-loop PI in constant-speed mode)
     let (k_p, k_d, k_i): (&str, Option<&str>, Option<&str>) = match (pid_loop, ram) {
         (PidLoop::Position, false) => ("pos-p", Some("pos-d"), Some("pos-i")),
         (PidLoop::Position, true) => ("kp", Some("kd"), Some("ki")),
@@ -900,7 +900,7 @@ fn cmd_pid(
         }
     };
 
-    // 把 (参数值, 寄存器键名) 配成对，逐个写入
+    // Pair up (parameter value, register key name) and write them one by one
     let pairs: [(Option<i64>, &str); 3] = [
         (kp, k_p),
         (kd, k_d.unwrap_or("")),
@@ -928,7 +928,7 @@ fn cmd_pid(
     Ok(())
 }
 
-/// 实时监控反馈
+/// Live feedback monitor
 fn cmd_monitor(servo: &mut Servo, id: u8, interval: u64, count: Option<u32>) -> Result<()> {
     println!("位置      速度      负载%    电压V   温度°C  电流mA   移动  状态");
     let mut n = 0u32;
@@ -940,8 +940,8 @@ fn cmd_monitor(servo: &mut Servo, id: u8, interval: u64, count: Option<u32>) -> 
             fb.current, fb.moving, protocol::describe_status(fb.status),
         );
         n += 1;
-        // 【Rust 知识点：Option 的模式匹配】
-        // count 是 Option<u32>：Some(n) 表示用户指定了次数
+        // [Rust concept: pattern matching on Option]
+        // count is Option<u32>: Some(n) means the user specified a count
         if let Some(max) = count {
             if n >= max {
                 break;
@@ -952,7 +952,7 @@ fn cmd_monitor(servo: &mut Servo, id: u8, interval: u64, count: Option<u32>) -> 
     Ok(())
 }
 
-/// 保护参数设置
+/// Protection parameter settings
 #[allow(clippy::too_many_arguments)]
 fn cmd_protect(
     servo: &mut Servo,
@@ -995,7 +995,7 @@ fn cmd_protect(
     Ok(())
 }
 
-/// 把卸载条件/LED报警的位掩码翻译成中文（位定义见文档 3.3/3.4 节）
+/// Translate the unload-condition/LED-alarm bitmasks into Chinese (see doc sections 3.3/3.4 for bit definitions)
 fn describe_protect_bits(v: u8) -> String {
     if v == 0 {
         return "全部关闭".to_string();

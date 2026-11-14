@@ -1,24 +1,24 @@
-"""总览下面「运行和调参」那一块、设置 › 这只鸭子 › 模型 的后端（调参方案 v2 T1–T3：全部只读）。
+"""Backend for the "运行和调参" (Run and tuning) block under the overview and Settings › This duck › Models (tuning plan v2 T1–T3: all read-only).
 
-方案：scratchpad console/tuning-plan.md（v2 定稿）。三张卡：
-    卡 1 运行状态   robotd 阶段、启动四步（startup.py）、控制、能不能走、硬件
-    卡 2 调手感     走路模型自己的幅度 / 头腿平滑（文件 vs 主程序在用 vs 这一拍）、P/D/限力、手柄嘴 / 头幅度
-    卡 3 模型       每个槽一行（只看）；设置页的模型卡片、滑轮模型、导出鸭子档案（给训练用）
+Plan: scratchpad console/tuning-plan.md (v2 final). Three cards:
+    Card 1 Run status   robotd phase, the four startup steps (startup.py), control, whether it can walk, hardware
+    Card 2 Feel tuning  the walking model's own amplitude / head-leg smoothing (file vs. what the main program uses vs. this tick), P/D/torque limit, gamepad mouth / head amplitude
+    Card 3 Models       one row per slot (view only); the models card on the settings page, the slider model, export duck profile (for training)
 
-**这一版不往鸭子写任何东西**：改动要等 root 小助手（方案 T4）。唯一的写是 Studio 自己 state 目录里的
-duck-body.json（导出档案用的重量，用户在设置页填的）。
+**This version writes nothing to the duck**: changes have to wait for the root helper (plan T4). The only write is duck-body.json in Studio's own state directory
+(weights used for the exported profile, filled in by the user on the settings page).
 
-关键事实（方案 §0、§2）：
-- 联合 Walk 的幅度和头腿平滑写在**模型自己目录的 deployment-execution.json**（fork control.rs:622-632），
-  robotd.toml [policy] 的 action_scale 谁都不用；全局平滑只有起坐用（control.rs:722-733）。
-- 「主程序在用」一律看 busStatus.loaded_models.walk.runtime_execution_profile（审查 T-R14）；
-  active_action_scale / active_target_filters 只在策略开着时有，是「这一拍实际用的（× 电压补偿）」。
-- 舵机参数文件 servo-test-parameters.json 没有 = V167 原版（上力 P = 走路合同的 kp_fw、D 0、限力 1000）。
-  主程序读到的是 native.hd1910.servo_parameters；这个键不存在 = 原版板端固件的 robotd（不支持改，D6c）。
-  **不用 state.safety.gain**：飞特后端根本不写它（审查 T-R4，feetech.rs:1825-1834）。
+Key facts (plan §0, §2):
+- The combined Walk's amplitude and head-leg smoothing live in **deployment-execution.json in the model's own directory** (fork control.rs:622-632);
+  nobody uses action_scale in robotd.toml [policy]; global smoothing is only used for stand-up / sit-down (control.rs:722-733).
+- "What the main program uses" always comes from busStatus.loaded_models.walk.runtime_execution_profile (review T-R14);
+  active_action_scale / active_target_filters only exist while the policy is on and mean "what this tick actually uses (× voltage compensation)".
+- No servo parameter file servo-test-parameters.json = V167 stock (power-on P = the walking contract's kp_fw, D 0, torque limit 1000).
+  What the main program reads is native.hd1910.servo_parameters; if this key doesn't exist = robotd with the stock board firmware (changes not supported, D6c).
+  **Don't use state.safety.gain**: the Feetech backend never writes it (review T-R4, feetech.rs:1825-1834).
 
-读文件全在线程里（io()，2 秒一次，按 mtime 缓存；走路合同 431 KB 只在变了时才解析），view() 只拼内存里的东西。
-文件路径都相对 root（鸭子上是 /；测试、电脑上截图用一个假文件树：dev/duckfs.py）。
+All file reads happen in a thread (io(), every 2 seconds, cached by mtime; the 431 KB walking contract is parsed only when it changes); view() only assembles what is in memory.
+File paths are all relative to root (/ on the duck; tests and screenshots on a computer use a fake file tree: dev/duckfs.py).
 """
 import asyncio
 import json
@@ -43,8 +43,8 @@ CONFIG, SAVED = f"{ETC}/robotd.toml", f"{ETC}/robotd.saved.toml"
 SERVO_FILE = f"{ETC}/servo-test-parameters.json"
 PAD_FILE = f"{ETC}/pad-settings.json"
 PAD_PREV = f"{ETC}/pad-settings.json.previous"
-PAD_LIVE = "run/padd/input-settings.json"      # padd 实际在用的（padd:padd 0644，fork padd/src/input_settings.rs）
-PROFILE = f"{BASE}/management-profile.json"     # 随包模型的名字（builtin_models）
+PAD_LIVE = "run/padd/input-settings.json"      # what padd actually uses (padd:padd 0644, fork padd/src/input_settings.rs)
+PROFILE = f"{BASE}/management-profile.json"     # names of the bundled models (builtin_models)
 ROLLER = f"{BASE}/roller"
 ROLLERS = (("swizzle", "滑轮 · 对称滑"), ("crouch", "滑轮 · 蹲下"), ("spin", "滑轮 · 原地转"), ("standup", "滑轮 · 倒地起身"))
 BODY_FILE = "duck-body.json"
@@ -56,20 +56,20 @@ SLOT_SKILL = {"sitstand": "sit_toggle", "ground_pick": "ground_pick", "kick_left
               "roulade": "roulade"}
 BUTTON_CN = {"a": "A", "b": "B", "x": "X", "y": "Y", "lb": "LB", "rb": "RB", "dpad_down": "十字下", "dpad_up": "十字上",
              "dpad_left": "十字左", "dpad_right": "十字右", "ls": "L3", "rs": "R3"}
-# 随包联合 Walk（只有它有硬写的默认值，审查 T-R17：别的模型要看 .orig）
+# Bundled combined Walk (only it has hard-coded defaults, review T-R17: other models need to look at .orig)
 BUNDLED_WALK = "1cbf8730eadd75a5704332c9f3c10f60"
 BUNDLED_WALK_DEFAULT = {"action_scale": 1.0, "head_lowpass": 0.5, "legs_lowpass": 0.7}
-V167_SERVO = {"kd": 0, "torque_limit": 1000}    # 没参数文件：D 0、限力 1000，P 取走路合同（hd1910.rs:121-155, 257-267）
+V167_SERVO = {"kd": 0, "torque_limit": 1000}    # no parameter file: D 0, torque limit 1000, P taken from the walking contract (hd1910.rs:121-155, 257-267)
 PAD_DEFAULT = {"mouth_percent": 100.0, "head_rad": 2.5}
-MOUTH_WARN = 10                                  # 嘴巴最大开度 ≤ 10%：几乎张不开，标黄（D6e：改回按钮先不做）
+MOUTH_WARN = 10                                  # max mouth opening ≤ 10%: can barely open, flagged yellow (D6e: a revert button is not done yet)
 SCALE_USE_CN = {"joint_uniform": "走路（联合模型自己的参数）", "walking": "走路", "hold": "原地保持", "held": "没在推理",
                 "homing": "回站姿", "sit": "坐着", "rise": "站起来", "ground_pick": "低头捡东西", "roulade": "前滚翻",
                 "kick_left": "左脚踢", "kick_right": "右脚踢", "stand": "站立网络", "walk": "走路"}
 PHASE_CN = {"control": ("控制中", "ok"), "configuring_bus": ("在配置舵机总线", "warn"), "waiting_for_bus": ("等待总线设备响应", "warn"),
             "configuration_error": ("配置错了", "bad"), "configuring_uart": ("在配置串口", "warn"), "ready": ("调试模式", "warn"),
             "read_error": ("调试模式 · 读舵机出错", "bad")}
-MAX_JSON = 2 << 20            # 普通 json / toml 最大 2 MB
-MAX_CONTRACT = 8 << 20        # 合同 431 KB 左右，留够
+MAX_JSON = 2 << 20            # max 2 MB for ordinary json / toml
+MAX_CONTRACT = 8 << 20        # the contract is about 431 KB; leave plenty of room
 IO_EVERY_S = 2.0
 MISSED_WINDOW_S = 60.0
 AGE = {"health": 8.0, "policies": 6.0, "state": 1.5}
@@ -78,7 +78,7 @@ BODY_MAX_G = 5000
 
 
 class Refused(Exception):
-    """这个操作现在不能做，原因直接给页面看。"""
+    """This operation can't be done right now; the reason is shown directly on the page."""
 
 
 def num(x):
@@ -96,8 +96,8 @@ def _fresh(sample, key, now):
 
 
 def rounds_of(checkpoint):
-    """训练轮数：检查点 9599 → 9600 轮、9999 → 10000 轮、11000 → 11000 轮（凑整的规律跟随包模型的名字一样）。
-    字符串（老模型的 manifest 写的是检查点文件路径，比如 …/model_9999.pt）取最后一个数字。"""
+    """Training iterations: checkpoint 9599 → 9600 iterations, 9999 → 10000, 11000 → 11000 (same rounding rule as the bundled model names).
+    For strings (old models' manifests store the checkpoint file path, e.g. …/model_9999.pt) take the last number."""
     n = None
     if isinstance(checkpoint, bool):
         return None
@@ -114,7 +114,7 @@ def rounds_of(checkpoint):
 
 
 class FileCache:
-    """按 (mtime_ns, size) 缓存解析结果。读不到 = {"missing": True}；坏了 = {"error": "原因"}。"""
+    """Caches parsed results by (mtime_ns, size). Unreadable = {"missing": True}; broken = {"error": "reason"}."""
 
     def __init__(self):
         self._c = {}
@@ -153,7 +153,7 @@ def _toml(data):
 
 
 def _contract_summary(data):
-    """走路 / 动作合同只留几个字段（整份 431 KB 不留在内存里）。"""
+    """Keeps only a few fields of the walking / action contract (the whole 431 KB is not kept in memory)."""
     c = json.loads(data.decode("utf-8"))
     acts = ((c.get("model") or {}).get("actuators") or []) if isinstance(c.get("model"), dict) else []
     kp = acts[0].get("kp_fw") if acts and isinstance(acts[0], dict) else None
@@ -179,22 +179,22 @@ class Tune:
         self.rd, self.log, self.state_dir, self.duck = rd, log, state_dir, duck or {}
         self.root = Path(root)
         self.cache = FileCache()
-        self.disk = {}                 # io() 读好的东西：整份换掉（view() 在事件循环里读，不加锁）
-        self._missed = deque(maxlen=64)   # (monotonic, missed, ticks)：算「最近一分钟加了几拍」
+        self.disk = {}                 # what io() has read: replaced wholesale (view() reads it in the event loop without a lock)
+        self._missed = deque(maxlen=64)   # (monotonic, missed, ticks): to compute "how many ticks were added in the last minute"
         self._io_err_logged = set()
 
-    # ---- 路径 ----
+    # ---- Paths ----
 
     def p(self, rel):
         return self.root / rel
 
     def abs_path(self, path):
-        """robotd 报的绝对路径（/opt/robot/…）换到 root 下面。"""
+        """Maps an absolute path reported by robotd (/opt/robot/…) under root."""
         if not isinstance(path, str) or not path.startswith("/"):
             return None
         return self.root / path.lstrip("/")
 
-    # ---- 读文件（线程里） ----
+    # ---- Reading files (in a thread) ----
 
     def io(self):
         c = self.cache
@@ -210,7 +210,7 @@ class Tune:
         disk["builtin_names"] = {m.get("id"): m.get("name") for m in (prof.get("builtin_models") or [])
                                  if isinstance(m, dict) and isinstance(m.get("id"), str)}
         disk["body"] = c.get(Path(self.state_dir) / BODY_FILE, _json)
-        # 要读的模型目录：toml 里各槽 + 技能的路径，加上主程序报的 loaded_models（两边不一定一样）
+        # Model directories to read: each slot + skill path from the toml, plus loaded_models reported by the main program (the two may differ)
         paths = set()
         pol = (_val(cfg) or {}).get("policy") if isinstance(_val(cfg), dict) else None
         if isinstance(pol, dict):
@@ -240,19 +240,19 @@ class Tune:
             rollers.append({"id": name, "label": label, **m})
         disk["rollers"] = rollers
         disk["at"] = time.monotonic()
-        # 两份 toml 一不一致（板端脚本两份一起写；robot.loadPolicy 只写第一份）
+        # Whether the two toml files agree (the board-side script writes both; robot.loadPolicy only writes the first)
         a, b = _val(cfg), _val(saved)
         if a is None or b is None:
             disk["tomls_same"] = None
         else:
             disk["tomls_same"] = a == b
         self.disk = disk
-        # 健康检查里的超时拍数：记历史，算最近一分钟加了几拍
+        # Timed-out tick count from the health check: keep history to compute how many were added in the last minute
         h = self.rd.health.value if isinstance(self.rd.health.value, dict) else None
         loop = (h or {}).get("control_loop") if isinstance((h or {}).get("control_loop"), dict) else None
         if loop and isinstance(loop.get("missed"), int) and isinstance(loop.get("ticks"), int):
             if self._missed and (loop["ticks"] < self._missed[-1][2] or loop["missed"] < self._missed[-1][1]):
-                self._missed.clear()          # robotd 重启过：计数从头来
+                self._missed.clear()          # robotd restarted: the count starts over
             self._missed.append((time.monotonic(), loop["missed"], loop["ticks"]))
         for key, entry in (("config", cfg), ("servo_file", disk["servo_file"]), ("pad_file", disk["pad_file"])):
             e = _err(entry)
@@ -278,7 +278,7 @@ class Tune:
         return out
 
     async def loop(self):
-        """app.py 的 lifespan 起：2 秒读一次文件（线程里，SD 卡一卡不挡卸力）。"""
+        """Started by app.py's lifespan: reads files every 2 seconds (in a thread, so a stalled SD card doesn't block relax)."""
         while True:
             try:
                 await asyncio.to_thread(self.io)
@@ -288,7 +288,7 @@ class Tune:
                 await asyncio.sleep(5.0)
             await asyncio.sleep(IO_EVERY_S)
 
-    # ---- 推给页面 ----
+    # ---- Pushed to the page ----
 
     def view(self, now=None):
         now = time.monotonic() if now is None else now
@@ -422,10 +422,10 @@ class Tune:
         rows.sort(key=lambda r: (-(r["timeout"] + r["missing"]), r["id"]))
         return rows[:3]
 
-    # ---- 卡 2 ----
+    # ---- Card 2 ----
 
     def _walk(self, bus, policy_cfg, disk):
-        """走路模型：toml 里配的那个目录、它的执行配置（文件）、主程序在用的（loaded_models.walk）。"""
+        """Walking model: the directory configured in the toml, its execution config (file), what the main program uses (loaded_models.walk)."""
         models = disk.get("models") or {}
         lm = bus.get("loaded_models") if isinstance(bus.get("loaded_models"), dict) else {}
         loaded = lm.get("walk") if isinstance(lm.get("walk"), dict) else None
@@ -438,7 +438,7 @@ class Tune:
         if joint:
             loaded_vals = {k: num(running.get(k)) for k in keys} if running else None
         else:
-            # 不是联合模型：走路用全局 [policy]（主程序报的 resolved 值）
+            # Not a combined model: walking uses the global [policy] (resolved values reported by the main program)
             loaded_vals = {k: num(bus.get(k)) for k in keys} if any(num(bus.get(k)) is not None for k in keys) else None
         vals = {k: {"file": num((file or {}).get(k)), "loaded": (loaded_vals or {}).get(k)} for k in keys}
         mid = m.get("dir") or (os.path.basename(os.path.dirname(path)) if isinstance(path, str) else None)
@@ -532,7 +532,7 @@ class Tune:
         def settings(entry):
             v = _val(entry)
             if isinstance(v, dict) and "settings" in v and isinstance(v["settings"], dict):
-                v = v["settings"]                # padd 的回执：{"pid", "path", "settings": {...}}
+                v = v["settings"]                # padd's receipt: {"pid", "path", "settings": {...}}
             if not isinstance(v, dict):
                 return None
             return {"mouth_percent": num(v.get("mouth_percent")), "head_rad": num(v.get("head_rad"))}
@@ -547,7 +547,7 @@ class Tune:
                 "mouth_warn": mouth is not None and mouth <= MOUTH_WARN,
                 "same": (file == live) if file and live else None}
 
-    # ---- 卡 3 / 模型页 ----
+    # ---- Card 3 / models page ----
 
     def _name_of(self, path, models):
         if not isinstance(path, str):
@@ -611,7 +611,7 @@ class Tune:
         return {"slots": rows, "rollers": rollers, "skills": (pol or {}).get("skills") or [],
                 "change_error": (pol or {}).get("change_error"), "policies_known": pol is not None}
 
-    # ---- 导出鸭子档案 ----
+    # ---- Export duck profile ----
 
     def body(self):
         v = _val((self.disk or {}).get("body") or {})
@@ -620,7 +620,7 @@ class Tune:
         return v if isinstance(v, dict) else None
 
     def profile(self):
-        """给训练用的鸭子档案（只读汇总，方案 §2.4）。读不到的写 null，不编。"""
+        """Duck profile for training (read-only summary, plan §2.4). Unreadable values are written as null, not made up."""
         rd = self.rd
         bus = rd.bus.value if isinstance(rd.bus.value, dict) else {}
         native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
@@ -658,7 +658,7 @@ class Tune:
         }
 
     def save_body(self, body, by=None):
-        """设置页填的重量（g）和脚底材料。只写 Studio 自己的 state 目录，不碰鸭子的配置。"""
+        """Weight (g) and foot sole material filled in on the settings page. Only writes Studio's own state directory, never touches the duck's config."""
         if not isinstance(body, dict):
             raise Refused("没收到数据")
         out = {}
@@ -717,7 +717,7 @@ class Tune:
         raise Refused(f"不认识的指令：{op}")
 
     def diag(self):
-        """诊断包里的「调参快照」：三类文件读到的、主程序回读的。"""
+        """The "tuning snapshot" in the diagnostics bundle: what was read from the three kinds of files and what the main program reads back."""
         v = self.view()
         d = self.disk or {}
         return {"view": v, "files": {k: (d.get(k) or {}).get("error") or ("缺" if (d.get(k) or {}).get("missing") else "有")
@@ -726,7 +726,7 @@ class Tune:
 
 
 def _group(rows):
-    """[[P, D, I], ...] → [{"pdi": [P, D, I], "n": 颗数}]（15 颗一样就一行）。"""
+    """[[P, D, I], ...] → [{"pdi": [P, D, I], "n": count}] (one row if all 15 are the same)."""
     out = {}
     for r in rows:
         if isinstance(r, list) and len(r) == 3:

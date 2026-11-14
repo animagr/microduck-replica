@@ -1,127 +1,127 @@
-//! protocol.rs —— FT-SCS 自定义串口协议（飞特舵机私有协议）
+//! protocol.rs: FT-SCS custom serial protocol (Feetech's proprietary servo protocol)
 //!
-//! 【协议帧格式 —— 主机下发包】
+//! [Frame format: host-to-servo packet]
 //! ```text
-//!   字节序号:   0     1     2      3         4          5..N+4    N+5
-//!   内容:     0xFF  0xFF   ID   Length   Instruction   参数...   Checksum
+//!   Byte index:   0     1     2      3         4          5..N+4    N+5
+//!   Content:    0xFF  0xFF   ID   Length   Instruction   params...  Checksum
 //! ```
-//!   - 帧头：固定的两个 0xFF，用来让接收方找到一帧的起点；
-//!   - ID：目标舵机站号 0~253，0xFE(254) 是广播地址（所有舵机都收但不应答）；
-//!   - Length = 参数个数 N + 2（指令字节 1 个 + 校验字节 1 个）；
-//!   - Checksum = 对 ID + Length + Instruction + 所有参数 求和，
-//!     取反(~)后只保留低 8 位。接收方重新算一遍，不一致就丢弃。
+//!   - Header: two fixed 0xFF bytes so the receiver can find the start of a frame;
+//!   - ID: target servo address 0~253; 0xFE (254) is the broadcast address (all servos receive it but don't reply);
+//!   - Length = number of parameters N + 2 (1 instruction byte + 1 checksum byte);
+//!   - Checksum = sum of ID + Length + Instruction + all parameters,
+//!     inverted (~) with only the low 8 bits kept. The receiver recomputes it and discards the frame on mismatch.
 //!
-//! 【舵机应答包】格式几乎一样，只是第 4 个字节从“指令”换成了“错误状态字”：
+//! [Servo reply packet] almost the same format, except byte 4 changes from "instruction" to "error status byte":
 //! ```text
-//!   0xFF  0xFF   ID   Length   Error   参数...   Checksum
+//!   0xFF  0xFF   ID   Length   Error   params...   Checksum
 //! ```
 //!
-//! 【Rust 知识点：为什么这一层不碰串口？】
-//! 这一层只做“字节数组 <-> 结构体”的纯数据转换，不知道串口的存在。
-//! 好处是：可以脱离硬件做单元测试（见文件底部的 #[cfg(test)] 模块），
-//! 这是“分层设计”的典型做法。
+//! [Rust concept: why doesn't this layer touch the serial port?]
+//! This layer only does pure data conversion between "byte array <-> struct" and doesn't know the serial port exists.
+//! The benefit: it can be unit-tested without hardware (see the #[cfg(test)] module at the bottom of the file);
+//! this is a typical "layered design" practice.
 
 use crate::error::{Result, ServoError};
 
-/// 帧头：FT-SCS 协议固定用两个 0xFF 作为一帧的开始标志。
+/// Frame header: the FT-SCS protocol always uses two 0xFF bytes to mark the start of a frame.
 pub const HEADER: [u8; 2] = [0xFF, 0xFF];
 
-/// 广播 ID：总线上所有舵机都会执行，但都不返回应答包。
-/// 常用于同步写多个舵机。扫描时千万不要用它来判断舵机是否存在。
+/// Broadcast ID: every servo on the bus executes it, but none returns a reply packet.
+/// Commonly used for synchronous writes to multiple servos. Never use it to check whether a servo exists when scanning.
 pub const BROADCAST_ID: u8 = 0xFE;
 
-/// 协议指令集（内存表文档第 7、19 行提到的指令都在这里）。
+/// Protocol instruction set (all instructions mentioned in lines 7 and 19 of the memory table doc are here).
 ///
-/// 【Rust 知识点：#[repr(u8)]】
-/// 默认情况下 Rust 枚举的内存布局是不对外保证的；加上 #[repr(u8)]
-/// 就强制每个成员用 1 个字节表示，值就是我们指定的数字，
-/// 这样 `Instruction::Ping as u8` 就能安全地得到协议字节 0x01。
+/// [Rust concept: #[repr(u8)]]
+/// By default the memory layout of a Rust enum is not guaranteed externally; adding #[repr(u8)]
+/// forces each variant to be represented by 1 byte whose value is the number we specify,
+/// so `Instruction::Ping as u8` safely yields the protocol byte 0x01.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Instruction {
-    /// 0x01 查询舵机是否在线（握手），正常工作舵机应回应答包
+    /// 0x01 Query whether the servo is online (handshake); a working servo should return a reply packet
     Ping = 0x01,
-    /// 0x02 读内存表：参数 = [起始地址, 读取字节数]
+    /// 0x02 Read memory table: params = [start address, number of bytes to read]
     Read = 0x02,
-    /// 0x03 写内存表：参数 = [起始地址, 数据...]，立即生效
+    /// 0x03 Write memory table: params = [start address, data...], takes effect immediately
     Write = 0x03,
-    /// 0x04 异步写（REG WRITE）：参数同写指令，但先“记下来”不执行，
-    /// 等收到 ACTION 指令才统一执行（用于多舵机同步动作）
+    /// 0x04 Asynchronous write (REG WRITE): same params as write, but it is "noted down" and not executed
+    /// until an ACTION instruction arrives, then executed together (for synchronized multi-servo motion)
     RegWrite = 0x04,
-    /// 0x05 触发执行之前 REG WRITE 缓存的内容
+    /// 0x05 Trigger execution of what was previously buffered by REG WRITE
     Action = 0x05,
-    /// 0x06 恢复出厂设置（EPROM 全部回到默认值）
+    /// 0x06 Factory reset (all EPROM back to defaults)
     Reset = 0x06,
-    /// 0x08 重启舵机：等效断电重上电，SRAM 从 EPROM 重新加载。
-    /// 可用于不物理断电地验证 EPROM 写入是否真正落盘
+    /// 0x08 Reboot the servo: equivalent to a power cycle; SRAM reloads from EPROM.
+    /// Can be used to verify that EPROM writes were really committed without physically cutting power
     Reboot = 0x08,
-    /// 0x0A 状态重置（重置多圈模式的圈数计数）
+    /// 0x0A Status reset (resets the turn counter in multi-turn mode)
     ResetTurns = 0x0A,
-    /// 0x0B 位置校准：无参数 = 把当前位置标定为中位 2048；
-    /// 带 2 字节参数（小端）= 标定为指定读数。
-    /// 舵机收到后自动计算并修改 31 号位置偏移寄存器，
-    /// 这就是飞特 FD 调试软件“设置零位”按钮对应的指令。
-    /// 注意：HD-1910（HLS 系固件 ≥3.43）不支持老式“扭矩开关写 128”校准，
-    /// 必须用本指令；且应答“成功”不代表生效，校准后务必回读确认。
+    /// 0x0B Position calibration: no params = calibrate the current position as center 2048;
+    /// with a 2-byte param (little-endian) = calibrate to the given reading.
+    /// On receipt the servo automatically computes and updates the position offset register at address 31;
+    /// this is the instruction behind the "Set zero" button in Feetech's FD debugging software.
+    /// Note: HD-1910 (HLS-series firmware ≥3.43) doesn't support the old "write 128 to the torque switch" calibration;
+    /// this instruction must be used, and a "success" reply doesn't mean it took effect, so always read back to confirm after calibrating.
     Calibrate = 0x0B,
-    /// 0x83 同步写：一条指令同时给多个舵机写同一个地址
+    /// 0x83 Sync write: one instruction writes the same address on several servos at once
     SyncWrite = 0x83,
 }
 
-/// 计算 FT-SCS 校验和：所有字节相加后按位取反，只留低 8 位。
+/// Compute the FT-SCS checksum: add all bytes, invert bitwise, keep only the low 8 bits.
 ///
-/// 【Rust 知识点：`impl IntoIterator` 与泛型】
-/// 参数用泛型 + trait bound，让本函数既能接收 `&[u8]` 也能接收 `Vec<u8>`，
-/// 调用方更自由。`.iter()` 产生迭代器，`.fold(0u8, ...)` 是“折叠”累加。
-/// wrapping_add 是“溢出就回绕”的加法 —— 校验和本来就要模 256，
-/// 如果用普通 `+`，调试模式下溢出会直接 panic（程序崩溃），
-/// 这是 Rust 帮你发现算术错误的保护机制，这里我们显式声明“我就是要回绕”。
+/// [Rust concept: `impl IntoIterator` and generics]
+/// The parameter uses a generic + trait bound so this function accepts both `&[u8]` and `Vec<u8>`,
+/// giving callers more freedom. `.iter()` produces an iterator, and `.fold(0u8, ...)` is a "fold" accumulation.
+/// wrapping_add is addition that "wraps around on overflow": the checksum is modulo 256 anyway;
+/// with a plain `+`, overflow panics in debug mode (the program crashes);
+/// that's Rust's safeguard for catching arithmetic errors, and here we explicitly declare "I do want wraparound".
 pub fn checksum(bytes: &[u8]) -> u8 {
     let sum = bytes
         .iter()
         .fold(0u8, |acc, &b| acc.wrapping_add(b));
-    !sum // `!` 对整数是按位取反（NOT），对 bool 才是逻辑非
+    !sum // `!` on integers is bitwise NOT; only on bool is it logical NOT
 }
 
-/// 组装一条完整的下发包。
+/// Assemble a complete host-to-servo packet.
 ///
-/// 【Rust 知识点：Vec 与所有权】
-/// 函数内部创建 Vec<u8> 并把它“返回”给调用者 —— 所有权随之转移，
-/// 没有 malloc/free，也没有垃圾回收，编译器在编译期就确定了谁负责释放。
+/// [Rust concept: Vec and ownership]
+/// The function creates a Vec<u8> internally and "returns" it to the caller: ownership moves along with it,
+/// no malloc/free and no garbage collection; the compiler decides at compile time who is responsible for freeing it.
 pub fn build_packet(id: u8, inst: Instruction, params: &[u8]) -> Vec<u8> {
-    // Length = 指令(1) + 参数个数 + 校验(1)
+    // Length = instruction (1) + number of params + checksum (1)
     let length = (params.len() + 2) as u8;
 
-    // with_capacity 预分配恰好够用的内存，避免 push 时反复扩容
+    // with_capacity preallocates exactly enough memory, avoiding repeated growth on push
     let mut pkt = Vec::with_capacity(params.len() + 6);
     pkt.extend_from_slice(&HEADER);
     pkt.push(id);
     pkt.push(length);
     pkt.push(inst as u8);
     pkt.extend_from_slice(params);
-    // 校验和覆盖 ID..=最后一个参数（不含帧头）
+    // The checksum covers ID..=last param (excluding the header)
     pkt.push(checksum(&pkt[2..]));
     pkt
 }
 
-/// 解析后的舵机应答包。
+/// Parsed servo reply packet.
 pub struct StatusPacket {
-    /// 应答的舵机 ID
+    /// ID of the replying servo
     pub id: u8,
-    /// 错误状态字：0 表示正常；非 0 时每一位代表一种异常
-    /// （BIT0 电压 / BIT1 磁编码 / BIT2 温度 / BIT3 电流）
+    /// Error status byte: 0 means normal; when non-zero each bit represents a fault
+    /// (BIT0 voltage / BIT1 magnetic encoder / BIT2 temperature / BIT3 current)
     pub error: u8,
-    /// 应答携带的数据（读指令的返回值就放在这里）
+    /// Data carried by the reply (the return value of a read instruction goes here)
     pub params: Vec<u8>,
 }
 
-/// 把收到的一串原始字节解析成 StatusPacket，并做完整校验。
+/// Parse a string of received raw bytes into a StatusPacket, with full validation.
 ///
-/// 【Rust 知识点：用 Result 做“可组合的校验流水线”】
-/// 每一步检查失败就提前 return Err(...)，成功路径一路平坦地写下去，
-/// 避免了层层嵌套的 if/else（所谓“卫语句”风格）。
+/// [Rust concept: using Result as a "composable validation pipeline"]
+/// Each check returns Err(...) early on failure, and the success path is written straight down,
+/// avoiding deeply nested if/else (the so-called "guard clause" style).
 pub fn parse_status(buf: &[u8]) -> Result<StatusPacket> {
-    // 一帧最少 6 字节：帧头2 + ID + Length + Error + Checksum
+    // A frame is at least 6 bytes: header 2 + ID + Length + Error + Checksum
     if buf.len() < 6 {
         return Err(ServoError::Malformed("应答包太短，不足 6 字节".into()));
     }
@@ -130,11 +130,11 @@ pub fn parse_status(buf: &[u8]) -> Result<StatusPacket> {
     }
     let id = buf[2];
     let length = buf[3] as usize;
-    // Length 字段声称的总长度 = 帧头2 + ID + Length + Length的值
+    // Total length claimed by the Length field = header 2 + ID + Length + value of Length
     if buf.len() != length + 4 {
         return Err(ServoError::Malformed("包长度与 Length 字段不符".into()));
     }
-    // 重新计算校验和（范围同样是 ID 到校验字节之前）
+    // Recompute the checksum (same range: from ID up to before the checksum byte)
     let expect = checksum(&buf[2..buf.len() - 1]);
     if expect != buf[buf.len() - 1] {
         return Err(ServoError::Checksum);
@@ -142,22 +142,22 @@ pub fn parse_status(buf: &[u8]) -> Result<StatusPacket> {
     Ok(StatusPacket {
         id,
         error: buf[4],
-        // 参数区 = 错误字节之后、校验字节之前；可能为空（比如 PING 应答）
+        // Parameter area = after the error byte, before the checksum byte; may be empty (e.g. a PING reply)
         params: buf[5..buf.len() - 1].to_vec(),
     })
 }
 
-/// 把舵机状态字（应答包 Error 字节 / 内存表 65 号地址）翻译成中文描述。
+/// Translate the servo status byte (reply packet Error byte / memory table address 65) into a Chinese description.
 ///
-/// 【Rust 知识点：位运算 + Vec<String> + join】
-/// 状态字是按位编码的：BIT0(1)=电压 BIT1(2)=磁编码 BIT2(4)=温度 BIT3(8)=电流。
-/// 多种异常同时存在时值为各位之和，所以要用 `&` 逐位测试。
+/// [Rust concept: bit operations + Vec<String> + join]
+/// The status byte is bit-encoded: BIT0(1)=voltage BIT1(2)=magnetic encoder BIT2(4)=temperature BIT3(8)=current.
+/// When several faults are present the value is the sum of the bits, so test each bit with `&`.
 pub fn describe_status(status: u8) -> String {
     if status == 0 {
         return "正常".to_string();
     }
     let mut problems: Vec<&str> = Vec::new();
-    // 【Rust 知识点：迭代器式位检查】这里用普通的数组循环，简单直白
+    // [Rust concept: iterator-style bit checks] a plain array loop here, simple and direct
     let bits = [
         (1 << 0, "电压异常"),
         (1 << 1, "磁编码器异常"),
@@ -173,49 +173,49 @@ pub fn describe_status(status: u8) -> String {
 }
 
 // =============================================================================
-// 【Rust 知识点：单元测试】
-// `#[cfg(test)]` 表示这个模块只在 `cargo test` 时才编译，正式发布时不包含。
-// 协议层是纯函数，不依赖硬件，最适合用单元测试来保证正确性。
+// [Rust concept: unit tests]
+// `#[cfg(test)]` means this module is compiled only for `cargo test`, and excluded from release builds.
+// The protocol layer is pure functions with no hardware dependency, ideal for ensuring correctness with unit tests.
 // =============================================================================
 #[cfg(test)]
 mod tests {
-    use super::*; // 引入父模块的全部内容（super = 上一级模块）
+    use super::*; // bring in everything from the parent module (super = the module one level up)
 
     #[test]
     fn test_build_ping_packet() {
-        // PING ID=1 的经典报文：FF FF 01 02 01 FB
+        // The classic PING ID=1 packet: FF FF 01 02 01 FB
         let pkt = build_packet(1, Instruction::Ping, &[]);
         assert_eq!(pkt, vec![0xFF, 0xFF, 0x01, 0x02, 0x01, 0xFB]);
     }
 
     #[test]
     fn test_checksum_wraps() {
-        // 0xFF + 0xFF 会溢出 u8，wrapping_add 应该回绕而不是 panic
+        // 0xFF + 0xFF overflows u8; wrapping_add should wrap around instead of panicking
         assert_eq!(checksum(&[0xFF, 0xFF]), !0xFEu8);
     }
 
     #[test]
     fn test_parse_status_roundtrip() {
-        // 自己造一个合法的应答包（读地址 56 返回 2 字节），再解析回来
+        // Build a valid reply packet ourselves (reading address 56 returns 2 bytes), then parse it back
         let raw = [0xFF, 0xFF, 0x01, 0x04, 0x00, 0x00, 0x08, 0xF2];
         let pkt = parse_status(&raw).expect("合法包应该解析成功");
         assert_eq!(pkt.id, 1);
         assert_eq!(pkt.error, 0);
-        assert_eq!(pkt.params, vec![0x00, 0x08]); // 小端：位置 = 0x0800 = 2048
+        assert_eq!(pkt.params, vec![0x00, 0x08]); // little-endian: position = 0x0800 = 2048
     }
 
     #[test]
     fn test_parse_bad_checksum() {
-        let raw = [0xFF, 0xFF, 0x01, 0x04, 0x00, 0x00, 0x08, 0x00]; // 校验字节故意写错
+        let raw = [0xFF, 0xFF, 0x01, 0x04, 0x00, 0x00, 0x08, 0x00]; // checksum byte deliberately wrong
         assert!(matches!(parse_status(&raw), Err(ServoError::Checksum)));
     }
 
     #[test]
     fn test_build_calibrate_packet() {
-        // 位置校准 ID=1 标定为 2048(0x0800)：FF FF 01 04 0B 00 08 E7
+        // Position calibration ID=1 calibrated to 2048 (0x0800): FF FF 01 04 0B 00 08 E7
         let pkt = build_packet(1, Instruction::Calibrate, &2048u16.to_le_bytes());
         assert_eq!(pkt, vec![0xFF, 0xFF, 0x01, 0x04, 0x0B, 0x00, 0x08, 0xE7]);
-        // 无参数 = 标定为中位 2048：FF FF 01 02 0B F1
+        // No params = calibrate to center 2048: FF FF 01 02 0B F1
         let pkt = build_packet(1, Instruction::Calibrate, &[]);
         assert_eq!(pkt, vec![0xFF, 0xFF, 0x01, 0x02, 0x0B, 0xF1]);
     }

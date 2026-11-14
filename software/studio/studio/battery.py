@@ -1,20 +1,20 @@
-"""电池电量估算（battery-plan.md v2 定稿）：只警告，不做任何自动动作。
+"""Battery level estimation (battery-plan.md v2 final): warnings only, no automatic actions of any kind.
 
-鸭子上没有电量计、没有 ADC，唯一的测量是 15 颗舵机各自上报的供电电压（0.1 V 一格，舵机直接吃电池原压）。
-所以电量只能「电压查表」：静置时准，带载时电压被拉低就偏低。这里的做法（审查 B-R1…B-R15 + 用户 10-18 拍板）：
+The duck has no fuel gauge and no ADC; the only measurement is the supply voltage reported by each of the 15 servos (0.1 V steps; the servos run directly on raw battery voltage).
+So the battery level can only come from a "voltage lookup": accurate at rest, reading low under load when the voltage sags. The approach here (review B-R1…B-R15 + user decision on 10-18):
 
-    每秒一个读数   新鲜、3.0–9.5 V 的那几颗里去掉最高 3 颗、最低 3 颗再平均（不足 9 颗取中位，不足 5 颗这一秒不算）
-    三类状态       rest 卸力 · light 扭矩开但没在动（保持、站着、坐着）· heavy 走路 / 做动作 / 摔了
-    轻松段         rest、light 连续 ≥ 30 秒；每秒取它最近 30 秒的中位，记一个「轻松读数」
-    估算           最近 5 分钟里最高的那个轻松读数（= 最轻松的那会儿）+ 读数校准 → 除以 2 查表；
-                   5 分钟里一直没停下 → 最近 30 秒的中位直接查表，写明「走路中，按负载电压粗估，偏低」（粗估最多出黄条）
-    起步           开机 / Studio 重启 / 读不到电压超过 10 秒以后，头 30 秒只显示「估算中」，不出黄红
-    显示           整数，跟上一次差不到 2% 不动（死区）
-    警告           条件连续 60 秒才亮，回到线上方 3% 并连续 60 秒才收；
-                   负载线：最近 10 秒中位（校准后）低于 6.9 V 连续 30 秒 → 最醒目的一条，回到 7.0 V 以上 60 秒才收
+    one reading per second   among the fresh servos within 3.0–9.5 V, drop the highest 3 and lowest 3 and average (median if fewer than 9, skip this second if fewer than 5)
+    three state classes       rest = relaxed · light = torque on but not moving (holding, standing, sitting) · heavy = walking / performing an action / fallen
+    calm stretch         rest, light continuously for ≥ 30 seconds; each second take its median over the last 30 seconds and record one "calm reading"
+    estimate           the highest calm reading in the last 5 minutes (= the calmest moment) + reading calibration → divide by 2 and look up;
+                   if it never stopped in the 5 minutes → look up the median of the last 30 seconds directly, labeled "walking, rough estimate from under-load voltage, reads low" (a rough estimate yields at most the yellow bar)
+    startup           after boot / Studio restart / no voltage readable for more than 10 seconds, the first 30 seconds only show "估算中" (estimating), no yellow or red
+    display           integer, unchanged if within 2% of the previous value (dead band)
+    warnings           a condition must hold for 60 consecutive seconds to light up, and must return 3% above the line for 60 consecutive seconds to clear;
+                   under-load line: median of the last 10 seconds (after calibration) below 6.9 V for 30 consecutive seconds → the most prominent warning, cleared only after 60 seconds back above 7.0 V
 
-纯计算：不碰网络、不碰总线、不起线程，时间从外面传进来（测试里能快进）。日志由调用方拿 feed() 返回的事件去记
-（log_events），设置文件的读写也在这里（原子写；坏了改名 .bad、用默认值、记 warn）。
+Pure computation: no network, no bus, no threads, and time is passed in from outside (tests can fast-forward). Logging is done by the caller with the events feed() returns
+(log_events); reading and writing the settings file also lives here (atomic writes; if corrupt, rename to .bad, use defaults, log a warn).
 """
 import json
 import math
@@ -24,35 +24,35 @@ from collections import deque
 
 LOG_CAT = "电池"
 
-# 2S 锂离子 18650（NP-F550 等）静置开路电压 → 电量。几种常见 18650 曲线揉出来的折中，形状偏钴酸锂：
-# 同样电压下三元电芯的电量更高，所以这张表偏保守（报得比实际低），误差约 ±15%（battery-plan.md §1.1、审查 B-R5）
+# 2S lithium-ion 18650 (NP-F550 etc.) resting open-circuit voltage → charge level. A compromise blended from several common 18650 curves, shaped toward lithium cobalt oxide:
+# at the same voltage NMC cells have more charge, so this table is conservative (reports lower than actual), error about ±15% (battery-plan.md §1.1, review B-R5)
 OCV_TABLE = ((4.20, 100), (4.15, 95), (4.10, 89), (4.05, 83), (4.00, 77), (3.95, 70), (3.90, 63), (3.85, 55),
              (3.80, 46), (3.75, 37), (3.70, 28), (3.65, 19), (3.60, 12), (3.55, 8), (3.50, 5), (3.40, 2),
              (3.30, 1), (3.00, 0))
-CELLS = 2                       # HD-1910 最高 8.4 V：只能用 2S
-V_MIN, V_MAX = 3.0, 9.5         # 一颗舵机的读数在这之外就当没读到
-RD_EMPTY_V, RD_FULL_V = 6.6, 8.2    # robotd 自己的直线（fork duck-control/src/model.rs:118-137），只拿来对照
+CELLS = 2                       # HD-1910 maximum is 8.4 V: only 2S can be used
+V_MIN, V_MAX = 3.0, 9.5         # a single servo reading outside this range is treated as not read
+RD_EMPTY_V, RD_FULL_V = 6.6, 8.2    # robotd's own linear mapping (fork duck-control/src/model.rs:118-137), only used for comparison
 
-ESTIMATING_S = 30       # 起步后头 30 秒只显示「估算中」（B-R2）
-CALM_S = 30             # 轻松段至少这么长才算数（B-R4：60 → 30）
-CALM_WINDOW_S = 300     # 「最近 5 分钟最轻松的那会儿」
-LOAD_ROUGH_S = 30       # 没有轻松段时，粗估用最近 30 秒的中位
-GAP_S = 10.0            # 15 颗都读不到电压超过 10 秒 → 重新起步（B-R4）
-RUN_GAP_S = 10.0        # 轻松段里两个样本隔得超过这个就断开
+ESTIMATING_S = 30       # the first 30 seconds after startup only show "估算中" (estimating) (B-R2)
+CALM_S = 30             # a calm stretch must be at least this long to count (B-R4: 60 → 30)
+CALM_WINDOW_S = 300     # "the calmest moment in the last 5 minutes"
+LOAD_ROUGH_S = 30       # without a calm stretch, the rough estimate uses the median of the last 30 seconds
+GAP_S = 10.0            # no voltage from any of the 15 servos for more than 10 seconds → start over (B-R4)
+RUN_GAP_S = 10.0        # two samples in a calm stretch further apart than this break it
 KEEP_S = CALM_WINDOW_S + 60
-WARN_HOLD_S = 60        # 黄 / 红：持续 60 秒才亮、才收
+WARN_HOLD_S = 60        # yellow / red: must persist 60 seconds to light up and to clear
 HYST_PCT = 3
-LOW_MED_S = 10          # 负载线看最近 10 秒的中位
-LOW_HOLD_S = 30         # 负载线：持续 30 秒才亮
-LOW_CLEAR_HOLD_S = 60   # 回到线上方 0.1 V、持续 60 秒才收
+LOW_MED_S = 10          # the under-load line looks at the median of the last 10 seconds
+LOW_HOLD_S = 30         # under-load line: must persist 30 seconds to light up
+LOW_CLEAR_HOLD_S = 60   # cleared only after returning 0.1 V above the line for 60 seconds
 LOW_CLEAR_V = 0.1
 DEADBAND_PCT = 2
-GLITCH_V = 1.0          # 这一秒比最近 60 秒中位低 1.0 V 以上：记一条（分清是真掉电还是读坏了，B-R4）。
-                        # 不用审查说的 0.5 V：一号鸭走路时一秒的读数比中位低 0.5–0.8 V 很常见（10-12 15:32 那场 12 次），那是真负载
-GLITCH_EVERY_S = 60     # 最多一分钟记一条
-JUMP_PCT = 10           # 估算比上次高 10% 以上：记一条「换了电池或充过电」
+GLITCH_V = 1.0          # this second is 1.0 V or more below the median of the last 60 seconds: log an entry (to tell a real brownout from a bad reading, B-R4).
+                        # Not the 0.5 V the review suggested: when duck #1 walks, a one-second reading 0.5–0.8 V below the median is common (12 times in the 10-12 15:32 session); that is real load
+GLITCH_EVERY_S = 60     # log at most one entry per minute
+JUMP_PCT = 10           # estimate more than 10% higher than last time: log "battery swapped or charged"
 
-# robot.state 里的 policy 标签：这些是「没在做动作」（fork robotd main.rs:3706-3720、control.rs:592）
+# policy labels in robot.state: these mean "not performing an action" (fork robotd main.rs:3706-3720, control.rs:592)
 CALM_LABELS = {"held", "walk", "stand", "homing", "sit"}
 CLS_CN = {"rest": "卸力", "light": "站着 / 坐着", "heavy": "走路 / 做动作"}
 
@@ -60,14 +60,14 @@ MAINTENANCE = "放空了尽快充；长期不用存一半电（约 7.4–7.6 V�
 WARN_ONLY = "只警告：没电时鸭子不会自己停，用完关电源、拔电池（挂着卸力也在耗电）"
 
 
-# ---------------- 查表 ----------------
+# ---------------- Lookup ----------------
 
 def _num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
 def soc_from_cell(vc):
-    """每芯电压 → 电量 %（0–100，浮点；格子之间线性插值，两头夹住）。"""
+    """Per-cell voltage → charge % (0–100, float; linear interpolation between grid points, clamped at both ends)."""
     if not _num(vc):
         return None
     if vc >= OCV_TABLE[0][0]:
@@ -83,18 +83,18 @@ def soc_from_pack(v, cells=CELLS):
 
 
 def linear_pct(v):
-    """robotd 的算法：6.6 V = 0%、8.2 V = 100%、中间直线（带载口径，低电量那头偏高）。"""
+    """robotd's algorithm: 6.6 V = 0%, 8.2 V = 100%, linear in between (under-load basis, reads high at the low end)."""
     if not _num(v) or v <= 0:
         return None
     return max(0.0, min(1.0, (v - RD_EMPTY_V) / (RD_FULL_V - RD_EMPTY_V))) * 100
 
 
-# ---------------- 一秒一个读数 ----------------
+# ---------------- One reading per second ----------------
 
 def trimmed(volts, fresh=None):
-    """15 颗电压 → 这一秒的读数：(值或 None, 用了几颗, [(下标, 电压)] 有效的)。
-    有效 = 是有限的数、在 3.0–9.5 V 之间、fresh 给了的话那一颗是新鲜的。
-    ≥ 9 颗去掉最高最低各 3 颗再平均；5–8 颗取中位；不足 5 颗回 None。"""
+    """15 voltages → this second's reading: (value or None, how many were used, [(index, voltage)] of the valid ones).
+    Valid = a finite number, within 3.0–9.5 V, and fresh for that servo if fresh is given.
+    ≥ 9 servos: drop the highest 3 and lowest 3 and average; 5–8: take the median; fewer than 5: return None."""
     valid = []
     for i, v in enumerate(volts or ()):
         if fresh is not None and (i >= len(fresh) or fresh[i] is not True):
@@ -120,7 +120,7 @@ def _median(xs):
 
 
 def classify(torque_on, moving=False, fallen=False, label=None):
-    """rest / light / heavy；扭矩读不到回 None（这一秒不算轻松，也不算负载线以外的任何东西）。"""
+    """rest / light / heavy; None if torque cannot be read (this second counts neither as calm nor as anything other than for the under-load line)."""
     if torque_on is False:
         return "rest"
     if torque_on is not True:
@@ -131,8 +131,8 @@ def classify(torque_on, moving=False, fallen=False, label=None):
 
 
 def classify_robotd(bus, state):
-    """robotd 的 busStatus + robot.state → 状态类别。扭矩看 native.torque_state_confirmed（回读确认的，不是命令的）；
-    动没动看 move.applied 非 0、policy 标签是不是做动作（踢球、翻滚、limp_fall…）、safety.fallen。"""
+    """robotd's busStatus + robot.state → state class. Torque comes from native.torque_state_confirmed (confirmed by readback, not the command);
+    motion comes from a nonzero move.applied, whether the policy label is an action (kicking, rolling, limp_fall…), and safety.fallen."""
     native = (bus or {}).get("native") if isinstance((bus or {}).get("native"), dict) else {}
     torque = native.get("torque_state_confirmed")
     st = state if isinstance(state, dict) else {}
@@ -143,7 +143,7 @@ def classify_robotd(bus, state):
 
 
 def robotd_volts(bus):
-    """busStatus → (15 颗电压, 15 颗 fresh)。读不到回 (None, None)。"""
+    """busStatus → (15 voltages, 15 fresh flags). Returns (None, None) if unreadable."""
     native = (bus or {}).get("native") if isinstance((bus or {}).get("native"), dict) else {}
     joints = native.get("joints")
     if not isinstance(joints, list) or not joints:
@@ -153,23 +153,23 @@ def robotd_volts(bus):
 
 
 def classify_servo_session(rows):
-    """调舵机时 Studio 自己占着总线：有一颗扭矩开着就算 light，全关算 rest，读不到回 None。"""
+    """During servo tuning Studio holds the bus itself: any servo with torque on counts as light, all off counts as rest, unreadable returns None."""
     flags = [r.get("torque") for r in rows or () if isinstance(r, dict)]
-    known = [bool(f) for f in flags if f is not None and f in (0, 1)]   # servo.py 存的是 0 / 1（也认 True / False）
+    known = [bool(f) for f in flags if f is not None and f in (0, 1)]   # servo.py stores 0 / 1 (True / False also accepted)
     if not known:
         return None
     return "light" if any(known) else "rest"
 
 
 def servo_session_volts(rows):
-    """servo.snapshot() 的 rows → (电压, fresh)。"""
+    """rows from servo.snapshot() → (voltages, fresh)."""
     rs = [r if isinstance(r, dict) else {} for r in rows or ()]
     if not rs:
         return None, None
     return [r.get("volt") for r in rs], [r.get("fresh") is True for r in rs]
 
 
-# ---------------- 设置 ----------------
+# ---------------- Settings ----------------
 
 SETTINGS_FILE = "battery-settings.json"
 SETTINGS_VERSION = 1
@@ -177,7 +177,7 @@ PRESETS = {"2s_liion": "2S 锂电（NP-F550 等）", "bench": "台架电源（�
 DEFAULTS = {"preset": "2s_liion", "warn_pct": 30, "red_pct": 15, "load_floor_v": 6.9, "cal_offset_v": 0.0}
 RANGES = {"warn_pct": (15, 60), "red_pct": (5, 40), "load_floor_v": (6.6, 7.4), "cal_offset_v": (-0.5, 0.5)}
 LABELS = {"preset": "电池型号", "warn_pct": "提醒线", "red_pct": "红线", "load_floor_v": "负载电压线", "cal_offset_v": "读数校准"}
-CAL_CONFIRM_V = 0.3     # 校准差超过 ±0.3 V 先问一句（多半是量错了，B-R11）
+CAL_CONFIRM_V = 0.3     # a calibration difference beyond ±0.3 V asks for confirmation first (most likely a mismeasurement, B-R11)
 
 
 class SettingsError(ValueError):
@@ -185,7 +185,7 @@ class SettingsError(ValueError):
 
 
 def _check_item(k, v):
-    """一项合不合法：回 (规整后的值, None) 或 (None, 原因)。"""
+    """Whether one item is valid: returns (normalized value, None) or (None, reason)."""
     if k == "preset":
         return (v, None) if v in PRESETS else (None, f"只能是 {'、'.join(PRESETS)}")
     lo, hi = RANGES[k]
@@ -203,8 +203,8 @@ def _check_item(k, v):
 
 
 def validate_settings(values, base=None):
-    """把 values（可以只给几项）合到 base（默认 DEFAULTS）上：回 (新设置, [错误……])。有错误时新设置不能用。
-    不认识的项算错（页面发错了要知道）；红线至少比提醒线低 5%。"""
+    """Merge values (may be just a few items) onto base (default DEFAULTS): returns (new settings, [errors…]). If there are errors the new settings must not be used.
+    Unknown items count as errors (we want to know if the page sent something wrong); the red line must be at least 5% below the warning line."""
     out = dict(DEFAULTS if base is None else base)
     errors = []
     if not isinstance(values, dict):
@@ -228,8 +228,8 @@ def settings_path(state_dir):
 
 
 def load_settings(state_dir, log=None):
-    """读设置。没有文件 = 默认值。文件坏了（不是 JSON、顶层不是对象）：改名成 .bad 留着、用默认值、记一行 warn；
-    个别项不对：那几项用默认值、记一行 warn；不认识的项不管（以后的版本加的）。永远不抛异常。"""
+    """Read settings. No file = defaults. Corrupt file (not JSON, top level not an object): rename it to .bad and keep it, use defaults, log one warn line;
+    individual bad items: use defaults for those items, log one warn line; unknown items are ignored (added by later versions). Never raises."""
     p = settings_path(state_dir)
     try:
         with open(p, encoding="utf-8") as f:
@@ -266,7 +266,7 @@ def load_settings(state_dir, log=None):
 
 
 def save_settings(state_dir, settings):
-    """整份写回（先写临时文件再改名，写一半断电不会把旧的弄坏）。先校验，不合法抛 SettingsError；写不进去也抛。"""
+    """Write back the whole thing (write a temp file and then rename, so a power loss halfway does not corrupt the old one). Validates first and raises SettingsError if invalid; also raises if it cannot write."""
     good, errors = validate_settings(settings, DEFAULTS)
     if errors:
         raise SettingsError("；".join(errors))
@@ -288,7 +288,7 @@ def save_settings(state_dir, settings):
 
 
 def settings_changes(old, new):
-    """给日志看的一句：「红线 15% → 20%；读数校准 +0.00 → +0.12 V」。没变回空串。"""
+    """One line for the log: "red line 15% → 20%; reading calibration +0.00 → +0.12 V". Returns an empty string if nothing changed."""
     unit = {"warn_pct": "%", "red_pct": "%", "load_floor_v": " V", "cal_offset_v": " V"}
     parts = []
     for k in DEFAULTS:
@@ -300,10 +300,10 @@ def settings_changes(old, new):
     return "；".join(parts)
 
 
-# ---------------- 估算器 ----------------
+# ---------------- Estimator ----------------
 
 class _Latch:
-    """持续 on_s 秒才亮、持续 off_s 秒才收的开关。"""
+    """A switch that turns on after persisting on_s seconds and off after persisting off_s seconds."""
 
     def __init__(self, on_s, off_s):
         self.on_s, self.off_s = on_s, off_s
@@ -311,7 +311,7 @@ class _Latch:
         self._since = None
 
     def step(self, now, cond_on, cond_off):
-        """回 "on" / "off"（这一拍刚变的）或 None。"""
+        """Returns "on" / "off" (if it just changed on this tick) or None."""
         if not self.on:
             if cond_on:
                 self._since = now if self._since is None else self._since
@@ -339,21 +339,21 @@ def _ev(level, msg, hint=None, raw=None, ctx=None, step=None):
 
 
 class Estimator:
-    """一只鸭子一个。由一个单独的 1 Hz 循环喂（不在 summarize 里喂：那里每个页面每秒跑 10 次，审查 B-R7），
-    summarize 只调 view()。feed() 按样本的 key（busStatus 的采样时间）去重，同一份数据喂几遍都只算一次。"""
+    """One per duck. Fed by a separate 1 Hz loop (not in summarize, which runs 10 times per second per page, review B-R7);
+    summarize only calls view(). feed() dedups by the sample key (busStatus sample time), so the same data fed several times counts only once."""
 
     def __init__(self, settings=None):
         self.settings = dict(DEFAULTS)
         if settings:
             self.set_settings(settings)
-        self._ref_pct = None        # 重新起步前最后显示的电量（只在内存里）：判「换了电池或充过电」
+        self._ref_pct = None        # the last level shown before starting over (memory only): used to detect "battery swapped or charged"
         self._reset(None)
 
-    # ---- 状态 ----
+    # ---- State ----
 
     def _reset(self, now):
-        self.samples = deque()      # (t, 原始读数 V, cls)；原始 = 没加校准，校准在用的时候加，改设置马上生效
-        self.calm = deque()         # (t, 最近 30 秒中位, 主要的 cls)
+        self.samples = deque()      # (t, raw reading V, cls); raw = without calibration, which is applied at use time so setting changes take effect immediately
+        self.calm = deque()         # (t, median of the last 30 seconds, dominant cls)
         self.started_at = None
         self.last_valid_t = None
         self.last_feed_t = None
@@ -362,7 +362,7 @@ class Estimator:
         self.run_last_t = None
         self.shown = None
         self.mode = "no_data"
-        self.est = None             # (pct 浮点, 依据的 V（已校准）, 依据：calm / load, cls, 依据的时间)
+        self.est = None             # (pct float, basis V (calibrated), basis: calm / load, cls, basis time)
         self.spread = None
         self.started_logged = False
         self.warn = _Latch(WARN_HOLD_S, WARN_HOLD_S)
@@ -383,15 +383,15 @@ class Estimator:
     def off(self):
         return self.settings["cal_offset_v"]
 
-    # ---- 喂数据 ----
+    # ---- Feeding data ----
 
     def feed(self, now, volts=None, fresh=None, cls=None, key=None, source="robotd"):
-        """每秒调一次。volts=None 或 key 跟上次一样 = 这一秒没有新数据（照样走计时：读不到 10 秒要重新起步）。
-        回这一拍要记的日志事件（log_events 去记）。"""
+        """Call once per second. volts=None or the same key as last time = no new data this second (timers still run: 10 seconds without readings means starting over).
+        Returns the log events to record for this tick (recorded by log_events)."""
         events = []
         new = volts is not None and (key is None or key != self.last_key)
         if new and key is None and self.last_feed_t is not None and now - self.last_feed_t < 0.5:
-            new = False             # 没给 key 时按时间去重：同一秒喂两次只算一次
+            new = False             # without a key, dedup by time: feeding twice in the same second counts once
         if new:
             self.last_key, self.last_feed_t = key, now
             v, n, valid = trimmed(volts, fresh)
@@ -413,14 +413,14 @@ class Estimator:
         events = []
         if self.started_at is None:
             self.started_at = now
-        # 毛刺：这一秒比最近 60 秒中位低 0.5 V 以上（中位本身挡得住，这里只是记下来，带 15 颗原值）
+        # Glitch: this second is more than 0.5 V below the median of the last 60 seconds (the median itself absorbs it; this just records it, with the 15 raw values)
         recent = [x for t, x, _ in self.samples if now - t <= 60]
         if len(recent) >= 10:
             med = _median(recent)
             if v < med - GLITCH_V and (self.glitch_at is None or now - self.glitch_at >= GLITCH_EVERY_S):
                 self.glitch_at = now
                 raw = [round(x, 2) if _num(x) else x for x in (volts or [])]
-                # 文字固定、数放在原文里：Studio 日志 1 分钟内同一句只记一次
+                # Fixed wording with the numbers in the original text: the Studio log records the same sentence only once per minute
                 events.append(_ev("warn", "电压读数一下子掉了 1 V 以上",
                                   hint="一两秒的话不影响电量估算；经常出现要查电池接头和总线（看 15 颗原值分得清是真掉电还是读坏了）",
                                   raw=f"这一秒 {v:.2f} V，最近一分钟中位 {med:.2f} V；15 颗：{raw}",
@@ -431,7 +431,7 @@ class Estimator:
         lo = min(valid, key=lambda x: x[1])
         hi = max(valid, key=lambda x: x[1])
         self.spread = {"min": lo[1], "min_i": lo[0], "max": hi[1], "max_i": hi[0], "n": len(valid)}
-        # 轻松段：rest / light 连续；中间隔太久或者来了别的状态就断
+        # Calm stretch: continuous rest / light; broken if the gap is too long or another state arrives
         if cls in ("rest", "light"):
             if self.run_start is None or self.run_last_t is None or now - self.run_last_t > RUN_GAP_S:
                 self.run_start = now
@@ -449,7 +449,7 @@ class Estimator:
             self.calm.popleft()
         return events
 
-    # ---- 算 ----
+    # ---- Compute ----
 
     def _evaluate(self, now):
         events = []
@@ -482,7 +482,7 @@ class Estimator:
                     self.shown = int(round(pct))
                 events += self._log_estimate(now)
 
-        # 警告：起步的 30 秒里不判（B-R2）；台架电源不判百分比
+        # Warnings: not judged during the 30-second startup (B-R2); bench supplies are not judged by percentage
         if warming:
             return events
         pct = self.shown
@@ -494,14 +494,14 @@ class Estimator:
                               hint="准备充电；" + self._basis_short(), ctx=self._ctx()))
         elif ch == "off":
             events.append(_ev("info", f"电量回到约 {pct}%，提醒收起" if pct is not None else "电量提醒收起", ctx=self._ctx()))
-        # 粗估（一直在走、没停下过）最多出黄条：负载电压查表偏低，红条只认轻松段的估算或负载线（避免狼来了）
+        # A rough estimate (walking the whole time, never stopped) yields at most the yellow bar: looking up under-load voltage reads low, so the red bar only trusts calm-stretch estimates or the under-load line (to avoid crying wolf)
         ch = self.red.step(now, have and self.mode == "calm" and pct <= r, (not have) or pct >= r + HYST_PCT)
         if ch == "on":
             events.append(_ev("error", f"电量到红线 {r}%：现在约 {pct}%",
                               hint="该充电了；" + WARN_ONLY, ctx=self._ctx()))
         elif ch == "off":
             events.append(_ev("info", f"电量回到约 {pct}%，红线收起" if pct is not None else "电量红线收起", ctx=self._ctx()))
-        # 负载线：最近 10 秒中位（校准后）低于设定值，持续 30 秒
+        # Under-load line: median of the last 10 seconds (after calibration) below the setting for 30 seconds
         m10 = self.volts_now(now)
         floor = s["load_floor_v"]
         if m10 is not None and m10 < floor:
@@ -518,8 +518,8 @@ class Estimator:
         return events
 
     def _log_estimate(self, now):
-        """起步第一次出数记一条；重新起步（读不到电压 10 秒以上）以后第一次轻松段的估算比断之前高 10% 以上，
-        记一条「换了电池或充过电」。连续读着的时候不判：从保持换到卸力，同一块电池也能高 20%（10-12 15:32 那场）。"""
+        """Log an entry for the first value after startup; after starting over (no voltage for 10+ seconds), if the first calm-stretch estimate is more than 10% higher than before the gap,
+        log "battery swapped or charged". Not judged while readings are continuous: switching from holding to relaxed can read 20% higher on the same battery (the 10-12 15:32 session)."""
         events = []
         pct, vv, kind, c, _ = self.est
         if not self.started_logged:
@@ -534,10 +534,10 @@ class Estimator:
             self._ref_pct = None
         return events
 
-    # ---- 读结果 ----
+    # ---- Reading results ----
 
     def volts_now(self, now):
-        """最近 10 秒中位（加了校准），给小字和负载线用。不足 5 个样本回 None。"""
+        """Median of the last 10 seconds (with calibration), for the small text and the under-load line. Returns None with fewer than 5 samples."""
         win = [x for t, x, _ in self.samples if now - t <= LOW_MED_S]
         return _median(win) + self.off if len(win) >= 5 else None
 
@@ -563,8 +563,8 @@ class Estimator:
                 "calm_points": len(self.calm), "samples": len(self.samples)}
 
     def view(self, now, rd=None, names=None, shutdown=None):
-        """给页面的：电池格、详情弹窗、待办都从这里拿。rd：robotd health 的 battery（{volts, percent}）；
-        names：15 颗的中文名（按 volts 的顺序）；shutdown：robotd 配置的 battery_empty_shutdown（onboard.read_battery_shutdown）。"""
+        """For the page: the battery cell, details dialog and to-dos all come from here. rd: battery from robotd health ({volts, percent});
+        names: Chinese names of the 15 servos (in volts order); shutdown: robotd's configured battery_empty_shutdown (onboard.read_battery_shutdown)."""
         s = self.settings
         v10 = self.volts_now(now)
         cls = self.current_cls()
@@ -616,7 +616,7 @@ class Estimator:
                 "max_name": nm(sp["max_i"]), "n": sp["n"]}
 
     def _detail(self, now, v10, cls, rd_v, rd_pct, names, shutdown):
-        """详情弹窗的几行字：这个数怎么来的（用户要能查）。"""
+        """A few lines of text for the details dialog: how this number was derived (users must be able to check)."""
         s = self.settings
         lines = []
         cal = f"校准 {self.off:+.2f} V"
@@ -654,16 +654,16 @@ class Estimator:
         if sp and self.mode != "no_data":
             lines.append(f"{sp['n']} 颗电压：最低 {sp['min']:.1f} V（{sp['min_name']}）· 最高 {sp['max']:.1f} V（{sp['max_name']}）")
         if self.mode == "bench":
-            return lines                # 台架电源：没有电池，不说充电、保养
+            return lines                # bench supply: no battery, so no charging or maintenance talk
         lines.append(stop_words({"source": self.source, "shutdown": shutdown}))
         lines.append(MAINTENANCE)
         return lines
 
-    # ---- 校准 ----
+    # ---- Calibration ----
 
     def calibrate(self, now, measured_v):
-        """「我量了电池电压」：只在卸力静置满 30 秒时收（B-R11）。回 {ok, offset, confirm, reason}；
-        offset 是新的读数校准（电池端 − 舵机读数），调用方确认后再存进设置。差超过 ±0.3 V 要用户再确认一次。"""
+        """"I measured the battery voltage": only accepted after resting relaxed for a full 30 seconds (B-R11). Returns {ok, offset, confirm, reason};
+        offset is the new reading calibration (battery terminal − servo reading), saved into settings after the caller confirms. A difference beyond ±0.3 V requires the user to confirm once more."""
         if not _num(measured_v) or not 6.0 <= measured_v <= 9.0:
             return {"ok": False, "offset": None, "confirm": False, "reason": "量到的电压要在 6.0–9.0 V 之间：看看是不是量错了、表笔接反了"}
         win = [(x, c) for t, x, c in self.samples if now - t <= CALM_S]
@@ -684,10 +684,10 @@ class Estimator:
         return {"ok": True, "offset": off, "confirm": confirm, "reason": why, "servo_v": round(raw, 3)}
 
 
-# ---------------- 给待办和日志 ----------------
+# ---------------- For to-dos and the log ----------------
 
 def stop_words(view):
-    """没电时会不会有人让它停：只警告（用户 10-18）。调舵机时主程序停着，就算配置里开了自动关机也不会管。"""
+    """Whether anyone will stop it when the battery is empty: warnings only (user 10-18). During servo tuning the main program is stopped, so even if auto-shutdown is enabled in the config it will not act."""
     if view.get("source") == "servo":
         return "调舵机时主程序停着，没电它不会自己坐下；用完关电源、拔电池"
     if view.get("shutdown") is True:
@@ -696,7 +696,7 @@ def stop_words(view):
 
 
 def todo_items(view):
-    """估算结果 → 待办（最要紧的在前）。只警告：文案只给建议。"""
+    """Estimate → to-dos (most urgent first). Warnings only: the wording only gives advice."""
     if not isinstance(view, dict):
         return []
     items = []
@@ -722,7 +722,7 @@ def todo_items(view):
 
 
 def log_events(log, events):
-    """feed() 回的事件写进 Studio 日志（分类「电池」）。log 为 None 时什么都不做。"""
+    """Write the events returned by feed() into the Studio log (category "电池" (battery)). Does nothing if log is None."""
     if log is None:
         return
     for e in events or ():

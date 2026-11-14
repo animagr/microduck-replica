@@ -38,8 +38,8 @@ def validate_status(value):
     error = value.get('error')
     if error is not None and (not isinstance(error,str) or len(error)>240):
         raise ValueError('invalid audio error')
-    # 「最近一次认出的指令」（新版 duck-echo 才有）。只带指令名、成没成、失败原因、
-    # 多久之前、第几次：整句原话不落这里，所以校验也只放这几样
+    # "The most recently recognized command" (only in newer duck-echo). Carries only the command name, success or not, failure reason,
+    # how long ago and which attempt: the whole raw phrase never lands here, so validation covers only these items
     last = value.get('last')
     if last is not None:
         if not isinstance(last, dict) or set(last)-{'command','accepted','age','seq','reason'}:

@@ -1,25 +1,25 @@
-"""登录、会话、来源校验。
+"""Login, sessions, origin checks.
 
-为什么是 Studio 自己的密码，不用 Linux 的 radxa 密码：
-- 拿 radxa 密码校验，网页就成了 SSH 密码的猜测口，还绕开了 sshd 的 PerSourcePenalties；
-- 密码在安装器里设（经那一次 SSH 把哈希写过来），不在「第一次打开网页」时设，
-  免得局域网里谁先打开谁就成了管理员（DNS 重绑定也能替你设）。开发期用命令行：
+Why Studio has its own password instead of the Linux radxa password:
+- validating against the radxa password would turn the web page into an SSH password guessing oracle, and bypass sshd's PerSourcePenalties;
+- the password is set in the installer (the hash is written over during that one SSH session), not "the first time the web page is opened",
+  so that whoever on the LAN opens it first does not become the admin (DNS rebinding could also set it for you). During development use the command line:
       python -m studio.auth set-password --state-dir ./state
 
-会话：
-- 32 字节随机令牌，cookie `HttpOnly; SameSite=Lax; Path=/`（Lax：从聊天软件点链接进来也带登录；
-  跨站的改动请求由 Origin 校验和 CSRF 令牌挡）；
-- 勾「记住我」30 天有效，不勾就是 12 小时没动静过期；会话存盘，Studio 重启不用重新登录；
-- 改密码、退出时，相关会话立刻作废（页面的 WebSocket 由调用方断开）。
+Sessions:
+- 32-byte random token, cookie `HttpOnly; SameSite=Lax; Path=/` (Lax: login is carried even when following a link from a chat app;
+  cross-site state-changing requests are blocked by the Origin check and the CSRF token);
+- with "remember me" checked it is valid for 30 days, otherwise it expires after 12 hours of inactivity; sessions are saved to disk, so a Studio restart does not require logging in again;
+- on password change or logout, the related sessions are invalidated immediately (the page's WebSocket is disconnected by the caller).
 
-输错：按来源 IP 退避，连错 5 次以后等 30 秒，再错翻倍，最多 5 分钟。只影响网页，不影响 SSH。
+Wrong passwords: backoff per source IP; after 5 consecutive failures wait 30 seconds, doubling on each further failure, up to 5 minutes. Only affects the web page, not SSH.
 
-危险操作（直连总线、写 EEPROM、改系统设置、装程序）：要求 10 分钟内重新输过密码，像 sudo。
+Dangerous operations (direct bus access, writing EEPROM, changing system settings, installing programs): require the password to have been re-entered within 10 minutes, like sudo.
 
-来源校验（挡 DNS 重绑定和跨站请求）：
-- Host 只认：本机名、本机名.local、localhost，或者「这条连接实际连到的本机 IP」；
-- 改动类请求和 WebSocket 握手还要求 Origin 跟 Host 同源。SameSite 挡不住同一只鸭子上
-  别的端口（mediad 的 8080 跟 Studio 是同站），所以 Origin 一定要查。
+Origin checks (block DNS rebinding and cross-site requests):
+- Host only accepts: the hostname, hostname.local, localhost, or "the local IP this connection actually reached";
+- state-changing requests and WebSocket handshakes also require Origin to be same-origin with Host. SameSite cannot block other ports on the same duck
+  (mediad's 8080 is same-site with Studio), so Origin must always be checked.
 """
 import argparse
 import getpass
@@ -52,7 +52,7 @@ def _hash(password, salt, n, r, p, dklen):
 
 
 def _write_private(path, data):
-    """原子写、权限 0600：先写临时文件再改名，写一半断电也不会留下坏文件。"""
+    """Atomic write, mode 0600: write a temp file first and then rename, so a power loss halfway never leaves a broken file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -74,7 +74,7 @@ class Auth:
         self._dirty_at = None
         self._load_sessions()
 
-    # ---- 密码 ----
+    # ---- Password ----
 
     def has_password(self):
         return self.pw_path.is_file()
@@ -98,7 +98,7 @@ class Auth:
         self._log("info", "管理员密码已更新，其他登录全部作废" if kept else "管理员密码已更新，旧的登录全部作废")
 
     def clear_password(self):
-        """清掉管理员密码，回到「同一网络里打开就能用」。跟 set_password 一样只动 Studio 自己的文件。"""
+        """Clear the admin password, back to "usable by anyone who opens it on the same network". Like set_password, only touches Studio's own files."""
         try:
             self.pw_path.unlink()
         except FileNotFoundError:
@@ -115,10 +115,10 @@ class Auth:
             return False
         return hmac.compare_digest(want, got)
 
-    # ---- 登录 ----
+    # ---- Login ----
 
     def login(self, password, ip, remember=False):
-        """返回 (令牌, None, 0)；失败返回 (None, 原因, 还要等几秒)。"""
+        """Returns (token, None, 0); on failure returns (None, reason, seconds still to wait)."""
         now = time.time()
         with self._lock:
             f = self._fails.get(ip)
@@ -127,7 +127,7 @@ class Auth:
                 return None, f"输错太多次了，{wait} 秒后再试", wait
         if not self.has_password():
             return None, "还没设管理员密码：用安装器设，或者在鸭子上运行 set-password", 0
-        # 先记一次失败、再算哈希：就算并发进来，每一次也都已经记在账上（成功了再清掉）
+        # Record a failure first, then compute the hash: even with concurrent attempts, every one is already on the books (cleared again on success)
         with self._lock:
             if len(self._fails) > 1000:
                 self._fails = {k: v for k, v in self._fails.items() if v["until"] > now or now - v["at"] < 3600}
@@ -154,8 +154,8 @@ class Auth:
         return token, None, 0
 
     def session(self, token, touch=True):
-        """有效就返回会话，否则 None。touch=True 顺便更新最后活动时间（真有请求时）；
-        WebSocket 的定时检查用 touch=False——页面开着不等于有人在用。"""
+        """Return the session if valid, otherwise None. touch=True also updates the last activity time (when there is a real request);
+        the WebSocket periodic check uses touch=False, since a page being open does not mean someone is using it."""
         if not token:
             return None
         now = time.time()
@@ -177,7 +177,7 @@ class Auth:
             return dict(s)
 
     def reauth(self, token, password):
-        """危险操作前再输一次密码。"""
+        """Re-enter the password before a dangerous operation."""
         if not self.check_password(password):
             return False
         with self._lock:
@@ -206,7 +206,7 @@ class Auth:
         with self._lock:
             self._flush_locked()
 
-    # ---- 内部 ----
+    # ---- Internal ----
 
     @staticmethod
     def _expired(s, now):
@@ -239,10 +239,10 @@ class Auth:
             self.log.write(msg, cat=cat, level=level, **kw)
 
 
-# ---- 来源校验 ----
+# ---- Origin checks ----
 
 def _split_host(host):
-    """'microduck-2.local:80' -> ('microduck-2.local', '80')；'[fe80::1]:80' -> ('fe80::1', '80')。"""
+    """'microduck-2.local:80' -> ('microduck-2.local', '80'); '[fe80::1]:80' -> ('fe80::1', '80')."""
     host = (host or "").strip().lower()
     if host.startswith("["):
         end = host.find("]")
@@ -270,13 +270,13 @@ class OriginGuard:
             return False
         if ip.is_loopback:
             return True
-        # IP 只认「这条连接实际连到的本机地址」：DNS 重绑定用的是域名，过不了上面那关，
-        # 直接用 IP 的人一定是连到了鸭子的这个 IP 上
+        # IPs are only accepted if they are "the local address this connection actually reached": DNS rebinding uses a domain name and cannot pass the check above,
+        # and anyone using the IP directly must have connected to the duck at this IP
         return local_ip is not None and name == str(local_ip).lower()
 
     def origin_ok(self, origin_header, host_header):
-        """改动类请求、WebSocket 握手：Origin 必须跟 Host 同源。没带 Origin 的（老浏览器
-        的同源 GET）由调用方决定，改动类一律要求带。"""
+        """State-changing requests, WebSocket handshakes: Origin must be same-origin with Host. Requests without Origin (same-origin GETs
+        from old browsers) are up to the caller; state-changing ones are always required to carry it."""
         if not origin_header:
             return False
         try:

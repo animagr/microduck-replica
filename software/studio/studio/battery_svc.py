@@ -1,11 +1,11 @@
-"""电池估算挂进 Studio（battery-plan.md v2 §6 B2/B3）：一个 1 Hz 的循环喂估算器，summarize 只读结果，页面的 battery.op。
+"""Hooking battery estimation into Studio (battery-plan.md v2 §6 B2/B3): a 1 Hz loop feeds the estimator, summarize only reads results, plus the page's battery.op.
 
-为什么单独一个循环（审查 B-R7）：summarize 每个页面每秒跑 10 次，在那里喂样本，开三个页面就是每秒 30 个重复值。
-这里一秒一拍，按 busStatus 的采样时间（Sample.at）去重；调舵机时（Studio 自己占着总线，robotd 按计划停着）
-从 servo.snapshot() 的每颗电压取，同一个寄存器，切换时不重新起步。
+Why a separate loop (review B-R7): summarize runs 10 times per second per page, so feeding samples there would mean 30 duplicate values per second with three pages open.
+Here it ticks once per second, deduplicating by busStatus's sample time (Sample.at); during servo tuning (Studio holds the bus itself and robotd is deliberately stopped)
+it takes each servo's voltage from servo.snapshot(), the same register, so there is no restart when switching.
 
-设置存 state_dir/battery-settings.json（studio/battery.py 读写、校验）；改了马上换掉估算器的设置，下一拍生效。
-只警告：这里不发任何命令给鸭子。
+Settings are stored in state_dir/battery-settings.json (read, written and validated by studio/battery.py); a change replaces the estimator's settings immediately and takes effect on the next tick.
+Warnings only: no commands are sent to the duck from here.
 """
 import asyncio
 import os
@@ -15,9 +15,9 @@ from . import battery as B
 from .state import JOINT_CN, MAX_AGE
 
 TICK_S = 1.0
-BUS_STALE_S = 3.0       # busStatus 这么久没更新：这一拍当没有新数据（10 秒以后估算器自己重新起步）
-# 开发用（端到端测试、截图）：估算器的时间按这个倍数快进（30 秒估算中、60 秒才亮在 20 倍下是 1.5 秒、3 秒）。
-# 快进时每一拍都把最新的那份读数当新样本喂（不按 busStatus 的采样时间去重）。鸭子上不要设
+BUS_STALE_S = 3.0       # busStatus not updated for this long: treat this tick as no new data (after 10 seconds the estimator restarts by itself)
+# For development (end-to-end tests, screenshots): estimator time is fast-forwarded by this factor (30 s estimating and 60 s before lighting up become 1.5 s and 3 s at 20x).
+# When fast-forwarding, every tick feeds the latest reading as a new sample (no dedup by busStatus sample time). Do not set on the duck
 SPEED_ENV = "STUDIO_BATTERY_SPEED"
 
 
@@ -40,14 +40,14 @@ class BatteryService:
                      hint="只给端到端测试、截图用；鸭子上不要设这个环境变量")
 
     def clock(self, now=None):
-        """估算器用的时间（快进时按倍数放大）。"""
+        """Time used by the estimator (scaled by the factor when fast-forwarding)."""
         now = time.monotonic() if now is None else now
         return self._t0 + (now - self._t0) * self.speed
 
-    # ---- 一拍 ----
+    # ---- One tick ----
 
     def sample(self, now):
-        """这一拍的输入：(电压, fresh, cls, key, source, 名字) 或 None（没有新数据）。"""
+        """This tick's input: (voltage, fresh, cls, key, source, name) or None (no new data)."""
         sv = self.servo
         if sv is not None and getattr(sv, "state", None) == "open":
             snap = sv.snapshot()
@@ -56,7 +56,7 @@ class BatteryService:
             if vs is None:
                 return None
             names = [r.get("cn") if isinstance(r, dict) else None for r in rows]
-            # 舵机表没有采样时间：按秒去重（估算器在没给 key 时也会按时间去重）
+            # The servo table has no sample time: dedup by second (the estimator also dedups by time when no key is given)
             return vs, fr, B.classify_servo_session(rows), ("servo", int(now)), "servo", names
         bus = self.rd.bus.value
         age = self.rd.bus.age(now)
@@ -71,8 +71,8 @@ class BatteryService:
         names = [JOINT_CN.get(j.get("name"), j.get("name")) if isinstance(j, dict) else None for j in joints]
         cls = B.classify_robotd(bus, st) if st is not None else None
         if cls is None and st is None and isinstance(bus.get("native"), dict):
-            # 状态流没在推（没人看页面时 robotd 不推 robot.state）：只看 busStatus。卸力就是卸力；
-            # 扭矩开着、策略没开 = 保持 HOME（不会走）；策略开着可能在走，算不知道
+            # The state stream is not pushing (robotd does not push robot.state when nobody is watching the page): only look at busStatus. Relaxed is relaxed;
+            # torque on with the policy off = holding HOME (will not walk); with the policy on it may be walking, so count it as unknown
             torque = bus["native"].get("torque_state_confirmed")
             if torque is False:
                 cls = "rest"
@@ -94,7 +94,7 @@ class BatteryService:
         return events
 
     def view(self, now=None):
-        """summarize 用（每秒 10 次 × 每个页面）：只读内存，不算新样本。"""
+        """For summarize (10 times per second × each page): reads memory only, computes no new samples."""
         now = time.monotonic() if now is None else now
         h = self.rd.health
         health = h.value if h.age(now) is not None and h.age(now) <= MAX_AGE["health"] else None
@@ -113,11 +113,11 @@ class BatteryService:
                                hint="这是 Studio 的问题，导出诊断包发出来；不影响站和走")
                 await asyncio.sleep(5.0)
 
-    # ---- 页面的 battery.op ----
+    # ---- The page's battery.op ----
 
     async def handle(self, args, by="?"):
-        """{op:"get"} → 设置 + 说明；{op:"set", values:{…}} → 校验、存盘、马上生效；
-        {op:"calibrate", measured_v} → 算出读数校准（不存，页面确认后再 set）。不合法的抛 ValueError（原因给人看）。"""
+        """{op:"get"} → settings + notes; {op:"set", values:{…}} → validate, save, take effect immediately;
+        {op:"calibrate", measured_v} → compute a reading calibration (not saved; set after the page confirms). Invalid input raises ValueError (with a human-readable reason)."""
         op = (args or {}).get("op")
         if op == "get":
             return self._payload()
