@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 serialport = "4"
 
-# 发布构建时保留一定调试信息，Pi 上编译也更快
+# Keep some debug info in release builds; it also compiles faster on the Pi
 [profile.release]
 debug = false

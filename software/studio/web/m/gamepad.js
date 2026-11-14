@@ -1,28 +1,28 @@
-// 手柄页：两个虚拟摇杆 + 一排动作键。
+// Gamepad page: two virtual sticks + a row of action buttons.
 //
-// 协议完全照 web/pad.js 顶部那份说明，一条都没改：
-//   sticks {mode, lx, ly, rx, ry, seq}  -1..1，x 向右、y 向下为正；按住时 10 Hz 发
-//   stop {seq}                        松手发一次，后端按模式回中 / 停走
-//   mode {mode, seq} / {mode, hb:true} 切模式 + 头/身体模式每秒报一次「还在」（后端 3 秒没听到就退出）
-//   drive {open:true} / {on:false}     进出手柄区
-// 后端 deadman：0.5 秒收不到摇杆帧就自己停，所以松手/断线都不会让鸭子一直走。
+// The protocol follows the description at the top of web/pad.js exactly, not a single item changed:
+//   sticks {mode, lx, ly, rx, ry, seq}  -1..1, x right and y down positive; sent at 10 Hz while held
+//   stop {seq}                        sent once on release; the backend returns to center / stops walking depending on mode
+//   mode {mode, seq} / {mode, hb:true} switch mode + head/body mode reports "still here" once per second (the backend exits after 3 s of silence)
+//   drive {open:true} / {on:false}     enter/leave the gamepad area
+// Backend deadman: it stops by itself if no stick frame arrives for 0.5 s, so releasing / disconnecting never leaves the duck walking.
 import { html, useState, useEffect, useRef, useCallback } from '../vendor/preact-htm.module.js';
 import { link } from './link.js';
 import { ACTION_GROUPS, actionLabel, runAction, nextAction } from './actions.js';
 
 const SEND_MS = 100;
 const MODE_HB_MS = 1000;
-const AUTO_WALK_MS = 4000;   // 站着但策略没跑时，替用户补一次「开始走」的冷却（后端 enable 要一两秒）
+const AUTO_WALK_MS = 4000;   // cooldown for auto-sending "start walking" on the user's behalf when standing but the policy isn't running (backend enable takes a second or two)
 
-// 只留走路和转头两个：身体那档是给调试微调用的，日常玩容易误切（用户 11-02 提的）。
-// 后端还认 body，只是这里不给入口了。
+// Only walk and head are kept: the body mode is for debugging fine-tuning and is easy to switch into by mistake in everyday play (raised by the user on Nov 2).
+// The backend still accepts body; there's just no entry for it here.
 const MODES = [
   { id: 'drive', label: '走路', hint: '左摇杆前后走、左右平移；右摇杆左右转身' },
   { id: 'head', label: '转头', hint: '左摇杆抬头低头，右摇杆左右歪头' },
 ];
 
-// 站姿 → 一句话说清「现在差哪一步」。这张表就是用户「推摇杆没反应」的答案：
-// 站着分 holding（策略没跑，摇杆推了也被丢）和 policy（准备好走了），差的就是「开始走」这一下。
+// Posture → one sentence explaining "which step is missing now". This table is the answer to the user's "pushing the stick does nothing":
+// standing is split into holding (policy not running, stick input dropped) and policy (ready to walk); what's missing is that one "start walking".
 const TIPS = {
   walking: ['ok', '正在走：松开摇杆它会停下、继续站着'],
   policy: ['ok', '准备好走了：推左摇杆就走'],
@@ -42,7 +42,7 @@ function driveTip(st) {
   return TIPS[st.posture] || null;
 }
 
-/** 这些姿态下推摇杆后端也动不了（策略没跑 / 舵机没劲 / 正在调舵机），别白发帧，先告诉用户为什么 */
+/** In these postures the backend can't move even if the stick is pushed (policy not running / servos limp / servos being tuned); don't send frames for nothing, tell the user why first */
 function blockedWhy(st) {
   if (!st) return null;
   if (st.estop && st.estop.state === 'confirmed') return '舵机卸力了：先点「站起来」上力';
@@ -56,7 +56,7 @@ function blockedWhy(st) {
   }
 }
 
-/** 单个摇杆：按住拖动，松手弹回中间。归一化到 -1..1（x 向右、y 向下为正，跟后端一致） */
+/** A single stick: press and drag, springs back to center on release. Normalized to -1..1 (x right, y down positive, same as the backend) */
 function Stick({ cap, onChange, onEnd }) {
   const boxRef = useRef(null);
   const knobRef = useRef(null);
@@ -69,7 +69,7 @@ function Stick({ cap, onChange, onEnd }) {
     const r = box.getBoundingClientRect();
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
-    const max = Math.min(r.width, r.height) / 2 * 0.68;      // 摇杆最多推到半径的 68%
+    const max = Math.min(r.width, r.height) / 2 * 0.68;      // the stick can be pushed to at most 68% of the radius
     let dx = e.clientX - cx;
     let dy = e.clientY - cy;
     const len = Math.hypot(dx, dy);
@@ -89,7 +89,7 @@ function Stick({ cap, onChange, onEnd }) {
     e.preventDefault();
     idRef.current = e.pointerId;
     setActive(true);
-    try { boxRef.current.setPointerCapture(e.pointerId); } catch { /* 老浏览器 */ }
+    try { boxRef.current.setPointerCapture(e.pointerId); } catch { /* old browsers */ }
     move(e);
   };
 
@@ -122,12 +122,12 @@ export function GamepadPage({ st, live, say }) {
   poseRef.current = live ? st?.posture : null;
   const sayRef = useRef(say);
   sayRef.current = say;
-  const autoAt = useRef(0);                // 上次替用户补「开始走」的时刻：带冷却，别每帧打后端
-  const nagged = useRef(false);            // 坐着 / 卸力时推摇杆：只说一遍，别 10 Hz 刷屏
-  // 给 actions.js 用的实时站姿：等策略开起来就按真实状态等，不用瞎猜秒数
+  const autoAt = useRef(0);                // when "start walking" was last auto-sent for the user: with cooldown, don't hit the backend every frame
+  const nagged = useRef(false);            // pushing the stick while sitting / torque released: say it only once, don't spam at 10 Hz
+  // live posture for actions.js: wait for the policy by the real state instead of guessing seconds
   const ctxRef = useRef({ getPosture: () => poseRef.current });
 
-  // 进手柄区：告诉后端「我来了」，离开时「我走了」
+  // entering the gamepad area: tell the backend "I'm here", and "I'm leaving" on exit
   useEffect(() => {
     link.cmd('pad.op', { op: 'drive', open: true }, 8000);
     autoAt.current = 0;
@@ -137,22 +137,22 @@ export function GamepadPage({ st, live, say }) {
     };
   }, []);
 
-  // 摇杆：按住时 10 Hz 发整帧；全都松了就发一次 stop
+  // sticks: send full frames at 10 Hz while held; send stop once when all are released
   useEffect(() => {
     let wasOn = false;
     const t = setInterval(() => {
       const on = left.current.on || right.current.on;
       if (on) {
-        // 坐着 / 没劲儿 / 在调舵机等等：后端收了也动不了（策略没跑，robot.move 被 robotd 忽略）。
-        // 与其让它默默没反应，不如当场说一句；这时别发帧，省得后端 10 Hz 记一堆 dropped。
+        // sitting / limp / tuning servos etc.: the backend receives it but can't move (policy not running, robot.move ignored by robotd).
+        // Rather than silently doing nothing, say so right away; don't send frames then, so the backend doesn't log a pile of dropped at 10 Hz.
         const why = blockedWhy(stRef.current);
         if (why) {
           if (!nagged.current) { nagged.current = true; sayRef.current(why, true); }
           return;
         }
         nagged.current = false;
-        // 站着但策略没跑（holding）：这一帧会被 robotd 无视。替用户补一次「开始走」，
-        // 免得他只看到「推了没反应」。坐着不自动站——那是明显会动到身体的动作，交给用户自己点。
+        // standing but the policy isn't running (holding): this frame will be ignored by robotd. Auto-send "start walking" once for the user,
+        // so they don't just see "pushed and nothing happened". Don't auto-stand while sitting: that clearly moves the body, so it's left for the user to click.
         if (poseRef.current === 'holding' && performance.now() - autoAt.current > AUTO_WALK_MS) {
           autoAt.current = performance.now();
           link.cmd('pad.op', { op: 'walk' }, 20000);
@@ -172,7 +172,7 @@ export function GamepadPage({ st, live, say }) {
     return () => { clearInterval(t); link.cmd('pad.op', { op: 'stop', seq: link.nextPadSeq() }, 5000); };
   }, []);
 
-  // 头 / 身体模式：每秒续一次命（后端 3 秒没听到就退回走路模式）
+  // head / body mode: renew once per second (the backend returns to walk mode after 3 s of silence)
   useEffect(() => {
     link.cmd('pad.op', { op: 'mode', mode, seq: link.nextPadSeq() }, 6000);
     if (mode === 'drive') return undefined;
@@ -185,21 +185,21 @@ export function GamepadPage({ st, live, say }) {
     setBusy(key);
     const out = await runAction(link, key, ctxRef.current);
     setBusy(null);
-    autoAt.current = 0;                     // 手动点过按钮，下次推摇杆允许再自动补一次
+    autoAt.current = 0;                     // a button was clicked manually: allow auto-sending once more on the next stick push
     if (out.ok) say(out.note || `已发送：${out.cn}`); else say(out.error || `${out.cn}没发出去`, true);
   }, [busy, say]);
 
   const m = MODES.find((x) => x.id === mode) || MODES[0];
   const tip = driveTip(st);
-  const hot = nextAction(st);               // 现在最该按的那个键，给它描一圈绿边
+  const hot = nextAction(st);               // the button that most needs pressing now: draw a green outline around it
   const key = (k) => html`<button
     class=${'m-key' + (k === hot ? ' hot' : '') + (busy === k ? ' on' : '')}
     disabled=${Boolean(busy)} onClick=${() => fire(k)}>
     ${actionLabel(k)}
   </button>`;
 
-  // 「开始走」＝打开走路策略的总开关，「停止策略」＝停下并关掉策略。两个并排放在摇杆下面：
-  // 「推摇杆没反应」的唯一解法是「开始走」，混在动作格里最容易被漏掉（用户 11-02 提的）。
+  // "Start walking" (「开始走」) = master switch that turns on the walk policy, "stop policy" (「停止策略」) = stop and turn off the policy. Both sit side by side below the sticks:
+  // the only fix for "pushing the stick does nothing" is "start walking", and mixed into the action grid it's easiest to miss (raised by the user on Nov 2).
 
   return html`<div>
     ${!live ? html`<div class="m-banner">还没收到鸭子的状态，摇杆可以推，但可能不动。</div>` : null}

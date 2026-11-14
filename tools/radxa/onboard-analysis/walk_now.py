@@ -1,5 +1,5 @@
-"""看最近一段 walk（模型接管）：每隔一段打印倾斜、角速度、腿目标偏离 HOME、跟踪误差、摇杆指令；最后给倾斜均值和倒地帧数。
-用法：python3 walk_now.py [run-xxxx.jsonl]"""
+"""Look at the most recent walk (model in control): periodically print tilt, angular velocity, leg target deviation from HOME, tracking error, joystick command; finally give mean tilt and number of fallen frames.
+Usage: python3 walk_now.py [run-xxxx.jsonl]"""
 import json, glob, math, sys
 f = sys.argv[1] if len(sys.argv) > 1 else sorted(glob.glob('/home/duck/r17/rec/run-*.jsonl'))[-1]
 R = []
@@ -8,7 +8,7 @@ for l in open(f, errors='replace'):
     except ValueError: pass
 W = [i for i, r in enumerate(R) if r.get('policy') == 'walk']
 if not W: print('还没进入 walk'); sys.exit()
-# 取最后一段连续 walk
+# Take the last continuous walk segment
 i1 = W[-1]; i0 = i1
 while i0 - 1 in set(W): i0 -= 1
 seg = R[i0:i1 + 1]; HOME = R[i0 - 1]['targets']; LEG = [0, 1, 2, 3, 4, 10, 11, 12, 13, 14]

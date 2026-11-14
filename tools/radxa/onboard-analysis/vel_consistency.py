@@ -1,4 +1,4 @@
-"""每个关节：角度的差分（实际转速） vs robotd 报的速度。比值≈+1 正常，≈-1 号反了，偏离 1 很多说明比例错。"""
+"""Per joint: difference of angle (actual speed) vs the velocity robotd reports. Ratio ≈ +1 is normal, ≈ -1 means the sign is reversed, far from 1 means the scale is wrong."""
 import json, sys, math
 R=[]
 for _l in open(sys.argv[1], errors='replace'):

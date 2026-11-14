@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""舵机体检：一条命令读出每颗舵机的保护设置和当前状态，存成报告。**只读，不写舵机任何寄存器。**
+"""Servo checkup: one command reads every servo's protection settings and current state and saves a report. **Read-only, writes no servo registers.**
 
-  python servo_report.py --port COM5                 # 默认 15 颗：20-24,30-34,10-14
-  python servo_report.py --port COM5 --ids 21        # 总线上只接 21 号时
-  python servo_report.py --port COM5 --scan-all      # 不知道 ID（新舵机出厂是 1）：扫 0–253
+  python servo_report.py --port COM5                 # default 15 servos: 20-24,30-34,10-14
+  python servo_report.py --port COM5 --ids 21        # when only servo 21 is on the bus
+  python servo_report.py --port COM5 --scan-all      # ID unknown (new servos ship as 1): scan 0–253
 
-报告写在 logs/体检-日期-时间.md（给人看）和同名 .json（每颗 0–86 寄存器原值）。
-串口不能同时被调试台（server.py）或 FD 占着，先关掉它们。
-判据按《调试记录》第 5 步：过热（4）、过流（8）、过压（1）三个保护都要开，没开标红。
+The report is written to logs/体检-<date>-<time>.md (体检 = checkup; for humans) and a .json with the same name (raw values of registers 0–86 for each servo).
+The serial port can't be held by the debug console (server.py) or FD at the same time; close them first.
+Criteria per step 5 of the 《调试记录》 (debug log): the over-temperature (4), over-current (8) and over-voltage (1) protections must all be enabled; any not enabled are marked red.
 """
 import argparse
 import json
@@ -22,9 +22,9 @@ DEFAULT_IDS = "20-24,30-34,10-14"
 NAMES = {20: "左髋 yaw", 21: "左髋 roll", 22: "左髋 pitch", 23: "左膝", 24: "左踝",
          30: "颈 pitch", 31: "头 pitch", 32: "头 yaw", 33: "头 roll", 34: "嘴",
          10: "右髋 yaw", 11: "右髋 roll", 12: "右髋 pitch", 13: "右膝", 14: "右踝"}
-# 卸载条件（19）/ 状态位（65）每一位的意思，两个寄存器同一套定义
+# Meaning of each bit of the unload conditions (19) / status bits (65); both registers share the same definitions
 BITS = {1: "电压", 2: "磁编码", 4: "过热", 8: "过流", 32: "过载"}
-MUST = (4, 8, 1)          # 调试记录第 5 步：过热出厂开着，过流、过压要自己开
+MUST = (4, 8, 1)          # debug log step 5: over-temperature is on from the factory; over-current and over-voltage must be enabled yourself
 
 
 def parse_ids(text):
@@ -45,7 +45,7 @@ def bits_text(v):
 
 
 def examine(bus, sid):
-    """读一颗：PING → 导出 0–86 → 解码 → 判红黄。返回一行结果；哪一步读不到写在 step 里。"""
+    """Read one servo: PING → export 0–86 → decode → judge red/yellow. Returns one result row; the step that couldn't be read is written in step."""
     row = {"id": sid, "name": NAMES.get(sid, ""), "online": False, "red": [], "yellow": [], "info": []}
     step = "PING"
     try:
@@ -65,7 +65,7 @@ def examine(bus, sid):
         "firmware": f"{v[0]}.{v[1]}", "servo_ver": f"{v[3]}.{v[4]}",
         "unload": v[19], "status": v[65], "temp_c": v[63], "volt": v[62] / 10,
         "volt_range": (v[15] / 10, v[14] / 10), "temp_limit": v[13],
-        # 38 / 35 的单位按 10 ms 换算，报告里原值也写上（单位没在真机上核过）
+        # 38 / 35 units converted at 10 ms; the raw value is also written in the report (the units haven't been verified on real hardware)
         "protect_ma": round(v[28] * 6.5), "overcurrent_raw": v[38], "protect_time_raw": v[35],
         "overload_pct": v[36], "max_torque": v[16], "torque_limit": v[48],
         "angle_limit": (v[9], v[11]), "offset": s15(v[31]), "pos": s15(v[56]), "goal": s15(v[42]),
@@ -126,7 +126,7 @@ def run(bus, ids, port, out_dir):
     rows = []
     for sid in ids:
         r = examine(bus, sid)
-        if r["online"] or len(ids) <= 32:          # 扫 0–253 时只留在线的
+        if r["online"] or len(ids) <= 32:          # when scanning 0–253 keep only the online ones
             rows.append(r)
         mark = "✗" if not r["online"] else ("🔴" if r["red"] else ("🟡" if r["yellow"] else "✓"))
         if r["online"] or len(ids) <= 32:

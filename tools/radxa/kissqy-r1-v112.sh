@@ -1,24 +1,24 @@
 #!/bin/bash
-# 在 kissqy 的「一键系统镜像 R1」上改出一张 V1.12 板也能开机的卡。
+# Modify kissqy's "一键系统镜像 R1" (one-click system image R1) into a card that also boots on V1.12 boards.
 #   sudo bash kissqy-r1-v112.sh <microduck-zero3w-0.15.1-R1.img.xz> [--no-camera] [--no-tof] [--overlay i2c4-m0 ...]
 #
-# 为什么要改：R1 用的是 Armbian 自带的主线 U-Boot 2025.10 + 内存初始化固件 v1.21，
-# 咱们的 V1.12 板（AIC8800 Wi-Fi）用这套引导起不来，换成瑞莎的引导才行（见 README 和踩坑记录）。
+# Why the change: R1 uses Armbian's bundled mainline U-Boot 2025.10 + DRAM init firmware v1.21,
+# and our V1.12 board (AIC8800 Wi-Fi) can't boot with that; it only works after switching to Radxa's bootloader (see the README and the pitfall log).
 #
-# 只改这几处，其余（他的固件、模型、首次热点配网、账号锁定、SSH 密钥首启生成）原样保留：
-#   1. 扇区 64 / 16384 写瑞莎 u-boot-rk2410 的 idbloader.img / u-boot.itb（版本和 sha256 跟 build-armbian-card.sh 一样）
-#   2. 写 /boot/extlinux/extlinux.conf：瑞莎 U-Boot 只认它、不认 boot.scr。overlay、fdt、内核参数
-#      都从镜像自己的 armbianEnv.txt 搬过来，所以他的 HAT 音频、摄像头、NPU 照旧生效
-#   3. 可选 --overlay NAME：再加 overlay，比如 i2c4-m0（40 针 27/28 脚的 I²C4，IMU 模块飞线接这里）
-#   4. 可选 --no-camera / --no-tof：不开机自启 mediad / tofd。没接摄像头、ToF 时它们会不停崩溃重启，
-#      mediad 每次重启都扫一遍 GStreamer 插件，能占满一个核，把主板烧到降频
+# Only these few things change; everything else (his firmware, models, first-boot hotspot WiFi setup, account lockout, SSH keys generated on first boot) is kept as is:
+#   1. Write idbloader.img / u-boot.itb from Radxa's u-boot-rk2410 at sectors 64 / 16384 (same version and sha256 as build-armbian-card.sh)
+#   2. Write /boot/extlinux/extlinux.conf: Radxa U-Boot only reads this, not boot.scr. Overlays, fdt and kernel parameters
+#      are all carried over from the image's own armbianEnv.txt, so his HAT audio, camera and NPU still work
+#   3. Optional --overlay NAME: add more overlays, e.g. i2c4-m0 (I²C4 on pins 27/28 of the 40-pin header, where the IMU module is jumper-wired)
+#   4. Optional --no-camera / --no-tof: don't autostart mediad / tofd. Without a camera or ToF they keep crashing and restarting,
+#      and mediad rescans the GStreamer plugins on every restart, which can max out a core and heat the board until it throttles
 #
-# 注意：换成瑞莎引导以后，改 armbianEnv.txt 不再生效，以后加 overlay 要改 extlinux.conf。
-# 本脚本只换引导和开机配置，不能让他的程序认 IMU 模块（R1 只认总线上的 IMU 小板 ID 200）。
+# Note: after switching to Radxa's bootloader, editing armbianEnv.txt no longer takes effect; to add overlays later, edit extlinux.conf.
+# This script only replaces the bootloader and boot config; it can't make his programs recognize the IMU module (R1 only recognizes the IMU board with ID 200 on the bus).
 set -euo pipefail
 export LC_ALL=C.UTF-8
 
-R1_SHA=75da978b5d56acd9e4146256431732381de84523bb683e4ab7ac9f0580a7bce5   # kissqy 发布页公布的校验值
+R1_SHA=75da978b5d56acd9e4146256431732381de84523bb683e4ab7ac9f0580a7bce5   # checksum published on kissqy's release page
 UBOOT_DEB_URL=https://radxa-repo.github.io/bookworm/pool/main/u/u-boot-rk2410/u-boot-rk2410_2017.09-64-39cd993_arm64.deb
 UBOOT_DEB_SHA=fb319203ab7d568aac77505504c05698385aea8a0e8f895c226c6bc557a1bce7
 
@@ -62,7 +62,7 @@ elba=struct.unpack('<Q',h[72:80])[0]; esz=struct.unpack('<I',h[84:88])[0]
 f.seek(elba*512); e=f.read(esz); print(struct.unpack('<Q',e[32:40])[0])
 PY
 )
-# 引导程序要放在扇区 64..32767 里，分区必须从 32768 或更后面开始
+# The bootloader must sit in sectors 64..32767; the partition must start at 32768 or later
 [ "$START" -ge 32768 ] || { echo "根分区从扇区 $START 开始，放不下瑞莎引导，停止"; exit 1; }
 
 echo "[4/7] 写入引导程序（idbloader @64，u-boot.itb @16384）"
@@ -105,7 +105,7 @@ label armbian
   fdtoverlays ${FILES[*]}
   append root=UUID=$UUID rootwait rw console=tty1 consoleblank=0 ${ARGS}
 CONF
-# armbianEnv 只同步 overlay 列表，留给以后看它的脚本；实际生效的是 extlinux
+# armbianEnv only syncs the overlay list, for scripts that read it later; what actually takes effect is extlinux
 sed -i "s/^overlays=.*/overlays=${OVERLAYS[*]}/" "$ENV"
 
 echo "[6/7] 服务"

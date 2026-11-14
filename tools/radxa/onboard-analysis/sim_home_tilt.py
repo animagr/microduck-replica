@@ -1,7 +1,7 @@
-"""电脑上运行（要 mujoco 和官方 microduck_rl 的 MJCF）。运动学法：以 MJCF 的 STAND 关键帧（仿真里站立、脚掌平贴地面）为“脚平”参考，
-换成真机关节角后，令左右脚掌姿态保持与参考相同（仍平贴地面），反推机身姿态，读 imu 站点的机体系重力。
-用法：python sim_home_tilt.py <microduck_rl>/src/mjlab_microduck/robot/microduck/scene_backlash.xml home-capture.json
-输出「IMU 安装偏差（实测 − 应有）」，交给 imu_mount_fix.py。"""
+"""Runs on a computer (needs mujoco and the official microduck_rl MJCF). Kinematic method: use the MJCF's STAND keyframe (standing in simulation, soles flat on the ground) as the "feet flat" reference;
+after switching to the real robot's joint angles, keep both soles' orientation the same as the reference (still flat on the ground), solve back for the body orientation, and read the body-frame gravity at the imu site.
+Usage: python sim_home_tilt.py <microduck_rl>/src/mjlab_microduck/robot/microduck/scene_backlash.xml home-capture.json
+Outputs the "IMU mounting error (measured − expected)", to be handed to imu_mount_fix.py."""
 import json, sys, math
 import numpy as np, mujoco
 m = mujoco.MjModel.from_xml_path(sys.argv[1]); d = mujoco.MjData(m); real = json.load(open(sys.argv[2]))
@@ -16,7 +16,7 @@ def fk(qpos):
     return {b: d.body(b).xmat.reshape(3,3).copy() for b in feet + ['trunk_base' if 'trunk_base' in bodies else bodies[1]]}, d.site('imu').xmat.reshape(3,3).copy()
 k = m.key('STAND'); q0 = k.qpos.copy()
 print('STAND 关键帧机身四元数', np.round(q0[3:7],4), ' 各关节(°):', {m.joint(i).name: round(math.degrees(q0[m.jnt_qposadr[i]]),1) for i in range(m.njnt) if m.jnt_type[i]!=0 and 'passive' not in m.joint(i).name})
-# 参考：STAND 时脚掌在世界系的姿态（假定此时平贴地面）
+# Reference: sole orientation in the world frame at STAND (assumed flat on the ground at that point)
 ref, imu_ref = fk(q0)
 g = lambda Rimu: Rimu.T @ np.array([0,0,-1.0])
 def ang(v): n=np.linalg.norm(v); return math.degrees(math.asin(v[0]/n)), math.degrees(math.asin(-v[1]/n))
@@ -27,10 +27,10 @@ def tilt_for(qmap):
         if m.jnt_type[i]==0: continue
         n = m.joint(i).name
         q[m.jnt_qposadr[i]] = qmap.get(n, 0.0) if not n.startswith('passive') else 0.0
-    Rs, Rimu = fk(q)   # 机身水平时的各部件姿态
+    Rs, Rimu = fk(q)   # orientation of each part with the body level
     out = []
     for f in feet:
-        # 要求 R_world_base * R_base_foot = R_ref_foot  ⇒  R_world_base = R_ref_foot * R_base_foot^T（此处 base 水平所以 xmat 即 R_base_x）
+        # Require R_world_base * R_base_foot = R_ref_foot  ⇒  R_world_base = R_ref_foot * R_base_foot^T (base is level here, so xmat is R_base_x)
         Rwb = ref[f] @ Rs[f].T
         out.append(ang(g(Rwb @ Rimu)))
     return out

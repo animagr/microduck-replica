@@ -1,7 +1,7 @@
-// 总览：只看鸭子现在什么样（状态面板）。
-// 动作都在「手柄」页，语音在「语音」页——总览不重复放按钮（2026-11-02 按用户要求去掉）。
-// 3D 用的是桌面版同一套 Duck3D（web/duck3d.js），关节角来自 WS 的 state.joints[15]，
-// pageScroll 打开：手机上单指留给页面滚动，两指才转视角（桌面总览也是这么配的）。
+// Overview: only shows what the duck looks like right now (status panel).
+// Actions are all on the "Gamepad" page and voice on the "Voice" page; the overview doesn't duplicate buttons (removed on 2026-11-02 at the user's request).
+// The 3D view uses the same Duck3D as the desktop version (web/duck3d.js); joint angles come from WS state.joints[15],
+// with pageScroll on: on phones one finger is left for page scrolling, and only two fingers rotate the view (the desktop overview is configured the same way).
 import { html, useState, useEffect, useRef } from '../vendor/preact-htm.module.js';
 import { Duck3D } from '../duck3d.js';
 import { postureCopy, readings } from './actions.js';
@@ -17,12 +17,12 @@ function Stage({ st, live, name }) {
     try {
       d = new Duck3D(canvasRef.current, { view: 'front34', centerX: 0.5, centerY: 0.44, fill: 0.72, pageScroll: true });
     } catch (e) {
-      setMsg(`3D 起不来：${e.message}`);     // 老浏览器没有 WebGL：不给整页白屏，下面照样能控
+      setMsg(`3D 起不来：${e.message}`);     // old browsers without WebGL: don't white-screen the whole page; controls below still work
       return undefined;
     }
     duckRef.current = d;
     d.load('/model/').then(() => setReady(true)).catch((e) => setMsg(`3D 模型没加载：${e.message}`));
-    return () => { try { d.dispose(); } catch { /* 已经没了 */ } };
+    return () => { try { d.dispose(); } catch { /* already gone */ } };
   }, []);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ function Stage({ st, live, name }) {
     d.setGravity(st.gravity);
   }, [st]);
 
-  // 关节数据超过 1 秒没更新就当旧的（别拿默认姿势冒充实时）
+  // joint data not updated for more than 1 s is treated as stale (don't pass off the default pose as live)
   const old = st?.joints_age_ms == null || st.joints_age_ms > 1000;
   const c = postureCopy(st, name);
   return html`<section class=${'m-stage' + (live && !old ? '' : ' stale')} aria-label="鸭子现在">

@@ -1,6 +1,6 @@
-﻿# 一键做卡（Windows）：调用 WSL 里的 build-armbian-card.sh，生成 xxx-鸭子卡.img，拿 Rufus 烧。
-# 用法：先改同目录 card.conf（WiFi 名/密码），右键此文件 -> 使用 PowerShell 运行，选 Armbian 的 .img.xz。
-# 要装了 WSL2（管理员 PowerShell 跑 wsl --install，重启一次）。不用管理员权限。
+﻿# One-click card build (Windows): calls build-armbian-card.sh in WSL to produce xxx-鸭子卡.img (duck card image), then flash it with Rufus.
+# Usage: first edit card.conf in the same folder (WiFi name/password), right-click this file -> Run with PowerShell, and pick the Armbian .img.xz.
+# Requires WSL2 (run wsl --install in an admin PowerShell and reboot once). No admin rights needed.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 if ((Get-Content (Join-Path $PSScriptRoot 'card.conf') -Raw) -match '改成你的') { Write-Host '先把 card.conf 里的 WiFi 名和密码改掉' -ForegroundColor Red; Read-Host '回车退出'; exit 1 }

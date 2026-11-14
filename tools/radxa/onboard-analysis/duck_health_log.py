@@ -1,5 +1,5 @@
-"""每 0.5 s 记一次：舵机供电电压、最热舵机、CPU 温度和频率（robotctl health --json），
-加 WiFi（wlan0 状态、信号）和已连接的蓝牙设备数。CSV，追加写，每行 fsync。只读。"""
+"""Logs every 0.5 s: servo supply voltage, hottest servo, CPU temperature and frequency (robotctl health --json),
+plus WiFi (wlan0 state, signal) and the number of connected Bluetooth devices. CSV, append-only, fsync per line. Read-only."""
 import json, os, subprocess, sys, time
 secs = float(sys.argv[1]); out = sys.argv[2]; t0 = time.time()
 def wifi():

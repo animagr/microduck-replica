@@ -1,6 +1,6 @@
-"""每段录像：状态切换时间线、摇杆指令、最后几帧安全状态；配合同一段的 health CSV 看电压/温度。只读。
-时间用录像里的 wall（墙钟）：duck_rec 在 robotd 重启后会重连，robotd 自己的 t 会归零。
-用法：python3 crash_scan.py run-xxx.jsonl [health-xxx.csv]"""
+"""Per recording: timeline of state transitions, joystick commands, safety state in the last few frames; read alongside the same session's health CSV for voltage/temperature. Read-only.
+Times use the recording's wall (wall clock): duck_rec reconnects after robotd restarts, and robotd's own t resets to zero.
+Usage: python3 crash_scan.py run-xxx.jsonl [health-xxx.csv]"""
 import csv, json, math, sys
 
 R = []
@@ -39,7 +39,7 @@ for r in R[-3:]:
     s = dict(r.get('safety', {}))
     g = s.pop('gravity', None) or [0, 0, -1]
     n = math.sqrt(sum(x * x for x in g)) or 1
-    tilt = math.degrees(math.acos(max(-1, min(1, -g[2] / n))))     # 站直时重力朝下（g_z<0），倾角 0°
+    tilt = math.degrees(math.acos(max(-1, min(1, -g[2] / n))))     # standing upright, gravity points down (g_z<0), tilt 0°
     print(f"  {r['wall'] - w0:7.2f}s policy={r.get('policy')} loop={r.get('loop')} 倾角={tilt:.1f}° 摇杆={req(r)} safety={s}")
 if len(sys.argv) > 2:
     rows = list(csv.reader(open(sys.argv[2])))

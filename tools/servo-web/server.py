@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""飞特舵机网页调试台：串口 + 网页滑块 + 3D 鸭子跟着动。
+"""Feetech servo web debug console: serial port + web sliders + a 3D duck that moves along.
 
-用法：
-  python server.py --port COM5                      # Windows，URT-2
-  python server.py --port /dev/ttyUSB0              # 板子上，URT-2 插 USB
-  python server.py --port /dev/ttyS2                # 板子上，走半双工转接板（先 sudo systemctl stop robotd）
-  python server.py --fake                           # 没舵机，看界面
-然后浏览器开 http://<主机>:8080
+Usage:
+  python server.py --port COM5                      # Windows, URT-2
+  python server.py --port /dev/ttyUSB0              # on the board, URT-2 plugged into USB
+  python server.py --port /dev/ttyS2                # on the board, via the half-duplex adapter board (first sudo systemctl stop robotd)
+  python server.py --fake                           # no servos, just look at the UI
+Then open http://<host>:8080 in a browser
 """
 import argparse
 import asyncio
@@ -32,8 +32,8 @@ import feetech
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# 调试台版本。改了前端或后端就加一：index.html 里的 PAGE_VERSION 要跟这里一样，
-# 页面连上后会比对，不一样就提示"页面是旧的，Ctrl+F5"。改动记在 README 的「版本」一节。
+# Debug console version. Bump it whenever the frontend or backend changes: PAGE_VERSION in index.html must match this;
+# the page compares them after connecting and, if they differ, shows "页面是旧的，Ctrl+F5" (page is stale, Ctrl+F5). Record changes in the 「版本」 (Version) section of the README.
 VERSION = "0.15.6"
 DEFAULT_IDS = "20-24,30-34,10-14"
 JOINT_NAMES = {
@@ -58,31 +58,31 @@ def parse_ids(text):
 
 
 class FakeBus:
-    """没舵机时的替身（模拟模式）：虚拟舵机按真舵机的速度 / 加速度寄存器走梯形曲线到目标，
-    所以姿势、滑块、序列、灵动在 3D 里的快慢跟真机一样。扭矩默认开，没接串口也能直接看它动；
-    扭矩关了就停在原地（没有重力，不会往下掉）。"""
+    """Stand-in when there are no servos (simulation mode): virtual servos follow trapezoidal profiles to their targets using the real servos' speed / acceleration registers,
+    so poses, sliders, sequences and lively motions move in 3D at the same pace as on the real robot. Torque is on by default, so you can watch it move without a serial port;
+    with torque off it stays where it is (no gravity, so it doesn't fall)."""
 
-    MAX_SPEED = 3000                  # 步/秒：HD-1910 满速约这么多，跟 MAX_SPEED_REG 一致
-    ACC_UNIT = 8.7 * 4096 / 360       # 寄存器 41 一个单位 = 8.7°/s²，换成 步/s²
-    ACC_MAX = 254 * ACC_UNIT          # 41 写 0 = 不限加速度，按最大算
+    MAX_SPEED = 3000                  # steps/s: roughly HD-1910's full speed, same as MAX_SPEED_REG
+    ACC_UNIT = 8.7 * 4096 / 360       # one unit of register 41 = 8.7°/s², converted to steps/s²
+    ACC_MAX = 254 * ACC_UNIT          # writing 0 to 41 = unlimited acceleration, treated as the maximum
 
     def __init__(self, ids):
         self.pos = {i: 2048.0 for i in ids}
         self.vel = {i: 0.0 for i in ids}
         self.goal = {i: 2048 for i in ids}
-        self.speed_reg = {i: 0 for i in ids}   # 46：0 = 不限速
-        self.acc_reg = {i: 0 for i in ids}     # 41：0 = 不限加速度
+        self.speed_reg = {i: 0 for i in ids}   # 46: 0 = no speed limit
+        self.acc_reg = {i: 0 for i in ids}     # 41: 0 = no acceleration limit
         self.torque = {i: 1 for i in ids}
         self.offset = {i: 0 for i in ids}
-        self.locked = {i: 1 for i in ids}   # 出厂锁着
-        self.regs = {}                      # 其它寄存器随便写随便读，(id, 地址) -> 值
+        self.locked = {i: 1 for i in ids}   # locked from the factory
+        self.regs = {}                      # other registers: write anything, read anything, (id, address) -> value
         self.stats = {"tx": 0, "rx_ok": 0, "timeout": 0, "bad_checksum": 0, "bad_id": 0}
-        self.imu200 = None                  # 模拟 IMU 时挂一个 imu_bus.FakeImu200，答 ID 200
+        self.imu200 = None                  # when simulating the IMU, holds an imu_bus.FakeImu200 that answers ID 200
         self._t = time.monotonic()
 
     def _advance(self):
-        """按墙钟推进每颗虚拟舵机：朝目标加速，离目标近了按 v² = 2·a·d 减速，跟舵机自己的梯形曲线一样。
-        写寄存器之前先推进一次：不然上次读到这次写之间的时间，会按新目标补走。"""
+        """Advance each virtual servo by wall clock: accelerate toward the target, decelerate by v² = 2·a·d when close, same as the servo's own trapezoidal profile.
+        Advance once before writing registers: otherwise the time between the last read and this write would be made up using the new target."""
         now = time.monotonic()
         dt, self._t = min(0.2, now - self._t), now
         if dt <= 0:
@@ -102,7 +102,7 @@ class FakeBus:
             dv = max(-amax * dt, min(amax * dt, want - self.vel[i]))
             self.vel[i] += dv
             step = self.vel[i] * dt
-            if step * err > 0 and abs(step) >= abs(err):   # 朝着目标走、这一步就到：停在目标上。背着目标（刚换向）不算
+            if step * err > 0 and abs(step) >= abs(err):   # moving toward the target and this step reaches it: stop on the target. Moving away from it (just reversed) doesn't count
                 self.pos[i], self.vel[i] = float(self.goal[i]), 0.0
             else:
                 self.pos[i] += step
@@ -126,7 +126,7 @@ class FakeBus:
         return out
 
     def write_u16(self, sid, addr, v):
-        # 42 目标、46 速度、31 偏移跟真舵机一样是符号-幅值（BIT15 = 负），server 用 enc_sm 编好再写
+        # 42 target, 46 speed, 31 offset are sign-magnitude like on real servos (BIT15 = negative); server encodes with enc_sm before writing
         self._advance()
         v &= 0xFFFF
         self.regs[(sid, addr)] = v
@@ -136,7 +136,7 @@ class FakeBus:
             self.speed_reg[sid] = v & 0x7FFF
         elif addr == 31:
             off = feetech.sign15(v)
-            self.pos[sid] += off - self.offset[sid]       # 读数 = 原始 + 偏移（OFFSET_SIGN = +1）
+            self.pos[sid] += off - self.offset[sid]       # reading = raw + offset (OFFSET_SIGN = +1)
             self.offset[sid] = off
         return 0
 
@@ -148,7 +148,7 @@ class FakeBus:
             self.locked[sid] = 1 if v else 0
         elif addr != 40:
             self.regs[(sid, addr)] = v & 0xFF
-        if addr == 40 and v != 128:          # 写 128 跟 HD-1910 一样：回成功，什么都不做
+        if addr == 40 and v != 128:          # writing 128 behaves like HD-1910: replies success and does nothing
             self.torque[sid] = 1 if v == 1 else 0
         return 0
 
@@ -174,12 +174,12 @@ class FakeBus:
                 continue
             if addr == 42:
                 self.goal[sid] = feetech.sign15(struct.unpack("<H", bytes(data[:2]))[0])
-            if addr == 41:                   # 加速度（+ 目标位置 + 时间 + 速度）
+            if addr == 41:                   # acceleration (+ target position + time + speed)
                 self.acc_reg[sid] = data[0]
                 if length >= 3:
                     self.goal[sid] = feetech.sign15(struct.unpack("<H", bytes(data[1:3]))[0])
                 if length >= 7:
-                    self.speed_reg[sid] = struct.unpack("<H", bytes(data[5:7]))[0] & 0x7FFF   # 符号-幅值，取幅值
+                    self.speed_reg[sid] = struct.unpack("<H", bytes(data[5:7]))[0] & 0x7FFF   # sign-magnitude, take the magnitude
             if addr == 46:
                 self.speed_reg[sid] = struct.unpack("<H", bytes(data[:2]))[0] & 0x7FFF
             if addr == 40:
@@ -188,7 +188,7 @@ class FakeBus:
     def sync_read(self, ids, addr, n):
         out = {i: (0, bytes([self.torque[i]]) + bytes(n - 1) if addr == 40 else bytes(n)) if i in self.pos else None
                for i in ids}
-        imu = self.imu200                    # 页面随时可能拔掉虚拟小板：取一次，别判断完再读时变成 None
+        imu = self.imu200                    # the page may remove the virtual board at any moment: read it once, so it doesn't become None between the check and the read
         if imu is not None and 200 in out and addr == 56 and n == 15:
             out[200] = (0, imu.block())
         return out
@@ -235,29 +235,29 @@ class FakeBus:
 
 
 BUS = None
-PORT = None        # 当前串口名；None = 假总线
+PORT = None        # current serial port name; None = fake bus
 BAUD = 1_000_000
 IDS = []
 PRESENT = []
 CLIENTS = set()
-IMU_SERVICE = None  # 可选 IMU 读取器（J-Link DLL 或 pyOCD）；与舵机状态共用 /ws，不接受网页控制探针
-LOG = []           # [{"n": 序号, "t": "时:分:秒", "cat": 分类, "level": info/warn/error, "msg": 正文}]
+IMU_SERVICE = None  # optional IMU reader (J-Link DLL or pyOCD); shares /ws with servo state, doesn't accept probe control from the web page
+LOG = []           # [{"n": sequence number, "t": "HH:MM:SS", "cat": category, "level": info/warn/error, "msg": text}]
 LOG_N = 0
 LOG_DIR = os.path.join(HERE, "logs")
-LOG_CATS = ["系统", "总线", "运动", "校准", "寄存器", "姿态", "方向", "IMU"]   # 页面自己还有一类「页面」
+LOG_CATS = ["系统", "总线", "运动", "校准", "寄存器", "姿态", "方向", "IMU"]   # (system, bus, motion, calibration, register, pose, direction, IMU) the page itself has one more category, 「页面」 (page)
 LEVEL_TAG = {"info": "", "warn": "[警告]", "error": "[错误]", "debug": "[调试]"}
 _log_io = threading.Lock()
 STREAM_HZ = 50
-FAKE_STREAM_HZ = 30    # 模拟模式不占总线，推快一点，3D 动起来顺
-SPEED_UNIT = 1.0   # 速度寄存器 46 一个单位 = 多少步/秒：相位 18 BIT2=1 → 1（0.0146 rpm），BIT2=0 → 50（0.732 rpm）
-MAX_SPEED_REG = 3000   # "不限速"写多少：相位 BIT3=1 时 0 = 最快；BIT3=0 时 0 = 停，得写个大数（HD-1910 满速约 3000 步/秒）
-STREAM_LAST = {}       # goals_stream 上一帧给每颗的目标，用来算这一帧该多快
+FAKE_STREAM_HZ = 30    # simulation mode doesn't occupy the bus, so push faster for smoother 3D motion
+SPEED_UNIT = 1.0   # steps/s per unit of speed register 46: phase 18 BIT2=1 → 1 (0.0146 rpm), BIT2=0 → 50 (0.732 rpm)
+MAX_SPEED_REG = 3000   # what to write for "no speed limit": with phase BIT3=1, 0 = fastest; with BIT3=0, 0 = stop, so a large number must be written (HD-1910 full speed is about 3000 steps/s)
+STREAM_LAST = {}       # the target goals_stream gave each servo in the previous frame, used to compute how fast this frame should go
 
 
 def release_speed(ids):
-    """把速度上限放开、加速度设最大（41 = 0，46 = MAX_SPEED_REG）。只写这两个，**不碰目标位置 42**：
-    以前一包写 41..47 连目标一起，目标取自回读的 67。校准收尾刚把目标对准当前读数，
-    67 要是还没跟上，就把旧目标写回去了，下次开扭矩关节被拉走。"""
+    """Release the speed limit and set acceleration to maximum (41 = 0, 46 = MAX_SPEED_REG). Writes only these two, **doesn't touch target position 42**:
+    previously one packet wrote 41..47 including the target, taken from the read-back 67. Calibration finishes by aligning the target with the current reading,
+    and if 67 hadn't caught up yet, the old target got written back, so the joint got pulled away the next time torque was turned on."""
     ids = list(ids)
     if ids:
         BUS.sync_write(41, 1, [(i, bytes([0])) for i in ids])
@@ -265,7 +265,7 @@ def release_speed(ids):
 
 
 def read_phase():
-    """连接时只读相位 18，确定速度单位；保留舵机现有的速度、加速度和目标。"""
+    """On connect, only read phase 18 to determine the speed unit; keep the servos' existing speed, acceleration and target."""
     global SPEED_UNIT, MAX_SPEED_REG
     if is_fake() or not PRESENT:
         return
@@ -279,7 +279,7 @@ def read_phase():
 
 
 def list_ports():
-    """系统里现在有哪些串口。拔插 USB 后口号会变，页面上直接选，不用重启服务。"""
+    """Which serial ports the system has right now. Port numbers change after unplugging/replugging USB; pick directly on the page without restarting the service."""
     try:
         from serial.tools import list_ports as lp
         return [{"device": p.device, "desc": (p.description or "").strip()} for p in lp.comports()]
@@ -289,13 +289,13 @@ def list_ports():
 
 
 def bus_trace(line):
-    """串口收发的原始字节，只进日志文件（页面不显示，不然刷屏）。
-    出问题时 grep 日志文件里的 → / ← 就能还原当时总线上到底发生了什么。"""
+    """Raw serial TX/RX bytes, only to the log file (not shown on the page, otherwise it would flood).
+    When something goes wrong, grep the log file for → / ← to reconstruct what actually happened on the bus."""
     log(line, "总线", "debug")
 
 
 def open_bus(port, baud=None):
-    """打开串口并接管总线。失败不抛异常，返回 {ok, msg}，页面照样能用（假总线）。"""
+    """Open the serial port and take over the bus. Doesn't raise on failure; returns {ok, msg}, and the page still works (fake bus)."""
     global BUS, PORT, BAUD, PRESENT
     baud = baud or BAUD
     try:
@@ -321,11 +321,11 @@ def open_bus(port, baud=None):
 
 
 def fallback_fake(why):
-    """没有串口时退到假总线：页面照开，能看界面、看 3D，就是不动真舵机。"""
+    """Fall back to the fake bus when there's no serial port: the page still opens, you can see the UI and the 3D view, it just doesn't move real servos."""
     global BUS, PORT, PRESENT
     BUS, PORT = FakeBus(IDS), None
     PRESENT = list(IDS)
-    if imu_backend(IMU_SERVICE) == "bus":   # 启动参数 --imu-bus 但没串口：假总线上挂一块虚拟小板答 ID 200
+    if imu_backend(IMU_SERVICE) == "bus":   # started with --imu-bus but no serial port: hang a virtual board answering ID 200 on the fake bus
         import imu_bus
         BUS.imu200 = imu_bus.FakeImu200()
     log(f"{why}，先用假总线把页面起起来；插好 USB 后在页面顶栏选串口点「连接」", "总线", "warn")
@@ -336,9 +336,9 @@ def log_path():
 
 
 def log(msg, cat="系统", level="info", exc=False):
-    """cat：系统 / 总线 / 运动 / 校准 / 寄存器 / 姿态 / 方向 / IMU。level：info / warn / error / debug。
-    每行都追加到 logs/servo-web-日期.log（debug 只进文件，不上页面）；exc=True 把当前异常的 traceback 一起写进文件。
-    出问题时这个文件就是现场，发过来或者让 Claude 直接读。"""
+    """cat: 系统 / 总线 / 运动 / 校准 / 寄存器 / 姿态 / 方向 / IMU (system / bus / motion / calibration / register / pose / direction / IMU). level: info / warn / error / debug.
+    Every line is appended to logs/servo-web-<date>.log (debug goes only to the file, not to the page); exc=True also writes the current exception's traceback to the file.
+    When something goes wrong this file is the scene of the incident; send it over or let Claude read it directly."""
     global LOG_N
     t = time.strftime("%H:%M:%S")
     line = f"{t} [{cat}]{LEVEL_TAG.get(level, '')} {msg}"
@@ -359,17 +359,17 @@ def log(msg, cat="系统", level="info", exc=False):
 
 
 def _ack(err):
-    """写指令的应答：0 = 正常；None = 没回包（应答级别 0，或者丢了）；别的 = 舵机状态位有报警。"""
+    """Reply to a write instruction: 0 = normal; None = no reply packet (reply level 0, or lost); anything else = the servo status bits have an alarm."""
     return "✓" if err == 0 else ("（没应答）" if err is None else f"（状态 0x{err:02X}）")
 
 
 def fmt_off(v):
-    """偏移寄存器 31：HD-1910 第 15 位是符号位，34279 = -1511。
-    传进来的可能是原始寄存器值，也可能是已经解过符号的负数，两种都得印对。"""
+    """Offset register 31: on HD-1910 bit 15 is the sign bit, 34279 = -1511.
+    What's passed in may be the raw register value or an already sign-decoded negative number; both must print correctly."""
     if v is None:
         return "?"
     if v < 0:
-        return str(v)                                  # 已经是带符号的，直接印
+        return str(v)                                  # already signed, print directly
     return f"{feetech.sign15(v)}（原始{v}）" if v & 0x8000 else str(v)
 
 
@@ -378,7 +378,7 @@ def is_fake():
 
 
 async def index(request):
-    # 不让浏览器缓存页面：改了前端以后，缓存里的旧页面会用旧逻辑跑，现象像"改了没生效"
+    # Don't let the browser cache the page: after a frontend change, the old cached page would run old logic, which looks like "the change didn't take effect"
     return FileResponse(os.path.join(HERE, "index.html"),
                         headers={"Cache-Control": "no-store, max-age=0"})
 
@@ -403,7 +403,7 @@ DIRS_FILE = os.path.join(HERE, "directions.json")
 
 
 def load_dirs():
-    """每颗舵机的方向 +1 / -1。文件里没写的按 +1。"""
+    """Each servo's direction +1 / -1. Anything not in the file is treated as +1."""
     try:
         with open(DIRS_FILE, encoding="utf-8") as f:
             raw = json.load(f)
@@ -430,12 +430,12 @@ def save_dirs(dirs):
 
 
 CALIB_DIR = os.path.join(HERE, "calib")
-SIM_CALIB_DIR = None   # 模拟模式的校准备份：放临时目录，服务一关就没了
+SIM_CALIB_DIR = None   # calibration backups in simulation mode: kept in a temp directory, gone once the service stops
 
 
 def calib_dir():
-    """校准备份放哪。模拟模式不能用真的 calib/：虚拟舵机的偏移要是混进去，
-    接上真舵机点「撤销」，会把虚拟的偏移写进真舵机。"""
+    """Where to keep calibration backups. Simulation mode can't use the real calib/: if virtual servo offsets got mixed in,
+    clicking 「撤销」 (Undo) after connecting real servos would write the virtual offsets into the real servos."""
     global SIM_CALIB_DIR
     if not is_fake():
         return CALIB_DIR
@@ -445,7 +445,7 @@ def calib_dir():
 
 
 def backup_calibration(ids):
-    """中位校准前把每颗的偏移（寄存器 31）、读数、扭矩、锁标志、固件版本记下来，撤销用。"""
+    """Before center calibration, record each servo's offset (register 31), reading, torque, lock flag and firmware version, for undo."""
     rows = {}
     for i in ids:
         try:
@@ -457,7 +457,7 @@ def backup_calibration(ids):
             log(f"#{i} 备份时读不到：{type(e).__name__}: {e}", "校准", "warn", exc=True)
     d = calib_dir()
     os.makedirs(d, exist_ok=True)
-    now = time.time()                                  # 带毫秒：同一秒点两次也不撞名，字典序 = 时间顺序
+    now = time.time()                                  # with milliseconds: clicking twice in the same second won't collide on name, and lexicographic order = time order
     fn = f"eeprom-{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}{int(now * 1000) % 1000:03d}.json"
     with open(os.path.join(d, fn), "w", encoding="utf-8") as f:
         json.dump({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "servos": rows}, f, ensure_ascii=False, indent=1)
@@ -465,9 +465,9 @@ def backup_calibration(ids):
 
 
 def shift_saved_poses(deltas, sign=1, only=None, exclude=()):
-    """重新校准后，同一个物理姿势的读数变了 delta。把 poses/ 里存的原始读数跟着挪，免得发旧数字摆错。
-    only：只挪这些文件（撤销时用：只把当次挪过的挪回来，之后新存的姿态不碰）；exclude：不挪的（当基准的那个姿态）。
-    序列文件只存"相对某个姿态几度"，不用挪。返回挪过的文件名列表。"""
+    """After recalibration, the reading for the same physical pose changed by delta. Shift the raw readings stored in poses/ accordingly, so sending old numbers doesn't pose it wrong.
+    only: shift only these files (used for undo: only shift back what was shifted that time, leaving poses saved later alone); exclude: ones not to shift (the pose used as the reference).
+    Sequence files only store "how many degrees relative to some pose", so they don't need shifting. Returns the list of shifted file names."""
     changed = []
     if not os.path.isdir(POSES_DIR) or not any(deltas.values()):
         return changed
@@ -494,24 +494,24 @@ def shift_saved_poses(deltas, sign=1, only=None, exclude=()):
     return changed
 
 
-CALIB_TOLERANCE = 2      # 校准后读数离目标多少步算到位
-DROOP_TOLERANCE = 3      # 关扭矩那几毫秒关节垂了多少步以内就不补偿
-OFFSET_LIMIT = 2047      # 偏移寄存器 31 的安全量程：手册说 0~2047 表示正、2048~4095 表示负，
-                         # 只有 |偏移| ≤ 2047 这一段几种编码理解都一致，超出就不写
-CALIB_LOCK = threading.Lock()   # 校准期间不让状态轮询抢总线：一次 sync_read 卡住能占几百毫秒，
-                                # 正好落在关扭矩的窗口里，关节就垂下去了
-OFFSET_SIGN = None       # +1：读数 = 原始 + 偏移；-1：读数 = 原始 − 偏移。手册没写死，开机探一次
-CALIB_BIG_DEG = 30       # 摆好的位置离目标差这么多度以上：页面再确认一次，日志单独列出来（不拦）
+CALIB_TOLERANCE = 2      # how many steps from the target the reading may be after calibration and still count as in place
+DROOP_TOLERANCE = 3      # if the joint sagged within this many steps during the few ms torque was off, don't compensate
+OFFSET_LIMIT = 2047      # safe range of offset register 31: the manual says 0~2047 is positive and 2048~4095 negative;
+                         # only for |offset| ≤ 2047 do all the encoding interpretations agree; beyond that, don't write
+CALIB_LOCK = threading.Lock()   # during calibration, don't let status polling grab the bus: one stuck sync_read can take hundreds of ms,
+                                # landing right in the torque-off window, and the joint sags
+OFFSET_SIGN = None       # +1: reading = raw + offset; -1: reading = raw − offset. The manual doesn't pin it down, so probe once at startup
+CALIB_BIG_DEG = 30       # posed position more than this many degrees from the target: the page confirms once more, and the log lists it separately (not blocked)
 
 
 def enc_sm(v):
-    """符号-幅值编码：寄存器 31（偏移）、42（目标位置）、46（速度）都是 BIT15 当方向位，
-    不是二进制补码。写 -5 要写 0x8005；写成 0xFFFB 舵机会理解成 -32763，然后满速撞限位。"""
+    """Sign-magnitude encoding: registers 31 (offset), 42 (target position) and 46 (speed) all use BIT15 as the direction bit,
+    not two's complement. To write -5, write 0x8005; writing 0xFFFB the servo interprets as -32763 and then slams into the limit at full speed."""
     v = int(v)
     return (0x8000 | (-v & 0x7FFF)) if v < 0 else (v & 0x7FFF)
 
 
-enc_off = enc_sm          # 老名字留着，别处还在用
+enc_off = enc_sm          # old name kept, still used elsewhere
 
 
 def read_off(i):
@@ -527,8 +527,8 @@ def write_off(i, v):
 
 
 def wait_off_change(i, was, ms=20):
-    """写完偏移就轮询它落地没有，最多等 ms 毫秒。比固定 sleep 强在：
-    落地通常 1~2 ms，固定睡 20 ms 等于白送 18 ms 的重力下垂。返回 (读到的偏移, 变了没有)。"""
+    """After writing the offset, poll until it lands, waiting at most ms milliseconds. Better than a fixed sleep because
+    it usually lands within 1~2 ms, and a fixed 20 ms sleep would just give away 18 ms of gravity sag. Returns (offset read, whether it changed)."""
     end = time.monotonic() + ms / 1000.0
     off = was
     while True:
@@ -538,10 +538,10 @@ def wait_off_change(i, was, ms=20):
 
 
 def probe_offset_sign(i):
-    """探一次偏移的符号方向：扭矩开着时把偏移 +1，看读数往哪边动。
+    """Probe the sign direction of the offset once: with torque on, add +1 to the offset and see which way the reading moves.
 
-    只动 1 步（0.09°），而且在校准窗口之外做，不影响精度。同型号固件一致，探一次给 15 颗共用。
-    兜底方案靠它一次写到位；探不出来就两个方向都试（慢，但仍然安全）。"""
+    Moves only 1 step (0.09°), and done outside the calibration window, so it doesn't affect accuracy. Firmware is consistent across the same model, so one probe is shared by all 15.
+    The fallback relies on it to write correctly in one go; if the probe fails, try both directions (slow, but still safe)."""
     global OFFSET_SIGN
     if OFFSET_SIGN is not None:
         return OFFSET_SIGN
@@ -553,7 +553,7 @@ def probe_offset_sign(i):
         write_off(i, o0 + 1)
         wait_off_change(i, o0)
         r1 = read_pos(i)
-        write_off(i, o0)                      # 立刻还原，只是探一下
+        write_off(i, o0)                      # restore immediately, it was just a probe
         wait_off_change(i, o0 + 1)
         BUS.lock(i)
         if r1 == r0:
@@ -568,11 +568,11 @@ def probe_offset_sign(i):
 
 
 def calibrate_by_offset(i, target, trail):
-    """兜底：舵机连 0x0B 也不认时，自己算偏移写寄存器 31。
+    """Fallback: when the servo doesn't even accept 0x0B, compute the offset ourselves and write register 31.
 
-    符号方向优先用探针的结果（一次写就够）；探不出来就两个方向都试、回读验证。
-    只要没成功就把原偏移写回去，中途抛异常也一样 —— 绝不给舵机留一个乱写的偏移。
-    返回 (成功与否, 校准后读数, 现在的偏移)。"""
+    For the sign direction, prefer the probe result (one write suffices); if the probe failed, try both directions and verify by reading back.
+    Unless it succeeded, write the original offset back, even if an exception is thrown midway: never leave a servo with a garbage offset.
+    Returns (success, reading after calibration, current offset)."""
     o0, r0 = read_off(i), read_pos(i)
     signs = [OFFSET_SIGN] if OFFSET_SIGN else [1, -1]
     ok, pos, off = False, r0, o0
@@ -601,43 +601,43 @@ def calibrate_by_offset(i, target, trail):
 
 
 def calibrate_one(i, before, target=2048):
-    """一颗舵机的位置校准：让它「现在这个位置」的读数变成 target（默认 2048 = 官方零位）。
+    """Position calibration for one servo: make its reading at "its current position" become target (default 2048 = official zero position).
 
-    两条路：先用 0x0B 位置校准指令（舵机自己算偏移、自己存 EEPROM），不生效就自己算偏移写寄存器 31。
-    HD-1910（固件 3.46）不认扭矩开关写 128：2026-09-20 实测 4 轮，解锁、扭矩关着写 128，
-    15 颗偏移一个都没变，还照样回"成功"应答 —— 所以**判据不看应答，看偏移寄存器变没变**。
+    Two paths: first the 0x0B position calibration instruction (the servo computes the offset and stores it to EEPROM itself); if that has no effect, compute the offset ourselves and write register 31.
+    HD-1910 (firmware 3.46) doesn't accept writing 128 to the torque switch: in 4 rounds of hardware tests on 2026-09-20, unlocked, torque off, writing 128,
+    not one of the 15 offsets changed, yet it still replied "success". So **the criterion ignores the reply and checks whether the offset register changed**.
 
-    关扭矩期间关节被重力压下去（实测颈部 0.62 步/毫秒），而 USB 串口一个来回 1~16 ms，窗口没法做到零。
-    对策是把下垂**算出来补偿**：
+    While torque is off the joint is pushed down by gravity (measured on the neck: 0.62 steps/ms), and a USB serial round trip takes 1~16 ms, so the window can't be made zero.
+    The countermeasure is to **compute the sag and compensate**:
 
-        校准前读数 pre（扭矩还开着，舵机顶着你摆好的位置）
-        校准后这个位置读 target（0x0B 的定义），偏移变了 Δ
-        下垂 d = pre − target + 符号 × Δ          ← 三个数都读得到
+        reading before calibration pre (torque still on, servo holding the position you posed)
+        after calibration this position reads target (by definition of 0x0B), the offset changed by Δ
+        sag d = pre − target + sign × Δ          ← all three numbers can be read
 
-    把偏移再挪 d，你摆好的那个位置就正好读 target。关节本身不动（停在垂下去的地方），
-    扭矩恢复后也不会自己回去 —— 要回去用「回零位」按正常限速走。
+    Shift the offset by another d, and the position you posed reads exactly target. The joint itself doesn't move (it stays where it sagged to),
+    and won't go back by itself after torque is restored; to go back, use 「回零位」 (Return to zero), which moves at the normal speed limit.
 
-    顺序：压低加速度/速度 → 解锁 → 读 pre → 关扭矩并**回读确认真关了** → 0x0B → 轮询偏移确认落地
-    → 没落地就兜底 → 算下垂补偿 → 目标写成**当前读数**（永远不写 target，判断错了也不会拉关节）
-    → 扭矩复原 → 加锁 → 恢复速度。中途出错，finally 里照样写目标、恢复扭矩、加锁。
-    返回 {"ok", "pre", "pos", "target", "droop", "method", "why"}。"""
+    Order: lower acceleration/speed → unlock → read pre → torque off and **read back to confirm it's really off** → 0x0B → poll the offset to confirm it landed
+    → fall back if it didn't land → compute sag compensation → write the target as **the current reading** (never write target, so even a wrong judgment won't pull the joint)
+    → restore torque → lock → restore speed. If an error occurs midway, finally still writes the target, restores torque and locks.
+    Returns {"ok", "pre", "pos", "target", "droop", "method", "why"}."""
     was_on = before.get("torque") == 1
     old_off = before.get("offset")
     trail, step, ok, pre, pos, off, why = [], "限速", False, None, None, None, ""
     method, droop = "0x0B", 0
     try:
-        # 安全网：校准期间把这颗压成慢速小加速度。万一哪一步判断错了，关节也是慢慢走，人能伸手挡住
+        # Safety net: during calibration, throttle this servo to low speed and low acceleration. If some step misjudges, the joint still moves slowly and a person can reach out and stop it
         BUS.write_u8(i, 41, 10)
         BUS.write_u16(i, 46, enc_sm(200))
         step = "解锁"
         trail.append("解锁" + _ack(BUS.unlock(i)))
         step = "读当前位置"
-        pre = read_pos(i)                     # 扭矩还开着，读到的就是舵机顶着的位置 = 你摆好的位置
+        pre = read_pos(i)                     # torque still on, so what's read is the position the servo holds = the position you posed
         o_before = read_off(i)
         if was_on:
             step = "关扭矩"
             BUS.write_u8(i, 40, 0)
-            if BUS.read_u8(i, 40) != 0:       # 这包丢了的话 0x0B 会在扭矩开着时执行，偏移一改就满速拉
+            if BUS.read_u8(i, 40) != 0:       # if this packet were lost, 0x0B would run with torque on, and once the offset changes it would pull at full speed
                 BUS.write_u8(i, 40, 0)
                 if BUS.read_u8(i, 40) != 0:
                     raise feetech.BusError("关扭矩没生效（回读不是 0），不敢往下做")
@@ -647,7 +647,7 @@ def calibrate_one(i, before, target=2048):
         step = "确认偏移变了"
         off, changed = wait_off_change(i, o_before)
         pos = read_pos(i)
-        ok = changed or abs(pre - target) <= CALIB_TOLERANCE   # 本来就在目标上，偏移不变也算对
+        ok = changed or abs(pre - target) <= CALIB_TOLERANCE   # already at the target, so an unchanged offset also counts as correct
         if not ok:
             step = "兜底：写偏移寄存器 31"
             trail.append("0x0B 没让偏移变，改用写偏移")
@@ -665,7 +665,7 @@ def calibrate_one(i, before, target=2048):
             elif abs(droop) > DROOP_TOLERANCE:
                 trail.append(f"垂了{droop:+d}步但补偿超量程，没补")
         step = "写目标"
-        trail.append(f"目标{pos}" + _ack(BUS.write_u16(i, 42, enc_sm(pos))))   # 永远写当前读数
+        trail.append(f"目标{pos}" + _ack(BUS.write_u16(i, 42, enc_sm(pos))))   # always write the current reading
         if was_on:
             step = "开扭矩"
             trail.append("开扭矩" + _ack(BUS.write_u8(i, 40, 1)))
@@ -677,7 +677,7 @@ def calibrate_one(i, before, target=2048):
         trail.append("✗" + why)
         log(f"#{i} {why}", "校准", "error", exc=True)
     finally:
-        # 不管上面怎么错，都要：目标对准当前读数（下次开扭矩不会按旧坐标系把关节拉走）→ 扭矩复原 → 加锁 → 恢复速度
+        # No matter what went wrong above, always: align the target with the current reading (so the next torque-on won't pull the joint by the old coordinate system) → restore torque → lock → restore speed
         try:
             p = read_pos(i)
             BUS.write_u16(i, 42, enc_sm(p))
@@ -710,26 +710,26 @@ def calibrate_one(i, before, target=2048):
 
 
 def save_json_atomic(path, obj):
-    """先写 .tmp 再改名：json.dump 写一半崩了会留个半截文件，
-    而读不了的姿态/备份文件只会被静默跳过，等于悄悄丢数据。"""
+    """Write .tmp first, then rename: if json.dump crashes halfway it leaves a truncated file,
+    and unreadable pose/backup files are just silently skipped, which amounts to quietly losing data."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
 
 
-# 官方姿势：microduck_rl src/mjlab_microduck/robot/microduck/scene.xml 的 keyframe（d424a0c），弧度、模型约定。
-# 跟 index.html 的 OFFICIAL_POSES 是同一份。只有「折叠」能当校准基准：鸭子折好能自己趴住，膝靠零件顶住
+# Official poses: keyframe from microduck_rl src/mjlab_microduck/robot/microduck/scene.xml (d424a0c), radians, model convention.
+# Same as OFFICIAL_POSES in index.html. Only "fold" can serve as a calibration reference: a folded duck can rest on its own, with the knees stopped by parts
 OFFICIAL_FOLD = {20: 0, 21: 0, 22: 1.57, 23: 1.57, 24: 0, 30: 1, 31: 1, 32: 0, 33: 0,
                  10: 0, 11: 0, 12: -1.57, 13: -1.57, 14: 0}
-# 校准用的折叠：腿按官方 FOLD，头颈摆正（颈、头 pitch 0°）、嘴闭上。官方 FOLD 的颈 / 头 57° 不是接触点
-# （腿折好时颈要转到 66.6° 才碰上零件，fold_contact 算的），靠眼睛摆不准；脖子竖直、头平视好摆得多。零点照样是官方 2048
+# Fold used for calibration: legs per the official FOLD, head/neck straight (neck, head pitch 0°), mouth closed. The official FOLD's neck / head at 57° isn't a contact point
+# (with legs folded the neck has to rotate to 66.6° before hitting a part, computed by fold_contact), so it can't be posed accurately by eye; a vertical neck with the head looking level is much easier to pose. The zero is still the official 2048
 FOLD_CALIB = {**OFFICIAL_FOLD, 30: 0, 31: 0, 34: 0}
 OFFICIAL_REFS = {"@official:FOLD": ("官方折叠（头颈摆正）", FOLD_CALIB)}
 
 
 def official_targets(ref):
-    """官方基准的目标读数：2048 + 角度 × 4096/2π × ±。± 用 directions.json，跟 3D、姿态发送一致。"""
+    """Target readings for the official reference: 2048 + angle × 4096/2π × ±. ± comes from directions.json, consistent with the 3D view and pose sending."""
     label, rad = OFFICIAL_REFS[ref]
     dirs = load_dirs()
     return label, {i: int(round(2048 + a * 4096 / (2 * math.pi) * dirs.get(i, 1))) for i, a in rad.items()}
@@ -743,7 +743,7 @@ def read_pose_file(fn):
 
 
 def calib_targets(ref):
-    """基准 → (名字, {id: 目标读数}, 是不是官方基准)。页面确认框和真校准用同一份，不各算各的。"""
+    """Reference → (name, {id: target reading}, whether it's the official reference). The page's confirm dialog and the real calibration use the same data rather than each computing its own."""
     if not ref:
         return "零位 2048", {i: 2048 for i in IDS}, False
     if ref in OFFICIAL_REFS:
@@ -755,9 +755,9 @@ def calib_targets(ref):
 
 
 def calib_plan(ids, ref=None):
-    """校准前给页面看：每颗现在读多少、要写成多少、差几度。只读，不写舵机。
-    差得多（> CALIB_BIG_DEG）不拦：装舵盘时转了半圈就是这样，校准正好把它纠回来；
-    页面会再确认一次，提醒排除「方向 ± 设反了」。"""
+    """Shown on the page before calibration: what each servo reads now, what it will be set to, how many degrees off. Read-only, doesn't write servos.
+    A large difference (> CALIB_BIG_DEG) isn't blocked: that's what happens when a horn was mounted half a turn off, and calibration fixes exactly that;
+    the page confirms once more, reminding the user to rule out "direction ± set backward"."""
     name, targets, _ = calib_targets(ref)
     st = BUS.states(ids)
     rows = []
@@ -770,21 +770,21 @@ def calib_plan(ids, ref=None):
 
 
 def calibrate_mid_all(ids, ref=None):
-    """（见下）。整段持 CALIB_LOCK：状态轮询和另一个标签页都得让路。"""
+    """(See below.) Holds CALIB_LOCK for the whole duration: status polling and other tabs have to wait."""
     with CALIB_LOCK:
         return _calibrate_mid_all(ids, ref)
 
 
 def _calibrate_mid_all(ids, ref=None):
-    """把选中舵机「现在的位置」校准成目标读数，一颗一颗来：每颗只关几毫秒扭矩，别的舵机照样撑着。
+    """Calibrate the selected servos' "current position" to the target readings, one at a time: each servo has torque off for only a few ms while the others keep holding.
 
-    ref=None：目标都是 2048，鸭子要摆成官方零位（腿伸直、脚板垂直、头平视、嘴闭上）。
-    ref=姿态文件名：目标是那个姿态里存的读数。比如「缩」：鸭子自己能缩着放稳，靠机械接触定位，比手扶着摆直准。
-    零位始终是官方的 2048，姿态只当「校准夹具」用，所以官方代码、策略、别的姿态都不用加 offset。
+    ref=None: all targets are 2048; the duck must be posed in the official zero position (legs straight, soles vertical, head level, mouth closed).
+    ref=pose file name: targets are the readings stored in that pose. E.g. 「缩」 (fold): the duck can rest folded on its own, positioned by mechanical contact, more accurate than holding it straight by hand.
+    The zero is always the official 2048; the pose only serves as a "calibration jig", so official code, the policy and other poses need no offset.
 
-    存的姿态挪不挪：校到 2048 是换了零位，之前存的姿态是旧读数，要跟着挪；
-    按姿态校准是把舵机拉回基准姿态那套读数，别的姿态跟基准是同一套读数存的，不挪（舵机换过、舵盘重装过，校回来它们就又对了）。"""
-    # 官方基准（折叠）跟零位 2048 一样是在定零点：目标来自官方角度，不是存的读数，所以存的姿态要跟着换算
+    Whether saved poses are shifted: calibrating to 2048 changes the zero, so previously saved poses hold old readings and must be shifted along;
+    calibrating to a pose pulls the servos back to the reference pose's set of readings, and the other poses were saved with the same set of readings as the reference, so they aren't shifted (after a servo replacement or horn remount, calibrating back makes them right again)."""
+    # The official reference (fold), like zero 2048, sets the zero point: targets come from official angles, not saved readings, so saved poses must be converted along
     name, targets, official = calib_targets(ref)
     if official:
         name += "（" + " ".join(f"{i}→{targets[i]}" for i in ids if i in targets) + "）"
@@ -792,7 +792,7 @@ def _calibrate_mid_all(ids, ref=None):
         targets = {i: 2048 for i in ids}
     pose_ref = bool(ref) and not official
     sim = is_fake()
-    # 模拟：虚拟舵机的读数跟真舵机没关系，存的姿态（真舵机的读数）一个都不挪
+    # Simulation: virtual servo readings have nothing to do with real servos, so none of the saved poses (real servo readings) are shifted
     shift = not pose_ref and not sim
     log(f"开始校准 {len(ids)} 颗到{name}：{ids}" + ("（模拟：只改虚拟舵机，备份放临时目录，存的姿态不挪）" if sim else ""), "校准")
     fn, before = backup_calibration(ids)
@@ -804,7 +804,7 @@ def _calibrate_mid_all(ids, ref=None):
         if i not in targets:
             bad[i] = "参考姿态里没有这颗"
             continue
-        if not 0 <= targets[i] <= 4095:               # 姿态文件是能手改的 JSON，改错一个数就校到离谱的读数上
+        if not 0 <= targets[i] <= 4095:               # pose files are hand-editable JSON; one wrong number would calibrate to an absurd reading
             bad[i] = f"目标 {targets[i]} 不在 0~4095，没动它"
             continue
         if "offset" not in b:
@@ -813,13 +813,13 @@ def _calibrate_mid_all(ids, ref=None):
         r = calibrate_one(i, b, targets[i])
         if r["ok"]:
             ok.append(i)
-            # 同一个物理位置（你摆好的那个），读数从 pre 变成了 target —— 下垂已经补偿掉了
+            # The same physical position (the one you posed): the reading went from pre to target; the sag has already been compensated
             deltas[str(i)] = r["target"] - r["pre"]
             if abs(deltas[str(i)]) * 360 / 4096 > CALIB_BIG_DEG:
                 big[i] = deltas[str(i)] * 360 / 4096
         else:
             bad[i] = r["why"]
-    # 先把「打算挪哪些」落盘再真挪：反过来的话，中间崩了就再也挪不回去了
+    # First persist "which ones we intend to shift" to disk, then actually shift: the other way round, a crash midway could never be shifted back
     bp = os.path.join(calib_dir(), fn)
     with open(bp, encoding="utf-8") as f:
         rec = json.load(f)
@@ -834,7 +834,7 @@ def _calibrate_mid_all(ids, ref=None):
     if moved:
         log(f"存的姿态换算到新零点：{moved}（" + " ".join(f"#{k}{v:+d}" for k, v in deltas.items() if v) + "）", "姿态")
     if big:
-        # 不拦，只标出来：装舵盘时转了半圈会差 180°，校准正好纠回来；方向 ± 设反了也会差这么多，那种校进去是错的
+        # Not blocked, just flagged: a horn mounted half a turn off differs by 180°, which calibration fixes exactly; direction ± set backward also differs this much, and calibrating that in is wrong
         log(f"这几颗摆好的位置离目标差 {CALIB_BIG_DEG}° 以上：" + " ".join(f"#{i} {d:+.1f}°" for i, d in big.items())
             + "。装舵盘时转了半圈没关系；要是方向 ± 设反了，这次校进去的零点是错的：开扭矩用滑块推一点，"
             "看 3D 里这个关节跟实物转的方向是不是一致，不一致就撤销、改 ±、重校", "校准", "warn")
@@ -845,13 +845,13 @@ def _calibrate_mid_all(ids, ref=None):
 
 
 def undo_calibration():
-    """（见下）。整段持 CALIB_LOCK。"""
+    """(See below.) Holds CALIB_LOCK for the whole duration."""
     with CALIB_LOCK:
         return _undo_calibration()
 
 
 def _undo_calibration():
-    """把最近一次备份里的偏移写回去（关扭矩 → 解锁 → 写 31 → 加锁），目标位置改成当前读数，扭矩状态照旧。"""
+    """Write back the offsets from the most recent backup (torque off → unlock → write 31 → lock), set the target position to the current reading, torque state unchanged."""
     d = calib_dir()
     files = sorted(f for f in os.listdir(d) if f.startswith("eeprom-")) if os.path.isdir(d) else []
     if not files:
@@ -874,7 +874,7 @@ def _undo_calibration():
             if on:
                 step = "关扭矩"
                 BUS.write_u8(i, 40, 0)
-                if BUS.read_u8(i, 40) != 0:     # 跟校准一样：这包丢了，改偏移就等于让关节满速跑
+                if BUS.read_u8(i, 40) != 0:     # same as calibration: if this packet were lost, changing the offset would make the joint run at full speed
                     BUS.write_u8(i, 40, 0)
                     if BUS.read_u8(i, 40) != 0:
                         raise feetech.BusError("关扭矩没生效（回读不是 0），不敢写偏移")
@@ -884,7 +884,7 @@ def _undo_calibration():
             step = "写偏移"
             trail.append(f"写偏移{fmt_off(row['offset'])}" + _ack(BUS.write_u16(i, 31, row["offset"])))
             step = "读回"
-            wait_off_change(i, feetech.sign15(off0))   # 轮询落地，别固定睡 20 ms 让关节多垂
+            wait_off_change(i, feetech.sign15(off0))   # poll until it lands, don't sleep a fixed 20 ms and let the joint sag more
             off1, p1 = BUS.read_u16(i, 31), read_pos(i)
             step = "写目标"
             trail.append(f"目标{p1}" + _ack(BUS.write_u16(i, 42, enc_sm(p1))))
@@ -899,7 +899,7 @@ def _undo_calibration():
             bad[i] = f"卡在「{step}」：{type(e).__name__}: {e}"
             log(f"#{i} 撤销{bad[i]}（扭矩{'没恢复' if on else '本来就关着'}）", "校准", "error", exc=True)
         finally:
-            try:                                       # 跟校准同样的收尾：目标对准当前读数再恢复扭矩
+            try:                                       # same wrap-up as calibration: align the target with the current reading before restoring torque
                 p = read_pos(i)
                 BUS.write_u16(i, 42, enc_sm(p))
                 if on and BUS.read_u8(i, 40) != 1:
@@ -911,10 +911,10 @@ def _undo_calibration():
             except Exception as e:
                 log(f"#{i} 加锁失败：{type(e).__name__}: {e}", "校准", "error", exc=True)
     if rec.get("sim"):
-        pass                                           # 模拟里校的：当时就没挪姿态，撤销也不挪
+        pass                                           # calibrated in simulation: poses weren't shifted then, so undo doesn't shift them either
     elif "shifted" in rec:
-        # 当次挪过的要挪回来；校准之后新存的姿态是按新坐标系存的，也得挪回去，
-        # 不然撤销完它们指向的物理姿势整体偏了 delta 步，一发就把关节顶到限位
+        # What was shifted that time must be shifted back; poses saved after the calibration were saved in the new coordinate system and must be shifted back too,
+        # otherwise after undo the physical poses they point to would all be off by delta steps, and sending one would push joints into their limits
         later = []
         t0 = rec.get("time", "")
         for p in list_poses():
@@ -964,7 +964,7 @@ def save_pose(name):
 
 
 def delete_pose(fn):
-    """不真删：挪进 poses/.trash/，文件名前加时间，删错了从那里拿回来。只认 poses/ 里的 .json。"""
+    """Not really deleted: moved into poses/.trash/ with a timestamp prefixed to the file name, so a mistaken delete can be recovered from there. Only accepts .json in poses/."""
     if not fn or os.path.basename(fn) != fn or not fn.endswith(".json"):
         raise ValueError(f"不认识的姿态文件 {fn!r}")
     src = os.path.join(POSES_DIR, fn)
@@ -994,11 +994,11 @@ async def info(request):
 
 
 def torque_on_aligned(ids):
-    """开扭矩前先把目标（42）对准当前读数。扭矩关着时用手掰过关节、或者关着时发过姿势 / 校准过，
-    目标寄存器里还是旧值，一开扭矩舵机就按放开的速度冲过去。
-    顺序：读扭矩 → 关着的读位置 → 写目标 = 位置（带应答）→ 直接读 42 核对 → 开扭矩。
-    核对读 42 本身，不看状态里的 67：67 在真机上跟不跟得上没验证过。本来就开着的不动它的目标（可能正在走）。
-    读不到位置、目标写不进去的那颗不开。返回 (开了的, {id: 目标}, {id: 没开的原因})。"""
+    """Before turning torque on, align the target (42) with the current reading. If a joint was moved by hand with torque off, or a pose was sent / calibration done while off,
+    the target register still holds the old value, and as soon as torque turns on the servo rushes there at the released speed.
+    Order: read torque → read position of the ones that are off → write target = position (with reply) → read 42 directly to check → torque on.
+    Check by reading 42 itself, not 67 in the status: whether 67 keeps up on real hardware hasn't been verified. Servos already on keep their targets (they may be moving).
+    A servo whose position can't be read or whose target can't be written isn't turned on. Returns (turned on, {id: target}, {id: reason not turned on})."""
     tq = BUS.sync_read(ids, 40, 1)
     already = [i for i in ids if tq.get(i) and tq[i][1][0] == 1]
     need = [i for i in ids if i not in already]
@@ -1037,7 +1037,7 @@ def do_scan(ids):
 
 
 def do_timing(n=200):
-    """sync_read 全部在线舵机 n 次，看耗时和失败。"""
+    """sync_read all online servos n times, checking timing and failures."""
     ids = PRESENT or IDS
     times, fails = [], 0
     for _ in range(n):
@@ -1053,8 +1053,8 @@ def do_timing(n=200):
     return res
 
 
-SIM_IMU_OWNED = False   # 当前 IMU_SERVICE 是不是页面「模拟」里接上的（启动参数给的不归它管）
-SIM_IMU_LOCK = threading.Lock()   # 两个标签页同时点、或者跟「连接串口」撞上，别各改一半
+SIM_IMU_OWNED = False   # whether the current IMU_SERVICE was attached via the page's 「模拟」 (Simulation) (one given by startup arguments isn't managed by it)
+SIM_IMU_LOCK = threading.Lock()   # two tabs clicking at once, or colliding with 「连接串口」 (Connect serial port): don't let each change half of it
 
 
 def imu_config_frame():
@@ -1063,7 +1063,7 @@ def imu_config_frame():
 
 
 def drop_sim_imu(why):
-    """接上真串口时把模拟里接的虚拟小板拔掉：真总线上没有它，留着页面会一直显示假姿态。启动参数给的 IMU 不动。"""
+    """When a real serial port connects, remove the virtual board attached in simulation: it doesn't exist on the real bus, and keeping it would make the page keep showing a fake attitude. An IMU given by startup arguments is left alone."""
     global IMU_SERVICE, SIM_IMU_OWNED
     with SIM_IMU_LOCK:
         if not SIM_IMU_OWNED:
@@ -1074,14 +1074,14 @@ def drop_sim_imu(why):
 
 
 def sim_imu_mode():
-    """模拟 IMU 现在是：off 不接 / on 虚拟小板在线 / lost 虚拟小板掉线；不是模拟接上的返回 None。"""
+    """Simulated IMU state: off = not attached / on = virtual board online / lost = virtual board dropped out; returns None if not attached via simulation."""
     if not SIM_IMU_OWNED or IMU_SERVICE is None:
         return "off" if is_fake() and IMU_SERVICE is None else None
     return "on" if getattr(BUS, "imu200", None) is not None else "lost"
 
 
 def set_sim_imu(mode):
-    """模拟模式下接 / 拔虚拟 IMU 小板。走的是 --imu-bus 同一条路：虚拟小板挂在假总线上答 ID 200。"""
+    """Attach / remove the virtual IMU board in simulation mode. Takes the same path as --imu-bus: the virtual board hangs on the fake bus and answers ID 200."""
     with SIM_IMU_LOCK:
         return _set_sim_imu(mode)
 
@@ -1113,11 +1113,11 @@ def _set_sim_imu(mode):
 
 
 def handle(cmd):
-    """WebSocket 指令，同步执行（在线程里跑）。返回要回给前端的 dict 或 None。"""
+    """WebSocket command, executed synchronously (run in a thread). Returns the dict to send back to the frontend, or None."""
     op = cmd.get("op")
     if op == "sim_imu":
         set_sim_imu(cmd.get("mode"))
-        return None                  # ws_endpoint 把新配置广播给所有页面
+        return None                  # ws_endpoint broadcasts the new config to all pages
     if op == "imu_protocol":
         service = IMU_SERVICE
         if service is None or imu_backend(service) != "bus":
@@ -1140,8 +1140,8 @@ def handle(cmd):
         items = [(int(i), struct.pack("<H", int(p) & 0xFFFF)) for i, p in cmd["goals"].items()]
         BUS.sync_write(42, 2, items)
     elif op == "goals_stream":
-        # 连续流：每帧给目标位置，同时把速度上限设成"正好在 dt 内走到"，加速度最大。
-        # 舵机就以匹配的速度连续走，不会每帧冲一下停一下。结束时发 stream_end 放开速度。
+        # Continuous stream: each frame gives target positions and sets the speed limit to "arrive exactly within dt", with max acceleration.
+        # The servos then move continuously at a matching speed instead of lurching and stopping every frame. At the end, send stream_end to release the speed limit.
         dt = max(0.01, float(cmd.get("dt", 0.05)))
         want = {int(i): int(p) & 0xFFFF for i, p in cmd["goals"].items()}
         fresh = [i for i in want if i not in STREAM_LAST]
@@ -1151,7 +1151,7 @@ def handle(cmd):
                 STREAM_LAST[i] = (st[i]["pos"] if st.get(i) else want[i])
         items = []
         for i, p in want.items():
-            sps = abs(p - STREAM_LAST[i]) / dt * 1.2          # 留 20% 余量，宁可早到一点
+            sps = abs(p - STREAM_LAST[i]) / dt * 1.2          # 20% margin; better to arrive a bit early
             reg = max(3, min(32767, int(round(sps / SPEED_UNIT))))
             items.append((i, bytes([0]) + struct.pack("<H", p) + struct.pack("<H", 0) + struct.pack("<H", reg)))
             STREAM_LAST[i] = p
@@ -1163,9 +1163,9 @@ def handle(cmd):
         for i in ids:
             STREAM_LAST.pop(i, None)
     elif op == "goals_profile":
-        # 平滑运动：一次写 41..47 = 加速度(1) 目标位置(2) 时间(2)=0 速度(2)，舵机自己走梯形曲线到终点。
-        # 速度按 |终点-当前| / 秒数 算，单位由相位 BIT2 定（SPEED_UNIT 步/秒 每单位）。
-        # 发完立刻返回，不在这里等——等的话会把后面的指令（比如灵动的头部流）全堵住。页面等完自己发 goals_verify 和 release。
+        # Smooth motion: one write of 41..47 = acceleration(1) target position(2) time(2)=0 speed(2); the servo follows its own trapezoidal profile to the end point.
+        # Speed is |end − current| / seconds, with units set by phase BIT2 (SPEED_UNIT steps/s per unit).
+        # Return immediately after sending, don't wait here: waiting would block subsequent commands (e.g. the head stream of lively motions). The page sends goals_verify and release itself after waiting.
         seconds = max(0.2, float(cmd.get("seconds", 2)))
         acc = max(1, min(254, int(cmd.get("acc", 30))))
         want = {int(i): int(p) & 0xFFFF for i, p in cmd["goals"].items()}
@@ -1173,7 +1173,7 @@ def handle(cmd):
         items, speeds = [], {}
         for i, p in want.items():
             cur = st[i]["pos"] if st.get(i) else p
-            sps = abs(p - cur) / seconds                       # 步/秒
+            sps = abs(p - cur) / seconds                       # steps/s
             reg = max(1, min(32767, int(round(sps / SPEED_UNIT)))) if sps > 0 else 1
             speeds[i] = reg
             items.append((i, bytes([acc]) + struct.pack("<H", p) + struct.pack("<H", 0) + struct.pack("<H", reg)))
@@ -1186,7 +1186,7 @@ def handle(cmd):
         release_speed(ids)
         for i in ids:
             STREAM_LAST.pop(i, None)
-    elif op == "goals_verify":  # 同上，但回读舵机里的目标位置，没收到的重发，最多 4 轮
+    elif op == "goals_verify":  # same as above, but read back the target positions in the servos and resend those not received, up to 4 rounds
         want = {int(i): int(p) & 0xFFFF for i, p in cmd["goals"].items()}
         for attempt in range(4):
             BUS.sync_write(42, 2, [(i, struct.pack("<H", p)) for i, p in want.items()])
@@ -1350,21 +1350,21 @@ def read_states_with_imu(ids, service):
 
 
 def stream_should_poll():
-    """这一拍要不要读总线。--imu-bus 时没扫到舵机也要读：台架上可能只接了小板（ID 200 不在扫描范围里）。"""
+    """Whether to read the bus this tick. With --imu-bus, read even if no servos were found: on the bench maybe only the board is connected (ID 200 isn't in the scan range)."""
     return bool(CLIENTS) and (bool(PRESENT) or imu_backend(IMU_SERVICE) == "bus") \
         and not CALIB_LOCK.locked()
 
 
 async def stream():
-    """按 STREAM_HZ 广播全部舵机状态和新日志。读不到的舵机攒 3 秒报一次，同一个错误 5 秒内只记一次。"""
+    """Broadcast all servo states and new log entries at STREAM_HZ. Servos that can't be read are batched and reported every 3 s; the same error is logged at most once per 5 s."""
     sent_n = LOG_N
     miss, miss_t0 = {}, time.monotonic()
     err_last, err_t = "", 0.0
     while True:
         t0 = time.monotonic()
         if stream_should_poll():
-            # 校准期间不抢总线：一次 sync_read 遇上掉包能占几百毫秒，
-            # 正好卡在关扭矩的窗口里，关节就垂下去了
+            # Don't grab the bus during calibration: one sync_read hitting a lost packet can take hundreds of ms,
+            # landing right in the torque-off window, and the joint sags
             try:
                 if imu_backend(IMU_SERVICE) == "bus":
                     st = await asyncio.to_thread(read_states_with_imu, PRESENT, IMU_SERVICE)
@@ -1393,7 +1393,7 @@ async def stream():
         await asyncio.sleep(max(0.0, 1.0 / hz - (time.monotonic() - t0)))
 
 
-# 指令 → 日志分类；QUIET 是拖滑块、流式这种高频指令，不逐条记
+# Command → log category; QUIET are high-frequency commands like slider drags and streaming, not logged one by one
 OP_CAT = {"goal": "运动", "goals": "运动", "goals_stream": "运动", "stream_end": "运动", "goals_profile": "运动",
           "release": "运动", "goals_verify": "运动", "torque": "运动", "scan": "总线", "scan_all": "总线", "timing": "总线",
           "dump": "寄存器", "write_reg": "寄存器", "reboot": "寄存器", "set_id": "寄存器", "calibrate": "校准",
@@ -1411,7 +1411,7 @@ async def ws_endpoint(ws):
                                    "version": VERSION, "imu_enabled": IMU_SERVICE is not None,
                                    "imu_protocol": getattr(IMU_SERVICE, "protocol", None),
                                    "sim_imu": sim_imu_mode()}))
-    CLIENTS.add(ws)  # hello 必须先于后台广播，前端先收到功能配置
+    CLIENTS.add(ws)  # hello must precede background broadcasts so the frontend receives the feature config first
     try:
         while True:
             cmd = json.loads(await ws.receive_text())
@@ -1427,7 +1427,7 @@ async def ws_endpoint(ws):
             if reply:
                 await ws.send_text(json.dumps(reply))
             if op in ("sim_imu", "reconnect", "imu_protocol"):
-                # 成功失败都广播：失败时页面下拉框要退回实际状态；别的标签页也跟着变
+                # Broadcast on both success and failure: on failure the page's dropdown must revert to the actual state; other tabs follow too
                 await broadcast(json.dumps(imu_config_frame()))
     except WebSocketDisconnect:
         pass
@@ -1436,7 +1436,7 @@ async def ws_endpoint(ws):
 
 
 class ImuLogHandler(logging.Handler):
-    """J-Link SDK/桥接器也写现有的分类日志，保留一条排查时间线。"""
+    """The J-Link SDK/bridge also writes to the existing categorized log, keeping one timeline for troubleshooting."""
 
     def emit(self, record):
         level = ("error" if record.levelno >= logging.ERROR else
@@ -1446,7 +1446,7 @@ class ImuLogHandler(logging.Handler):
 
 
 def imu_backend(service):
-    """服务用的探针后端名（jlink / swd），拿不到就是 None；只认字符串，免得把怪对象塞进 JSON。"""
+    """Probe backend name used by the service (jlink / swd), None if unavailable; only accepts strings, so no odd objects get stuffed into JSON."""
     backend = getattr(service, "backend", None)
     return backend if isinstance(backend, str) else None
 
@@ -1458,7 +1458,7 @@ def imu_error_frame(message, backend=None):
 
 
 async def imu_stream(service, startup_error=None):
-    """独立读状态/广播任务：串口超时不会拖慢 IMU，异常也不影响舵机流。"""
+    """Independent status read/broadcast task: serial timeouts don't slow the IMU, and exceptions don't affect the servo stream."""
     previous = None
     error_last, error_time = "", 0.0
     while True:
@@ -1485,7 +1485,7 @@ async def imu_stream(service, startup_error=None):
 
 
 async def imu_stream_dynamic():
-    """模拟模式：虚拟 IMU 可以在页面上随时接上 / 拔掉，推送任务跟着 IMU_SERVICE 换。"""
+    """Simulation mode: the virtual IMU can be attached / removed on the page at any time, and the push task follows IMU_SERVICE."""
     current, task = None, None
     try:
         while True:
@@ -1510,7 +1510,7 @@ async def lifespan(app):
     handler = None
     logger = logging.getLogger("imu_bridge")
     old_level, old_propagate = logger.level, logger.propagate
-    # pyOCD 自己的日志很啰嗦，只收警告以上，跟桥接器同一条 IMU 时间线
+    # pyOCD's own logging is verbose; only take warnings and above, on the same IMU timeline as the bridge
     pyocd_logger = logging.getLogger("pyocd")
     pyocd_old = (pyocd_logger.level, pyocd_logger.propagate)
     pyocd_handler = None
@@ -1592,14 +1592,14 @@ def parse_args(argv=None):
 
 
 def create_imu_service(args):
-    # 不启用时不导入桥接器，也不需要 J-Link SDK / pyOCD。
+    # When not enabled, the bridge isn't imported, and neither the J-Link SDK nor pyOCD is needed.
     imu_swd = getattr(args, "imu_swd", None)
     imu_bus = getattr(args, "imu_bus", False)
     if not args.imu_jlink and not args.imu_demo and imu_swd is None and not imu_bus:
         return None
     if imu_bus:
         from imu_bus import BusImuService
-        # 跟 stream() 实际读总线的频率一致：模拟 30 Hz、真串口 50 Hz（启动时没给串口也按模拟算）
+        # Same as the frequency stream() actually reads the bus at: 30 Hz simulated, 50 Hz real serial (no serial port given at startup also counts as simulated)
         return BusImuService(poll_hz=FAKE_STREAM_HZ if args.fake or not args.port else STREAM_HZ,
                              protocol=getattr(args, "imu_bus_protocol", "feetech"))
     from imu_bridge import BridgeService, DEFAULT_FIRMWARE, validate_probe_settings
@@ -1663,8 +1663,8 @@ def main(argv=None):
     if a.fake or not a.port:
         fallback_fake("没给 --port（或用了 --fake）" if not a.port else "--fake")
     elif not open_bus(a.port, a.baud)["ok"]:
-        # 串口打不开（USB 没插、口号变了、被别的程序占着）也要把页面起起来，
-        # 插好以后在页面顶栏选串口点「连接」就行，不用重启服务
+        # Even if the serial port can't be opened (USB not plugged in, port number changed, held by another program), bring the page up anyway;
+        # once plugged in, just pick the serial port in the page's top bar and click 「连接」 (Connect), no need to restart the service
         fallback_fake(f"串口 {a.port} 打不开")
     print(f"舵机调试台 v{VERSION} · 浏览器开 http://127.0.0.1:{a.http_port}  （局域网用本机 IP）", flush=True)
     uvicorn.run(app, host=a.host, port=a.http_port, log_level="warning")

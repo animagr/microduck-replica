@@ -1,7 +1,7 @@
-"""IMU 页后端（studio/imu.py）：推给页面的状态取对了没有，粗校 / verify-imu 该拒的拒。
+"""IMU page backend (studio/imu.py): whether the state pushed to the page is taken from the right places, and coarse calibration / verify-imu refuse what they should.
 
-用 tests/fixtures/now-20261018.jsonl（10-18 二号鸭真机录的）里的 busStatus 和 calibration-status。
-粗校 / verify 用假 cmd 连接，照 fork 的 verify-imu 回包文字演成功和三种失败。
+Uses busStatus and calibration-status from tests/fixtures/now-20261018.jsonl (recorded on duck #2's real hardware on Oct 18).
+Coarse calibration / verify use a fake cmd connection that acts out success and three kinds of failure using the fork's verify-imu reply text.
 """
 import asyncio
 import copy
@@ -34,7 +34,7 @@ def recorded(method):
 
 
 class FakeCmd:
-    """站在假 rd 的 cmd 连接上：busStatus / calibration-status / verify-imu。"""
+    """Sits on the fake rd's cmd connection: busStatus / calibration-status / verify-imu."""
 
     def __init__(self, rd):
         self.rd = rd
@@ -141,7 +141,7 @@ class ImuBackendTest(unittest.TestCase):
         return ImuBackend(FakeRd(**kw), self.log, self.tmp.name)
 
     def test_view_picks_mount_of_chip_in_use(self):
-        # 二号鸭用 LSM6DSV16X：要取 imu_mounts 里它那份，不是顶上那个（那是另一种芯片的）
+        # Duck #2 uses an LSM6DSV16X: take its entry in imu_mounts, not the top-level one (that belongs to a different chip)
         v = self.backend(bus=recorded("robot.busStatus"), calib=recorded("robot.busCommand")).view()
         self.assertEqual(v["t"], "imu")
         self.assertEqual(v["source"], "lsm6dsv16x")
@@ -149,7 +149,7 @@ class ImuBackendTest(unittest.TestCase):
         self.assertIs(v["mount"]["verified"], True)
         self.assertTrue(v["ready"])
         self.assertEqual(v["reader"]["state"], "streaming")
-        json.dumps(v)                                           # 能直接发给页面
+        json.dumps(v)                                           # can be sent directly to the page
 
     def test_view_without_robotd(self):
         v = self.backend().view()
@@ -166,7 +166,7 @@ class ImuBackendTest(unittest.TestCase):
                 self.assertEqual(self.backend(bus=bus, calib=factory_calib()).view()["source"], "bus")
 
     def test_view_bus_board_falls_back_to_top_level_mount(self):
-        # 总线小板：busStatus 没有 imu_source → 当成 bus，方向用顶上的 imu_mount_quat
+        # Bus board: busStatus has no imu_source → treated as bus, orientation from the top-level imu_mount_quat
         bus = {"native": {"imu_age_ms": 5}}
         calib = {"calibration": {"imu_mount_quat": [1, 0, 0, 0], "imu_mount_verified": False}}
         v = self.backend(bus=bus, calib=calib).view()
@@ -328,7 +328,7 @@ class ImuBackendTest(unittest.TestCase):
                 self.assertIn(word, str(cm.exception))
 
     def test_full_solve_saves_pending_for_commit(self):
-        """站着完整校完、结果 ok：新的方向、来源、质量写进 state/imu-pending.json（Studio 重启也不丢）。"""
+        """Full standing calibration completed with ok result: the new orientation, source and quality are written to state/imu-pending.json (not lost on Studio restart)."""
         from tests.test_imu_calib import Duck
         b = self.backend(bus=recorded("robot.busStatus"), calib=recorded("robot.busCommand"))
         old = b.view()["mount"]["quat"]
@@ -343,7 +343,7 @@ class ImuBackendTest(unittest.TestCase):
         self.assertAlmostEqual(sum(x * x for x in row["quat"]), 1.0, places=9)
 
     def test_solve_bad_samples_fails_politely(self):
-        # 乱七八糟的读数：回 ok=False 和一句原因，不抛异常、不把后端弄挂
+        # Garbage readings: return ok=False with a reason, don't raise and don't bring the backend down
         b = self.backend()
         res = asyncio.run(b.handle({"op": "solve", "samples": [{"step": "still", "g": [0, 0, -1]}]}, "测试"))
         self.assertFalse(res["ok"])

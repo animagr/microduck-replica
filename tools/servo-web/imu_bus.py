@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""从舵机 TTL 总线读 IMU 小板（ID 200）。默认使用仓库配套的飞特协议 56/15；可选兼容 DXL2 的 124/12。
+"""Read the IMU board (ID 200) from the servo TTL bus. By default uses the repo's Feetech protocol 56/15; optionally the DXL2-compatible 124/12.
 
-舵机与 IMU 可运行不同总线协议：舵机状态仍由 Feetech SCS 解码，IMU 块交给这里。
-飞特协议的 15 字节块判据照主控（fork 的 duck-control
-imu.rs / bus.rs）写，跟 tools/imu200/imu200.py 同一套：
+Servos and the IMU can run different bus protocols: servo state is still decoded with Feetech SCS, and the IMU block is handed to this module.
+The Feetech protocol's 15-byte block criteria follow the controller (the fork's duck-control
+imu.rs / bus.rs), the same set as tools/imu200/imu200.py:
 
-- 四元数三分量全 0 → 融合还没出数（主控沿用上一帧，不计入 ready）
-- 不是有限数 / norm² > 1.02 → 主控拒绝这一帧
-- 前 12 字节连续 25 帧完全相同 → 主控报 orientation is frozen
-- 保留字节（byte 14）必须是 0；状态位 BIT1/BIT2 是板子自己报的故障
+- All three quaternion components are 0 → fusion hasn't produced output yet (the controller reuses the previous frame and doesn't count it toward ready)
+- Not finite / norm² > 1.02 → the controller rejects this frame
+- First 12 bytes identical for 25 consecutive frames → the controller reports orientation is frozen
+- The reserved byte (byte 14) must be 0; status bits BIT1/BIT2 are faults reported by the board itself
 
-板子连续 5 次不应答时暂缓读取，每 2 秒单独 PING 一下 200。飞特模式仍使用含 IMU 和舵机
-的同步读；DXL2 模式将 IMU 与舵机分开读取，舵机始终使用 Feetech 请求。
+After the board fails to reply 5 times in a row, reading is suspended, and 200 is PINGed separately every 2 s. Feetech mode still uses a sync read covering the IMU and the servos;
+DXL2 mode reads the IMU and the servos separately, and the servos always use Feetech requests.
 """
 import math
 import struct
@@ -27,21 +27,21 @@ DXL2_BLOCK_ADDR = 124
 DXL2_BLOCK_LEN = 12
 BLOCK_ADDR = FEETECH_BLOCK_ADDR
 BLOCK_LEN = FEETECH_BLOCK_LEN
-WINDOW = 12               # 主控只看前 12 字节，StaleImuTracker 也只比这 12 字节
-FROZEN_FRAMES = 25        # bus.rs: 连续 25 帧相同就报 frozen
+WINDOW = 12               # the controller only looks at the first 12 bytes, and StaleImuTracker only compares these 12 bytes
+FROZEN_FRAMES = 25        # bus.rs: 25 identical consecutive frames reports frozen
 GYRO_DPS_PER_LSB = 0.0175
-MISS_DEGRADE = 5          # 连续这么多帧 200 没应答：先把它移出 sync_read
-RETRY_S = 2.0             # 移出后每隔这么久单独 PING 它一次
+MISS_DEGRADE = 5          # this many consecutive frames with no reply from 200: first remove it from sync_read
+RETRY_S = 2.0             # after removal, PING it separately at this interval
 
 BIT_FUSION_NOT_READY = 0x01
 BIT_IMU_COMM_FAIL = 0x02
 BIT_SELF_TEST_FAIL = 0x04
 BIT_READER_TOO_SLOW = 0x08
-SLOW_READER_HZ = 30      # 固件 BIT3 = 两次读之间刷新 > 4 次（120 Hz 采样）≈ 读得比 30 Hz 慢
+SLOW_READER_HZ = 30      # firmware BIT3 = more than 4 refreshes between two reads (120 Hz sampling) ≈ reading slower than 30 Hz
 
 
 def decode_block(block):
-    """解飞特 15 字节块或 DXL2 12 字节块，不做坐标变换。"""
+    """Decode a Feetech 15-byte block or a DXL2 12-byte block, without coordinate transformation."""
     if len(block) not in (FEETECH_BLOCK_LEN, DXL2_BLOCK_LEN):
         raise BridgeError(f"块长度 {len(block)}，应为 12（DXL2）或 15（飞特）")
     gyro = struct.unpack_from("<3h", block, 0)
@@ -54,13 +54,13 @@ def decode_block(block):
 
 
 class BusImuService:
-    """跟 BridgeService 同样的接口（start/stop/get_status），数据由 server 的状态轮询喂进来。"""
+    """Same interface as BridgeService (start/stop/get_status); data is fed in by the server's status polling."""
 
     demo = False
     backend = "bus"
 
     def __init__(self, poll_hz=None, protocol="feetech"):
-        # 调试台自己按 poll_hz 读（默认 10 Hz）。低于 30 Hz 时 BIT3 每帧都会亮，那是我们读得慢，不是主控，不提示
+        # The debug console reads at its own poll_hz (default 10 Hz). Below 30 Hz BIT3 lights up every frame; that's us reading slowly, not the controller, so no warning
         self.poll_hz = poll_hz
         self.protocol = protocol
         self.lock = threading.Lock()
@@ -68,7 +68,7 @@ class BusImuService:
         self.last_publish = time.monotonic()
         self.misses = 0
         self.total_misses = 0
-        self.excluded_since = None       # 被移出 sync_read 的时刻；None = 正常带着 200
+        self.excluded_since = None       # when it was removed from sync_read; None = 200 included normally
         self.last_probe = None
         self.last_window = None
         self.same_run = 0
@@ -76,7 +76,7 @@ class BusImuService:
         self.smooth_hz = 0.0
         self.frames = 0
 
-    # ---- 生命周期：没有自己的线程，接口跟 BridgeService 对齐 ----
+    # ---- Lifecycle: no thread of its own, interface aligned with BridgeService ----
     def start(self):
         pass
 
@@ -121,13 +121,13 @@ class BusImuService:
                           message="总线轮询停了（没有网页连着，或者正在校准），姿态暂停。")
         return result
 
-    # ---- 轮询侧 ----
+    # ---- Polling side ----
     def include_in_sync(self):
-        """这一帧 sync_read 要不要带上 200。"""
+        """Whether this frame's sync_read should include 200."""
         return self.excluded_since is None
 
     def due_probe(self, now=None):
-        """出列期间，到点了就该单独 PING 一次 200。"""
+        """While removed, once it's time, 200 should be PINGed separately once."""
         if self.excluded_since is None:
             return False
         now = time.monotonic() if now is None else now
@@ -137,7 +137,7 @@ class BusImuService:
         return False
 
     def probe_result(self, answered):
-        """单独 PING 的结果：应答了就放回 sync_read。返回是否放回。"""
+        """Result of the separate PING: if it replied, put it back into sync_read. Returns whether it was put back."""
         if answered and self.excluded_since is not None:
             self.excluded_since = None
             self.misses = 0
@@ -146,7 +146,7 @@ class BusImuService:
         return False
 
     def feed(self, block, now=None):
-        """block = 200 的 15 字节；None = 这一帧它没应答（或没带它）。返回生成的帧。"""
+        """block = 200's 15 bytes; None = it didn't reply this frame (or wasn't included). Returns the generated frame."""
         now = time.monotonic() if now is None else now
         if block is None:
             self.misses += 1
@@ -202,7 +202,7 @@ class BusImuService:
 
 
 class FakeImu200:
-    """假总线（--fake）用的假小板：120 Hz 换块，陀螺低位带抖动，四元数绕 Z 慢慢转。"""
+    """Fake board for the fake bus (--fake): new block at 120 Hz, gyro low bits with jitter, quaternion slowly rotating about Z."""
 
     def __init__(self, sample_hz=120.0, ready_after_s=0.5):
         self.t0 = time.monotonic()
@@ -216,6 +216,6 @@ class FakeImu200:
         jitter = (n % 7) - 3
         yaw = 0.6 * math.sin(t * 0.5)
         gyro = (int(17 * math.cos(t * 0.5)) + jitter, jitter, -jitter)
-        quat = (0.05, 0.0, math.sin(yaw / 2))   # 带一点倾斜，z 过零时也不会是全 0 的"未就绪"标记
+        quat = (0.05, 0.0, math.sin(yaw / 2))   # a slight tilt, so it's never the all-zero "not ready" marker even when z crosses zero
         return (struct.pack("<3h", *gyro) + struct.pack("<3e", *quat)
                 + bytes([n & 0xFF, 0, 0]))

@@ -1,13 +1,13 @@
-"""走路质量分析（只读）：从 duck_rec 的 50 Hz 录像里找出「颤、晃」来自哪里。
-用法：python gait_quality.py run-xxx.jsonl [报告.txt]
-分段：policy=walk 且指令速度 hypot(vx, vy)>0.02 记为「走」，policy=walk 且指令为 0 记为「原地」。
-录像里 robotd 重启过（t 回退或有 rec_error 行）时在那里切段，不跨段。
-指标：
-  1. 目标抖动：关节目标逐拍变化量（deg/拍）的 RMS，和 >4 Hz 高频能量占比 —— 模型输出本身抖不抖
-  2. 跟踪：目标 − 实际 的 RMS，和互相关估计的滞后（ms）—— 舵机跟不跟得上
-  3. 躯干：陀螺仪 RMS、主频；重力方向前后/左右摆幅 —— 机身晃不晃、晃多快
-  4. 步频：左右膝差的主频
-  5. 时序：相邻帧间隔的抖动、丢拍
+"""Walking quality analysis (read-only): find where the "jitter and wobble" come from in duck_rec's 50 Hz recordings.
+Usage: python gait_quality.py run-xxx.jsonl [report.txt]
+Segments: policy=walk with commanded speed hypot(vx, vy)>0.02 counts as "walking"; policy=walk with zero command counts as "in place".
+Where robotd restarted during the recording (t goes backward or there's a rec_error line), segments are cut there and never span the break.
+Metrics:
+  1. Target jitter: RMS of per-tick change in joint targets (deg/tick), and the share of energy above 4 Hz: does the model's output itself jitter
+  2. Tracking: RMS of target − actual, and lag estimated by cross-correlation (ms): can the servos keep up
+  3. Torso: gyro RMS, dominant frequency; fore-aft/left-right swing of the gravity direction: does the body wobble, and how fast
+  4. Step frequency: dominant frequency of the left-right knee difference
+  5. Timing: jitter of the interval between adjacent frames, dropped ticks
 """
 import json, math, sys
 import numpy as np
@@ -21,7 +21,7 @@ def p(*a):
     if out: out.write(s + '\n')
 
 R = []
-BREAK = {'_break': True}            # robotd 重启：t 回退或录像里记了 rec_error，段在这里断开
+BREAK = {'_break': True}            # robotd restart: t went backward or a rec_error was recorded; the segment breaks here
 for l in open(sys.argv[1], encoding='utf-8', errors='replace'):
     try: d = json.loads(l)
     except ValueError: continue

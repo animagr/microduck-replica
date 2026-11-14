@@ -1,17 +1,17 @@
-"""上机用的判据脚本（只读、只用标准库）：一段 duck_rec 录像（50 Hz RobotState jsonl）按停止规则出数。
-用法：python judge_block.py 录像.jsonl [起始秒 结束秒]（秒 = 相对文件第一帧的 wall 秒）
+"""Criteria script for hardware runs (read-only, standard library only): produces numbers for one duck_rec recording (50 Hz RobotState jsonl) according to the stopping rules.
+Usage: python judge_block.py recording.jsonl [start_s end_s] (seconds = wall seconds relative to the file's first frame)
 
-10-15 第二版：按真机影子数据和独立审核改的台阶规则，来龙去脉见 docs/HD1910-20261015-IMU乱跳根因与陀螺融合上机.md §5.5。
-台阶 = 用陀螺把上一帧重力外推 20 ms，与本帧差 >5°，只数直立走路帧（policy == walk、未卸力、safety.fallen 假）。
-  发布那一路 = safety.gravity（gyro 模式下就是策略看到的融合姿态），配本帧陀螺（两者都过了三点中值，延迟对齐）。
-  影子那一路 = imu.fusion.fused（chip 模式下的融合原值，没过中值），配下一帧陀螺（录像的陀螺过了中值、晚一帧）。
-每次台阶按它前后 ±2 帧的融合判定分类：
-  硬：判定里有 realign_long / realign_gap / fallback / follow（融合能整步跳的只有这四种）→ 1 次就回 chip，不受任何豁免；
-  软：判定只有 accepted / rejected / slew（这几种融合只做积分或每帧 ≤0.1° 的修正，不可能整步跳）：
-      摔倒上升沿前 1.0 s 内、或上一帧发布倾角 ≥30°（已经在倒、倒地判断还没跟上）→ 豁免，只记下；
-      其余每块 ≥3 次 → 回 chip；1–2 次 → 记下、块后逐个看。
-另列：直立走路帧里出现硬判定的帧（配合块前后计数：realign/fallback 涨了要能在录像里对上倒地后 / HOME 时，对不上按真跳处理）。
-静站：policy == held、未卸力、|ω| < 20°/s 的连续帧按 10 s 分窗，每窗 θ 中位 ≤0.5°、P90 ≤1°（倾斜、推动的帧自然被 |ω| 去掉）。
+10-15 second version: step rules revised based on real-hardware shadow data and an independent review; for the full background see docs/HD1910-20261015-IMU乱跳根因与陀螺融合上机.md §5.5.
+Step = gravity from the previous frame extrapolated 20 ms with the gyro differs from this frame by >5°, counted only on upright walking frames (policy == walk, torque on, safety.fallen false).
+  Published path = safety.gravity (in gyro mode this is the fused attitude the policy sees), paired with this frame's gyro (both have passed the three-point median, so their delays line up).
+  Shadow path = imu.fusion.fused (the raw fused value in chip mode, not median filtered), paired with the next frame's gyro (the recorded gyro has passed the median and lags one frame).
+Each step is classified by the fusion verdicts within ±2 frames around it:
+  Hard: verdicts include realign_long / realign_gap / fallback / follow (the only four that let fusion jump a whole step) → a single one means go back to chip, no exemption applies;
+  Soft: verdicts only accepted / rejected / slew (with these the fusion only integrates or corrects ≤0.1° per frame, so it can't jump a whole step):
+      within 1.0 s before a fall's rising edge, or previous frame's published tilt ≥30° (already falling, fall detection hasn't caught up) → exempt, just recorded;
+      otherwise ≥3 per block → go back to chip; 1–2 → recorded, inspected one by one after the block.
+Also listed: frames among upright walking frames with a hard verdict (cross-check with before/after-block counts: an increase in realign/fallback must match post-fall / HOME moments in the recording; if it doesn't, treat it as a real jump).
+Standing still: consecutive frames with policy == held, torque on, |ω| < 20°/s, split into 10 s windows; each window needs median θ ≤0.5° and P90 ≤1° (tilting and pushing frames are naturally removed by |ω|).
 """
 import json, math, sys
 
@@ -65,7 +65,7 @@ def verdicts_near(i):
 
 
 def classify(i):
-    """硬 / 豁免 / 软，和说明。"""
+    """Hard / exempt / soft, plus explanation."""
     vs = verdicts_near(i)
     if HARD & set(vs):
         return '硬', vs
@@ -144,7 +144,7 @@ for r in rows:
 if vs_all:
     print('判定（全部帧）:', vs_all); print('判定（直立走路帧）:', vs_up)
 
-# 静站：held、未卸力、|ω|<20°/s 的连续帧按 10 s 分窗
+# Standing still: consecutive frames that are held, torque on, |ω|<20°/s, split into 10 s windows
 wins, cur = [], []
 for r in rows:
     ok = r['policy'] == 'held' and not r['safety']['limp'] and wdeg(r) < 20 and 'theta_deg' in fus(r)

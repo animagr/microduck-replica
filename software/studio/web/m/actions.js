@@ -1,13 +1,13 @@
-// 动作词典 + 一句话解析。总览、语音、手柄三页共用这一份，别各写一套。
+// Action dictionary + one-sentence parsing. Shared by the overview, voice and gamepad pages; don't write a separate one for each.
 //
-// 下发方式统一走 Studio 已有的 pad.op（software/studio/README.md「前后端协议」、web/pad.js 顶部注释）：
+// Commands all go through Studio's existing pad.op (software/studio/README.md "frontend/backend protocol" (「前后端协议」), the header comment of web/pad.js):
 //   stand / sit / walk / walk_stop / skill {name} / sound {tag} / action_start·hold·stop
-// 不新造 HTTP 接口：手势、语音、按钮三条路最后都汇到同一个 _motion_cmd，互斥和看门狗都是现成的。
+// No new HTTP endpoints: gestures, voice and buttons all end up at the same _motion_cmd, and mutual exclusion and the watchdog already exist there.
 
 export const ACTIONS = {
   stand: { label: '站起来', op: { op: 'stand' }, cn: '站起来' },
   walk: { label: '开始走', op: { op: 'walk' }, cn: '开始走' },
-  // 后端没有 step 这个 op：走一小步 = 先确保策略在跑，再推 0.8 秒前进、停（见 stepOnce）
+  // the backend has no step op: taking a small step = make sure the policy is running, then push forward for 0.8 s and stop (see stepOnce)
   step: { label: '走一小步', special: 'step', cn: '走一小步' },
   stop: { label: '停下', op: { op: 'walk_stop' }, cn: '停下，站好' },
   sit: { label: '坐下', op: { op: 'sit' }, cn: '坐下' },
@@ -17,7 +17,7 @@ export const ACTIONS = {
   greet: { label: '打招呼', op: { op: 'sound', tag: 'greet' }, cn: '打招呼' },
 };
 
-// 点一下头 / 摇两下头这类「按住才做」的动作：发一次按下，按住 duration 毫秒，然后松开
+// "Press and hold" actions like a nod / two head shakes: send one press, hold for duration ms, then release
 const HELD = {
   nod: { id: 'nod', label: '点头', cn: '点点头', ms: 1100 },
   shake: { id: 'shake', label: '摇头', cn: '摇摇头', ms: 1100 },
@@ -25,13 +25,13 @@ const HELD = {
   mouth: { id: 'mouth', label: '张嘴', cn: '张嘴', ms: 900 },
 };
 
-// 头的指令进的是策略的观测，策略没跑时发了也不动（pad_combo.py 文件头、NEEDS_POLICY）。
-// 嘴不受这个限制：fork robotd 只要站好了（含保持、坐着）就动，所以 mouth 不在里面。
+// Head commands go into the policy's observations, so if the policy isn't running they're sent but nothing moves (pad_combo.py file header, NEEDS_POLICY).
+// The mouth isn't subject to this: fork robotd moves it as long as it's standing (including holding and sitting), so mouth isn't in here.
 const HELD_NEEDS_POLICY = new Set(['nod', 'shake', 'tilt']);
 
-// 手柄页的动作分组。站和走单独一组：用户最容易卡在「站着不动 / 摇杆没反应」上
-// 「开始走」不在组里：它是开走路策略的总开关，手柄页把它单独拎到摇杆下面、
-// 贴品牌黄底（gamepad.js 的 m-start-row），别让它和普通动作键混在一起被漏掉。
+// Action groups on the gamepad page. Standing and walking are a separate group: users most easily get stuck on "standing still / stick does nothing"
+// "Start walking" (「开始走」) isn't in a group: it's the master switch that turns on the walk policy, so the gamepad page pulls it out below the sticks
+// with the brand-yellow background (m-start-row in gamepad.js), so it doesn't get lost among the ordinary action buttons.
 export const ACTION_GROUPS = [
   { title: '站住与走路', keys: ['stand', 'step', 'stop'] },
   { title: '坐下与技能', keys: ['sit', 'roulade', 'ground_pick'] },
@@ -39,16 +39,16 @@ export const ACTION_GROUPS = [
   { title: '转头', keys: ['nod', 'shake', 'tilt'] },
 ];
 
-/** 任意动作键 → 按钮上的字（ACTIONS 和 HELD 共用一套取法） */
+/** Any action key → the text on the button (ACTIONS and HELD share the same lookup) */
 export function actionLabel(key) {
   const hit = ACTIONS[key] || HELD[key];
   return (hit && hit.label) || key;
 }
 
 /**
- * 现在最该点的那一个键（手柄页给它描一圈绿边）。每条都对应后端一条真实的准入条件：
- * holding = 站着但策略没跑 → 摇杆推了不动，差「开始走」；sitting / limp → 差「站起来」。
- * 用户最容易卡的就是「推了没反应」，所以要让他一眼看到下一步该按哪个。
+ * The button that most needs clicking right now (the gamepad page draws a green outline around it). Each case corresponds to a real admission condition in the backend:
+ * holding = standing but the policy isn't running → pushing the stick does nothing, missing "start walking"; sitting / limp → missing "stand up".
+ * Users most easily get stuck on "pushed it and nothing happened", so they should see at a glance which one to press next.
  */
 export function nextAction(st) {
   if (!st) return null;
@@ -64,7 +64,7 @@ export function nextAction(st) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 摇杆一帧。-1..1，y 向上为负 = 前进（pad_drive.sticks_to_intent 的 LY = -ly）。后端 0.5 秒收不到就自己刹车 */
+/** One stick frame. -1..1, y up is negative = forward (LY = -ly in pad_drive.sticks_to_intent). The backend brakes by itself if nothing arrives for 0.5 s */
 function pushStick(link, { x = 0, y = 0 } = {}, timeout) {
   return link.cmd('pad.op', {
     op: 'sticks', mode: 'drive', lx: x, ly: y, rx: 0, ry: 0, seq: link.nextPadSeq(),
@@ -73,18 +73,18 @@ function pushStick(link, { x = 0, y = 0 } = {}, timeout) {
 
 const whyOf = (r) => String((r && (r.reason || r.error || r.data?.dropped)) || '');
 const good = (r) => Boolean(r) && r.ok !== false;
-// 后端把「已经在走」也当成失败回话（这时按钮已经换成「停下」了），对调用方来说这是成功
+// The backend also replies "already walking" as a failure (by then the button has already changed to "stop"); for the caller this is success
 const isReady = (r) => !r?.data?.dropped && (good(r) || /准备好走|已经在走/.test(whyOf(r)));
-// 后端一次只发一个独占指令，前一个没回话会把后一个顶回来；站起 / 回中也都要等几拍。
-// robotd 的 home_start_guard 还要「连续几帧 HOME + 直立」才肯启动策略（不能进入保持：…），
-// 刚站起来时会连续拒几次；等一会儿再发就能过，所以这类原因也当成「忙」来重试。
+// The backend only sends one exclusive command at a time; if the previous one hasn't answered, the next is bounced back; standing up / returning to center also take a few ticks.
+// robotd's home_start_guard also requires "several consecutive frames at HOME + upright" before starting the policy ("不能进入保持：…" (cannot enter hold: …)),
+// so it rejects several times right after standing up; sending again after a moment gets through, so this kind of reason is also retried as "busy".
 const BUSY_WHY = /还没回话|等一下|等一秒|还在回站姿|还在站起来|正在起来|站稳了再点|不能进入保持|确认实际 HOME|关节实际位置|舵机反馈|反馈已过期|直立姿态|扶正/;
-// 策略真在跑的两种站姿（pad_drive.DRIVING）。holding = 站着但策略没跑，摇杆推了不动
+// The two standing postures in which the policy is really running (pad_drive.DRIVING). holding = standing but the policy isn't running; pushing the stick does nothing
 const DRIVING = new Set(['policy', 'walking']);
 
 /**
- * 等「策略跑起来」。给了 ctx.getPosture 就盯着状态；没给（比如总览页拿不到实时状态）就干等一小会儿。
- * robot.enable 发出去到 posture 变 policy 之间有一两秒，这时候推摇杆 / 点坐下都会被顶回来。
+ * Wait for "the policy is running". If ctx.getPosture is given, watch the state; if not (e.g. the overview page has no live state), just wait a little while.
+ * Between sending robot.enable and posture becoming policy there are a second or two; pushing the stick / clicking sit down during that time gets bounced back.
  */
 async function waitDriving(ctx, ms, check) {
   const get = ctx && ctx.getPosture;
@@ -99,9 +99,9 @@ async function waitDriving(ctx, ms, check) {
 }
 
 /**
- * 让走路策略跑起来，也就是「开始走」。
- * 官方规矩：站姿分两种——holding（站着但策略没跑，摇杆推了也不动）和 policy（准备好走了）。
- * 所以「坐下」「走一小步」「推摇杆」之前都得先过这一关，否则用户只会看到「没反应」。
+ * Get the walk policy running, i.e. "start walking".
+ * Official rule: there are two standing postures: holding (standing but the policy isn't running, the stick does nothing) and policy (ready to walk).
+ * So "sit down", "take a small step" and "push the stick" all have to get through this first; otherwise the user just sees "nothing happened".
  */
 async function ensurePolicy(link, ctx, tries = 4, check) {
   for (let i = 0; i < tries; i++) {
@@ -112,8 +112,8 @@ async function ensurePolicy(link, ctx, tries = 4, check) {
     const why = whyOf(r);
     if (BUSY_WHY.test(why)) { await sleep(900); continue; }
     if (/坐/.test(why)) {
-      // 坐着：先站起来（走 sit_toggle），站稳了再开策略。后端坐着又不给站时（策略没跑且卸了力）
-      // 会把「先把它扶起来放平」那句原话抛回来，这里照原话报给用户，别替它瞎指挥。
+      // sitting: stand up first (via sit_toggle), and start the policy once steady. When the backend refuses to stand while sitting (policy not running and torque released)
+      // it throws back the original message "first lift it up and set it level"; report that message to the user verbatim, don't make up instructions on its behalf.
       const s = await link.cmd('pad.op', { op: 'stand' }, 25000);
       check?.();
       if (!good(s) && !/已经站着/.test(whyOf(s))) return { ok: false, error: whyOf(s) || '站不起来' };
@@ -138,7 +138,7 @@ function startStep(link, ctx) {
   const step = { cancelled: null };
   activeSteps.set(link, step);
   const run = async () => {
-    // 旧步进先归零，新步进再拿方向盘，避免旧停止帧打断新动作。
+    // the old stepping is zeroed first, then the new stepping takes the wheel, so a stale stop frame doesn't interrupt the new action.
     if (previous) await previous.done;
     return stepOnce(link, ctx, step);
   };
@@ -156,7 +156,7 @@ function stopAction(link, op) {
   return result;
 }
 
-/** 手机的短步动作沿用 Studio 摇杆通道：策略 → 0.85 秒前进 → 停。 */
+/** The phone's short-step action reuses Studio's stick channel: policy → 0.85 s forward → stop. */
 async function stepOnce(link, ctx, step, power = 0.55) {
   const poseError = '还没确认走路策略在运行，等站稳后再试。';
   const cancelled = '短步已取消。';
@@ -215,8 +215,8 @@ async function stepOnce(link, ctx, step, power = 0.55) {
 }
 
 /**
- * 坐下。官方要求策略在跑才给坐，所以 holding 时会回「坐下要策略在跑：先点开始走」。
- * 这句话让用户去点一个他以为不存在的按钮——干脆这里替他补上：先开始走，再坐一次。
+ * Sit down. Official requires the policy to be running before sitting, so in holding it replies "sitting requires the policy running: click start walking first".
+ * That message sends the user to click a button they think doesn't exist, so just fill it in for them here: start walking first, then sit again.
  */
 async function sitSmart(link, ctx) {
   for (let i = 0; i < 4; i++) {
@@ -225,11 +225,11 @@ async function sitSmart(link, ctx) {
     if (good(r) || /已经坐着/.test(why)) {
       return { ok: true, cn: '坐下', error: null, note: /已经坐着/.test(why) ? '已经坐着了' : null };
     }
-    if (BUSY_WHY.test(why)) { await sleep(900); continue; }        // 上一个指令还没回话
+    if (BUSY_WHY.test(why)) { await sleep(900); continue; }        // the previous command hasn't answered yet
     if (!/策略/.test(why)) return { ok: false, cn: '坐下', error: why };
     const p = await ensurePolicy(link, ctx);
     if (!p.ok) return { ok: false, cn: '坐下', error: p.error };
-    await waitDriving(ctx, 6000);          // 开完策略还要等它真的站稳，不然坐下会被回一句「等一秒」
+    await waitDriving(ctx, 6000);          // after starting the policy, wait until it's really steady, otherwise sitting gets a reply of "wait a second"
   }
   return { ok: false, cn: '坐下', error: '坐下一直没排上队，再点一次试试' };
 }
@@ -237,8 +237,8 @@ async function sitSmart(link, ctx) {
 let press = 0;
 
 /**
- * 执行一个动作名（ACTIONS 或 HELD 里的键）。返回 {ok, cn, error, note}
- * @param ctx 可选：{getPosture()} —— 能读到实时站姿时，等待就按状态来，不用瞎猜时间
+ * Run an action name (a key in ACTIONS or HELD). Returns {ok, cn, error, note}
+ * @param ctx optional: {getPosture()}, when live posture is readable, waits follow the state instead of guessing times
  */
 export async function runAction(link, key, ctx) {
   const hit = ACTIONS[key];
@@ -257,19 +257,19 @@ export async function runAction(link, key, ctx) {
   }
   const held = HELD[key];
   if (!held) return { ok: false, cn: key, error: '不认识这个动作' };
-  // 点头 / 摇头 / 歪头只是给策略喂观测：策略没在跑，发下去也不会动（NEEDS_POLICY）。
-  // 「站起来后点头没反应 / 让我先点开始走」就卡在这——先替他把走路策略开起来。
+  // nod / shake / tilt head only feed the policy observations: if the policy isn't running, sending them moves nothing (NEEDS_POLICY).
+  // "nodding does nothing after standing up / make me click start walking first" gets stuck right here, so start the walk policy for them first.
   if (HELD_NEEDS_POLICY.has(key)) {
     const p = await ensurePolicy(link, ctx);
     if (!p.ok) return { ok: false, cn: held.cn, error: p.error };
   }
   const tag = ++press;
-  const tries = HELD_NEEDS_POLICY.has(key) ? 3 : 1;      // 嘴不用等策略，一次就够
+  const tries = HELD_NEEDS_POLICY.has(key) ? 3 : 1;      // the mouth doesn't wait for the policy, once is enough
   for (let i = 0; i < tries; i++) {
     const start = await link.cmd('pad.op', { op: 'action_start', id: held.id, press: tag }, 8000);
     if (start.ok !== false) break;
     const why = whyOf(start);
-    // 后端可能晚一拍才把站姿算成「正在走」：等它一下再试；其它原因（真的拒绝）直接报
+    // the backend may take a tick longer to consider the posture "walking": wait a moment and retry; other reasons (real rejections) are reported directly
     if (i < tries - 1 && (BUSY_WHY.test(why) || /准备好走|开始走|策略/.test(why))) {
       await waitDriving(ctx, 2000);
       continue;
@@ -284,19 +284,19 @@ export async function runAction(link, key, ctx) {
   return { ok: true, cn: held.cn, error: null, ms: performance.now() - t0 };
 }
 
-// ---------------- 语音开关（pad.op 的 audio 分支） ----------------
+// ---------------- Voice switch (pad.op's audio branch) ----------------
 
-// 后端（pad.py 的 audio 分支）要求「这条连接没被标成离开手柄区」，否则回「请先回到手柄遥控区操作语音」。
-// 手机页是单页应用，一条 ws 走遍五个 tab：从手柄切过来时，手柄页卸载会发 drive {on:false}，
-// 正好把这条连接标成离开 —— 语音开关就再也点不动了。所以进语音页先发一次 drive {open:true}
-// （后端只解开标记，不抢方向盘、不碰舵机），真撞上了再补一次重试。
+// The backend (pad.py's audio branch) requires that "this connection is not marked as having left the gamepad area", otherwise it replies "请先回到手柄遥控区操作语音" (please return to the gamepad remote area to operate voice).
+// The phone page is a single-page app, one ws across all five tabs: when switching from the gamepad, unmounting the gamepad page sends drive {on:false},
+// which marks exactly this connection as left, and the voice switch can no longer be clicked. So entering the voice page first sends drive {open:true}
+// (the backend only clears the mark, doesn't take the wheel or touch the servos), and if it really hits that, retry once more.
 export const PAD_AREA_WHY = /回到手柄|不在手柄|已经断开/;
 
 export function openPadArea(link) {
   return link.cmd('pad.op', { op: 'drive', open: true }, 8000);
 }
 
-/** 开 / 关板载聆听。被「回到手柄区」拒了就补一次 open 再重试一次 */
+/** Turn onboard listening on / off. If rejected with "return to the gamepad area", send open once and retry once */
 export async function setAudio(link, values, tries = 2) {
   for (let i = 0; i < tries; i++) {
     const r = await link.cmd('pad.op', { op: 'audio', ...values }, 12000);
@@ -307,13 +307,13 @@ export async function setAudio(link, values, tries = 2) {
   return { ok: false, reason: '板载语音没切换成功' };
 }
 
-// ---------------- 一句话 → 动作 ----------------
+// ---------------- One sentence → action ----------------
 
-// 前缀词。**不再要求**喊「鸭鸭」了（两条语音通道都直接说口令），但万一还带着就剥掉，
-// 免得「鸭鸭站起来」被当成不会做的词。常见的误识别（呀呀、丫丫）也一起收了。
+// Prefix word. Saying "鸭鸭" (Ducky) is **no longer required** (both voice channels take commands directly), but if it's still there it's stripped,
+// so "鸭鸭站起来" (Ducky stand up) isn't treated as an unknown phrase. Common misrecognitions (呀呀, 丫丫) are included too.
 const ADDRESS = /^(鸭鸭鸭|鸭鸭|呀呀|丫丫|小鸭鸭|鸭子|小鸭子)[，,、。.!！?？\s]*/;
 
-// 每条规则匹配整个口令。明确的「别走」「不要走」只表示停止。
+// Each rule matches the whole command. An explicit "别走" / "不要走" (don't walk) only means stop.
 const RULES = [
   ['stop', /^(?:停(?:下(?:来)?|住|步)?|别走|不要走|站住|站好|不走了)$/],
   ['stand', /^(?:站起(?:来)?|起立|起来|起身|站)$/],
@@ -336,15 +336,15 @@ export const CMD_CN = {
   chirp: '叫一声', greet: '打招呼',
 };
 
-/** 清掉空白和标点，方便匹配 */
+/** Strip whitespace and punctuation to make matching easier */
 function tidy(text) {
   return String(text || '').replace(/[\s，。！、,.!]/g, '');
 }
 
 /**
- * 解析一句话。
- * @param {string} text 识别到的文字
- * @param {{requireWake?: boolean}} opt requireWake=true 时没有「鸭鸭」开头就当成闲聊
+ * Parse one sentence.
+ * @param {string} text the recognized text
+ * @param {{requireWake?: boolean}} opt with requireWake=true, anything not starting with "鸭鸭" (Ducky) is treated as chit-chat
  * @returns {{cmd: string|null, wake: boolean, said: string}}
  */
 export function parseUtterance(text, { requireWake = false } = {}) {
@@ -362,7 +362,7 @@ export function parseUtterance(text, { requireWake = false } = {}) {
   return { cmd: null, wake, said };
 }
 
-// ---------------- 姿势文案 ----------------
+// ---------------- Posture text ----------------
 
 export function postureCopy(st, name) {
   const p = st?.posture;
@@ -383,7 +383,7 @@ export function postureCopy(st, name) {
   }
 }
 
-/** 电量 / 舵机 / IMU 三个小格用的数字，读不到统一给 null，别自己编 */
+/** Numbers for the three small cells battery / servo / IMU; anything unreadable is uniformly null, don't make up values */
 export function readings(st) {
   const b = st?.battery || {};
   const s = st?.servos || {};

@@ -1,11 +1,11 @@
-"""站 HOME 时两只脚掌在横滚（左右）方向差多少、是哪个关节造成的、哪条边低（只读分析）。
-脚掌法线 = 脚碰撞盒最短边方向；横滚 = 法线在躯干 y-z 平面里的倾角（+ = 法线往机身左边倒 = 脚掌左边低）。
-两脚横滚差 = 左脚横滚 − 右脚横滚，**相对仿真 HOME 姿势**：仿真模型在 HOME 时两只脚底本身就差 5.97°（每只外侧低约 3°，
-是模型几何，见开头自检行），下面都减掉这个基准。读数和 HOME 目标用同一个零点，所以零位偏差在这里看不出来。
-关节贡献 = 只把该关节从 HOME 换成实测值时差值的变化（其余关节保持 HOME）。
-内外侧边 = 躯干摆正时，脚碰撞盒底面靠身体中线的长边（内）和远离中线的长边（外）的平均高度；碰撞盒是简化的脚，真实情况要看实物。
-用法：python home_roll.py MJCF.xml 名称=录像.jsonl ...   （取每段 policy=held 且未卸力的最后 150 帧，按段统计）
-     python home_roll.py MJCF.xml 名称=home-capture.json ...（单帧，字段 joints15）
+"""When standing at HOME, how much the two soles differ in roll (left-right), which joint causes it, and which edge is lower (read-only analysis).
+Sole normal = direction of the foot collision box's shortest edge; roll = tilt of the normal in the torso y-z plane (+ = normal leans toward the body's left = sole's left side lower).
+Roll difference between feet = left foot roll − right foot roll, **relative to the simulated HOME pose**: in the sim model the two soles already differ by 5.97° at HOME (each outer side about 3° lower,
+this is model geometry, see the self-check line at the start), and that baseline is subtracted everywhere below. Readings and HOME targets share the same zero, so zero-position errors can't be seen here.
+Joint contribution = change in the difference when only that joint is switched from HOME to the measured value (other joints stay at HOME).
+Inner/outer edges = with the torso leveled, the average height of the long edge of the foot collision box's bottom face nearer the body's midline (inner) and farther from it (outer); the collision box is a simplified foot, check the real part for the true situation.
+Usage: python home_roll.py MJCF.xml name=recording.jsonl ...   (takes the last 150 frames of each segment with policy=held and torque on, statistics per segment)
+     python home_roll.py MJCF.xml name=home-capture.json ...(single frame, field joints15)
 """
 import json
 import math
@@ -39,7 +39,7 @@ def rolls(q):
     for s, g in gid.items():
         R = d.geom_xmat[g].reshape(3, 3); n = Rb.T @ R[:, int(np.argmin(m.geom_size[g]))]
         if n[2] < 0: n = -n
-        out[s] = math.degrees(math.atan2(n[1], n[2]))       # + = 法线往机身左边倒 = 脚掌左边低
+        out[s] = math.degrees(math.atan2(n[1], n[2]))       # + = normal leans toward the body's left = sole's left side lower
     return out
 
 
@@ -48,8 +48,8 @@ def diff(q):
 
 
 def edges(q):
-    """躯干坐标下每只脚底面内侧边、外侧边的平均高度（mm）。
-    底面 = 碰撞盒最薄方向上朝下的那一面；内外 = 底面左右两条长边里离身体中线近 / 远的那条。"""
+    """Average height (mm) of the inner and outer edges of each foot's bottom face, in the torso frame.
+    Bottom face = the downward-facing face along the collision box's thinnest direction; inner/outer = whichever of the bottom face's two long left/right edges is nearer / farther from the body's midline."""
     Rb, pb = fk(q); out = {}
     for s, g in gid.items():
         R = Rb.T @ d.geom_xmat[g].reshape(3, 3); c = Rb.T @ (d.geom_xpos[g] - pb); h = m.geom_size[g]
@@ -61,7 +61,7 @@ def edges(q):
         for sg in (-1.0, 1.0):
             e = bottom + sg * h[lat] * R[:, lat]
             side[sg] = (abs(e[1]), np.mean([(e + sx * h[lon] * R[:, lon])[2] for sx in (-1.0, 1.0)]))
-        inner, outer = sorted(side.values())                  # |y| 小的是内侧
+        inner, outer = sorted(side.values())                  # the one with smaller |y| is inner
         out[s] = (inner[1] * 1000, outer[1] * 1000)
     return out
 

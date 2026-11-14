@@ -1,19 +1,19 @@
-// 更多：语音方式切换、能看到但这一版手机页没重做的能力（跳到桌面版对应页）、以及连接信息。
-// 桌面版的那几页本来就是响应式的（#/tof、#/servos、#/imu），手机上能用，所以这一版先给入口。
-// 「模型」已经是手机壳里的整页（内嵌桌面版组件），不在这里重复列。
+// More: voice mode switching, capabilities that are visible but not redone in this version of the phone pages (jump to the matching desktop page), and connection info.
+// Those desktop pages are responsive already (#/tof, #/servos, #/imu) and usable on phones, so this version just provides entry points.
+// "Models" is already a full page in the phone shell (embedding the desktop component), so it isn't listed again here.
 import { html, useState, useEffect } from '../vendor/preact-htm.module.js';
 import { link } from './link.js';
 
 const SRC_KEY = 'duck.voice.source';
 const HOT_KEY = 'duck.hotspot';
 
-// 切热点会把这台手机的连接断掉，可能收不到后端的状态和回执；先把热点信息留在本机。
+// Switching to the hotspot drops this phone's connection and the backend's state and acks may not arrive; keep the hotspot info locally first.
 function loadHotspot() {
   try { return JSON.parse(localStorage.getItem(HOT_KEY) || 'null') || null; } catch { return null; }
 }
 
 function saveHotspot(h) {
-  try { localStorage.setItem(HOT_KEY, JSON.stringify(h)); } catch { /* 隐私模式 */ }
+  try { localStorage.setItem(HOT_KEY, JSON.stringify(h)); } catch { /* private mode */ }
 }
 
 const PAGES = [
@@ -34,10 +34,10 @@ const SOURCES = [
 export function MorePage({ hello, st, conn, say, nick, rename }) {
   const [src, setSrc] = useState('auto');
   const [draft, setDraft] = useState('');
-  useEffect(() => { try { setSrc(localStorage.getItem(SRC_KEY) || 'auto'); } catch { /* 隐私模式 */ } }, []);
+  useEffect(() => { try { setSrc(localStorage.getItem(SRC_KEY) || 'auto'); } catch { /* private mode */ } }, []);
   const pick = (id) => {
     setSrc(id);
-    try { localStorage.setItem(SRC_KEY, id); } catch { /* 隐私模式 */ }
+    try { localStorage.setItem(SRC_KEY, id); } catch { /* private mode */ }
     say(`语音方式已切到「${SOURCES.find((s) => s.id === id).label}」`);
   };
   const saveName = (e) => {
@@ -47,7 +47,7 @@ export function MorePage({ hello, st, conn, say, nick, rename }) {
     say(draft.trim() ? `以后就叫它「${draft.trim()}」` : '名字恢复成默认的「鸭鸭」');
   };
 
-  // 户外：热点信息跟状态同步，同时留在本机（切热点会把连接断掉）
+  // outdoors: hotspot info syncs with state and is also kept locally (switching to the hotspot drops the connection)
   const net = st?.net;
   const hs = net?.hotspot;
   const [hot, setHot] = useState(loadHotspot);

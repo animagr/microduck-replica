@@ -1,4 +1,4 @@
-"""真实部署包/HTTP/模型库 + 测试 RPC/预检器 + 无头 Edge；不操作真实鸭子。"""
+"""Real deployment package / HTTP / model library + test RPC / prechecker + headless Edge; doesn't operate a real duck."""
 import json
 import os
 import shutil

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""调试台后端自检：真实的 server.handle + FeetechBus，对着协议级模拟器（sim_bus）跑一遍会写舵机的功能。
+"""Debug console backend self-test: the real server.handle + FeetechBus, run against the protocol-level simulator (sim_bus) through the functions that write to servos.
 
   python selftest.py
 
-改了 feetech.py 或 server.py 里跟舵机打交道的地方，先跑这个再上真机。
-不碰真舵机，不碰仓库里的 poses/ 和 calib/（用临时目录）。
+If you changed the servo-related parts of feetech.py or server.py, run this before going to the real robot.
+Doesn't touch real servos, nor the repo's poses/ and calib/ (uses a temp directory).
 """
 import json
 import os
@@ -32,11 +32,11 @@ def main():
     server.CALIB_DIR = os.path.join(tmp, "calib")
     server.POSES_DIR = os.path.join(tmp, "poses")
     server.LOG_DIR = os.path.join(tmp, "logs")
-    server.DIRS_FILE = os.path.join(tmp, "directions.json")   # 跟实机一致：15 颗全 −1；不读仓库里的文件
+    server.DIRS_FILE = os.path.join(tmp, "directions.json")   # same as the real robot: all 15 are −1; doesn't read the repo's file
     with open(server.DIRS_FILE, "w", encoding="utf-8") as f:
         json.dump({str(i): -1 for i in IDS}, f)
     os.makedirs(server.POSES_DIR)
-    # 摆在一个离 2048 挺远的姿势上
+    # Put it in a pose fairly far from 2048
     start = {i: 2048 + (k * 37 - 250) for k, i in enumerate(IDS)}
     port = SimSerial(IDS, phys=start)
     server.BUS = feetech.FeetechBus(None, ser=port)
@@ -87,17 +87,17 @@ def main():
     print("校准后新存的姿态，撤销时也要跟着挪回来")
     H({"op": "calib_mid_all", "ids": IDS})
     H({"op": "save_pose", "name": "校准后存的"})
-    phys_at_save = {i: sv[i].phys for i in IDS}     # 存它的时候，每个关节的物理位置
+    phys_at_save = {i: sv[i].phys for i in IDS}     # physical position of each joint at the time it was saved
     H({"op": "calib_undo"})
     after = [x for x in server.list_poses() if x["name"] == "校准后存的"][0]["goals"]
-    # 真正要保证的：撤销以后把这个姿态发出去，关节还是回到存它时那个物理姿势
+    # What really needs to be guaranteed: after undo, sending this pose brings the joints back to the physical pose at the time it was saved
     want = {i: round(phys_at_save[i] + sv[i].off) for i in IDS}
     worst = max(abs(after[i] - want[i]) for i in IDS)
     check(worst <= 2, f"撤销后姿态里的数字仍然指向存它时那个物理姿势（最大差 {worst} 步）")
     server.delete_pose([x for x in server.list_poses() if x["name"] == "校准后存的"][0]["file"])
 
     print("按官方折叠校准：目标 = 官方 FOLD 角度 × ±，校完零点是官方 2048，存的姿态跟着换算")
-    fold_ids = IDS                                      # 腿按官方折叠、头颈摆正，15 颗一起标
+    fold_ids = IDS                                      # legs in the official fold, head/neck straight, all 15 calibrated together
     H({"op": "save_pose", "name": "折叠前存的"})
     saved_before = [x for x in server.list_poses() if x["name"] == "折叠前存的"][0]["goals"]
     phys = {i: sv[i].phys for i in IDS}
@@ -123,7 +123,7 @@ def main():
 
     print("扭矩关着按官方折叠校准（实际用法：手摆），校完用手展开，再开扭矩不能跳")
     H({"op": "torque", "on": 0})
-    for i in IDS:                                       # 手摆成校准用折叠，零点没校准，各差几步；右膝差 150°（装的时候转了）
+    for i in IDS:                                       # posed by hand into the calibration fold, zero not calibrated, each off by a few steps; right knee off by 150° (rotated during assembly)
         sv[i].phys = want[i] - sv[i].off + (1700 if i == 13 else 5)
     plan = H({"op": "calib_plan", "ids": IDS, "ref": "@official:FOLD", "for": "all"})
     rows = {x["id"]: x for x in plan["rows"]}
@@ -137,7 +137,7 @@ def main():
     check(all(sv[i].r[40] == 0 for i in IDS), "扭矩原来关着，校完还关着")
     check(all(sv[i].goal == st[i]["pos"] for i in IDS), "目标寄存器 = 当前读数")
     check(all(sv[i].phys == phys[i] for i in IDS), "关节没动")
-    for i in IDS:                                       # 用手把鸭子展开
+    for i in IDS:                                       # unfold the duck by hand
         sv[i].phys = 2048 - sv[i].off
     r = H({"op": "torque", "on": 1})
     server.BUS.states(IDS)
@@ -147,7 +147,7 @@ def main():
 
     print("扭矩关着发了姿势，再开扭矩也不能跳")
     H({"op": "torque", "ids": [24], "on": 0})
-    H({"op": "goals", "goals": {"24": 2800}})          # 关着发的目标留在舵机里
+    H({"op": "goals", "goals": {"24": 2800}})          # a target sent while torque is off stays in the servo
     sv[24].phys = 1900 - sv[24].off
     H({"op": "torque", "ids": [24], "on": 1})
     server.BUS.states([24])
@@ -159,8 +159,8 @@ def main():
     ref = [x for x in server.list_poses() if x["name"] == "缩"][0]
     other_before = [x for x in server.list_poses() if x["name"] == "别的"][0]["goals"]
     legs = [22, 23, 24, 12, 13, 14]
-    H({"op": "torque", "ids": legs, "on": 0})          # 缩着放在地上，腿扭矩关着
-    for i in legs:                                     # 模拟舵盘重装：同一个物理位置读数偏了 7 步
+    H({"op": "torque", "ids": legs, "on": 0})          # folded, placed on the ground, leg torque off
+    for i in legs:                                     # simulate remounting the servo horn: the same physical position reads 7 steps off
         sv[i].off += 7
     phys = {i: sv[i].phys for i in IDS}
     r = H({"op": "calib_mid_all", "ids": legs, "ref": ref["file"]})
@@ -190,7 +190,7 @@ def main():
     print("0x0B 和写偏移都不认：偏移还原，不留半吊子")
     sv[31].support_0b = False
     sv[31].ignore_offset_writes = True
-    H({"op": "goals", "goals": {"31": 2300}})     # 先挪开，不然"本来就在 2048"会直接算成功
+    H({"op": "goals", "goals": {"31": 2300}})     # move it away first, otherwise "already at 2048" would count as success right away
     server.BUS.states([31])
     o31 = sv[31].off
     r = H({"op": "calibrate", "id": 31})
@@ -250,12 +250,12 @@ def main():
         sv[i].droop = 0.62
     H({"op": "torque", "on": 1})
     server.BUS.states(IDS)
-    held = {i: sv[i].phys for i in IDS}          # 扭矩开着，舵机顶着不动
+    held = {i: sv[i].phys for i in IDS}          # torque on, servos holding still
     r = H({"op": "calib_mid_all", "ids": IDS})
     st = server.BUS.states(IDS)
     check(len(r["ok"]) == 15, f"15 颗都成功（{len(r['ok'])} 成功，失败 {list(r['bad'])[:3]}）")
-    # 真正的精度指标：把「你摆好的那个物理位置」代进新的坐标系，应该正好读 2048。
-    # 关节被重力垂几步是物理现实，挡不住；能挡住的是"零位被垂坏"。
+    # The real precision metric: plug "the physical position you posed" into the new coordinate system, and it should read exactly 2048.
+    # Joints sagging a few steps under gravity is physical reality and can't be prevented; what can be prevented is "the zero getting corrupted by the sag".
     worst = max(abs(held[i] + sv[i].off - 2048) for i in IDS)
     check(worst <= 2, f"摆好的位置校准后读 2048（最大误差 {worst:.0f} 步 = {worst * 360 / 4096:.2f}°）")
     yank = max(abs(sv[i].phys - held[i]) for i in IDS)

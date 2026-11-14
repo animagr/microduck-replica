@@ -1,5 +1,5 @@
-"""用录像检验 IMU 自洽：机体系重力 g 的变化率应满足 dg/dt = -ω × g（ω 为机体系角速度）。
-对比几种可能的错误（ω 取反、各轴取反、轴互换），哪一种和实测最吻合，就说明 IMU 实际是哪种情况。"""
+"""Check IMU self-consistency from recordings: the rate of change of body-frame gravity g should satisfy dg/dt = -ω × g (ω is the body-frame angular velocity).
+Compare several possible errors (ω negated, individual axes negated, axes swapped); whichever matches the measurements best tells what's actually going on with the IMU."""
 import json, sys, math, itertools
 R=[]
 for _l in open(sys.argv[1], errors='replace'):
@@ -13,7 +13,7 @@ for i in range(1,len(R)-1):
     dt=t[i+1]-t[i-1]
     if not 0.03<dt<0.06: continue
     dg=[(g[i+1][k]-g[i-1][k])/dt for k in range(3)]
-    if math.sqrt(sum(x*x for x in dg))<0.3: continue          # 只看明显在转的时刻
+    if math.sqrt(sum(x*x for x in dg))<0.3: continue          # only look at moments of clear rotation
     pairs.append((dg,w[i],g[i]))
 print('有效样本', len(pairs), '（|dg/dt|>0.3/s）')
 def score(T):
@@ -30,6 +30,6 @@ for perm in itertools.permutations(range(3)):
 res=sorted(((score(T),n) for n,T in cands.items()),reverse=True)
 print('原样 ω 的吻合度（1=完全一致，-1=完全相反）：', round(score(cands['原样 ω']),3))
 print('最吻合的 5 种：'); [print('  ',round(s,3),n) for s,n in res[:5]]
-# 站姿时的重力
+# Gravity in the standing pose
 held=[r['safety']['gravity'] for r in R if r.get('policy')=='held'][-200:]
 if held: print('站着时重力均值', [round(sum(x[k] for x in held)/len(held),3) for k in range(3)])

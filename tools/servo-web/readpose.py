@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""读一遍总线上所有舵机的当前姿态，打一张表。不写任何寄存器。
+"""Read the current pose of every servo on the bus once and print a table. Writes no registers.
 
   python readpose.py --port COM5
   python readpose.py --port /dev/ttyUSB0 --ids 20-24,30-34,10-14

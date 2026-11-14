@@ -1,5 +1,5 @@
-"""迈步最高点脚掌俯仰（相对本脚撑地时）按关节拆分：贡献 = ∂脚掌俯仰/∂关节 × (最高点关节角 − 撑地时关节角中位)。+ = 脚尖朝下。
-另给出机身俯仰变化的贡献（IMU）。"""
+"""Sole pitch at the swing apex (relative to the same foot during stance), broken down by joint: contribution = ∂sole pitch/∂joint × (joint angle at apex − median joint angle during stance). + = toe pointing down.
+Also gives the contribution of the change in body pitch (IMU)."""
 import math, os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

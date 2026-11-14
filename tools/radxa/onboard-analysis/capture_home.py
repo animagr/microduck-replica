@@ -1,6 +1,6 @@
-"""主板上运行：从最近一段录像里取鸭子站 HOME 静止时的关节角和 IMU 重力（取平均），存成 JSON，交给 sim_home_tilt.py。
-用法：python3 capture_home.py [输出文件]   （默认 home-capture.json；取最后 100 帧 policy=held）
-前提：duck_rec.py 正在录；鸭子站 HOME、放在平地上、手拿开、静止至少 3 秒。"""
+"""Runs on the board: from the most recent recording, take the joint angles and IMU gravity while the duck stands still at HOME (averaged), save as JSON, and hand it to sim_home_tilt.py.
+Usage: python3 capture_home.py [output file]   (default home-capture.json; takes the last 100 frames with policy=held)
+Prerequisites: duck_rec.py is recording; the duck stands at HOME on flat ground, hands off, still for at least 3 seconds."""
 import json, glob, math, sys
 out = sys.argv[1] if len(sys.argv) > 1 else 'home-capture.json'
 R = []

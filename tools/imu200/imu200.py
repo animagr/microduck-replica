@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""ID 200 IMU 块：编解码 + 假小板（模拟器）+ 真板子一致性检查。
+"""ID 200 IMU block: encode/decode + fake board (simulator) + conformance check for the real board.
 
-`imu_to_dxl` 小板要在舵机总线上冒充一颗 ID 200 的舵机，主控每 tick 的那条 sync_read
-（地址 56、长度 15）把它跟 15 颗舵机一次读回来。协议全文见
-[`hardware/imu_to_dxl/总线协议.md`](../../hardware/imu_to_dxl/总线协议.md)，这个文件是它的**可执行版本**：
+The `imu_to_dxl` board has to impersonate a servo with ID 200 on the servo bus; the controller's sync_read each tick
+(address 56, length 15) reads it back together with the 15 servos in one go. For the full protocol see
+[`hardware/imu_to_dxl/总线协议.md`](../../hardware/imu_to_dxl/总线协议.md); this file is its **executable version**:
 
-  python imu200.py demo                  # 假小板 + 真主控代码，在内存里跑一遍
-  python imu200.py vectors               # 打印测试向量（十六进制），写固件时对着抄
-  python imu200.py check --port COM6     # 拿真板子跑一致性检查，逐条 PASS/FAIL
+  python imu200.py demo                  # fake board + the real controller code, run once in memory
+  python imu200.py vectors               # print test vectors (hex), to copy from when writing firmware
+  python imu200.py check --port COM6     # run the conformance check against a real board, PASS/FAIL per item
 
-判据全部照着主控的真实代码写（fork 的 `duck-control/src/imu.rs` 和 `bus.rs`），不是照着协议文字写，
-所以这里过了 = 主控会认。日志跟仓库约定一致：`logs/imu200-日期.log`（含原始收发十六进制），
-每帧另落一行 JSONL，出问题直接读文件。
+All criteria are written to match the controller's real code (the fork's `duck-control/src/imu.rs` and `bus.rs`), not the protocol text,
+so passing here = the controller will accept it. Logs follow the repo convention: `logs/imu200-<date>.log` (including raw TX/RX hex),
+plus one JSONL line per frame, so when something goes wrong just read the file.
 """
 import argparse
 import json
@@ -23,25 +23,25 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "servo-web"))
-import feetech  # noqa: E402  仓库里的飞特协议实现，不重复造
+import feetech  # noqa: E402  the repo's Feetech protocol implementation, not reinvented
 
 IMU_ID = 200
-BLOCK_ADDR = 56           # 跟舵机同一个地址段，ID 200 才能挤进同一条 sync_read
-BLOCK_LEN = 15            # 主控实际用前 12 字节（imu.rs: IMU_BLOCK_LEN = 12），后 3 字节凑满舵机的块长
-IMU_WINDOW = 12           # 主控看的窗口，也是 StaleImuTracker 逐字节比较的范围
-GYRO_LSB_DPS = 0.0175     # ±500 dps 量程，17.5 mdps/LSB（imu.rs: GYRO_RAD_PER_LSB）
-GYRO_MAX_LSB = 28571      # ±500 dps 满量程对应的 LSB，超了说明固件量程配错
-READY_FRAMES = 25         # 主控累计（不是连续）25 帧有效四元数才算 ready（imu.rs: quat_samples）
-NORM_SQ_MAX = 1.02        # imu.rs 的判据：半精度在满量程的舍入余量
-STALE_RUN_MAX = 25        # bus.rs: StaleImuTracker 连续 25 帧 12 字节完全相同 → 报 frozen
-TICK_BUDGET_MS = 6.0      # 架构文档 §5 第 4 项：一条 sync_read 读 16 个设备的预算
-MOUNT = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)   # imu.rs: DEFAULT_MOUNT，绕 Y +90°
+BLOCK_ADDR = 56           # same address range as the servos, so ID 200 can squeeze into the same sync_read
+BLOCK_LEN = 15            # the controller actually uses the first 12 bytes (imu.rs: IMU_BLOCK_LEN = 12); the last 3 bytes pad it to the servos' block length
+IMU_WINDOW = 12           # the window the controller looks at, also the range StaleImuTracker compares byte by byte
+GYRO_LSB_DPS = 0.0175     # ±500 dps range, 17.5 mdps/LSB (imu.rs: GYRO_RAD_PER_LSB)
+GYRO_MAX_LSB = 28571      # LSB at ±500 dps full scale; exceeding it means the firmware range is misconfigured
+READY_FRAMES = 25         # the controller needs a cumulative (not consecutive) 25 frames with a valid quaternion to be ready (imu.rs: quat_samples)
+NORM_SQ_MAX = 1.02        # imu.rs criterion: rounding margin for half precision at full scale
+STALE_RUN_MAX = 25        # bus.rs: StaleImuTracker, 25 consecutive frames with identical 12 bytes → report frozen
+TICK_BUDGET_MS = 6.0      # architecture doc §5 item 4: budget for one sync_read reading 16 devices
+MOUNT = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)   # imu.rs: DEFAULT_MOUNT, +90° about Y
 
 JOINT_IDS = [20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 10, 11, 12, 13, 14]
-FULL_IDS = [IMU_ID] + JOINT_IDS        # 主控每 tick 发的就是这个列表，200 在最前
+FULL_IDS = [IMU_ID] + JOINT_IDS        # this is exactly the list the controller sends each tick, 200 first
 
 
-# ---- 日志：格式跟 servo-web 一致，debug 只进文件 ----
+# ---- Logging: same format as servo-web, debug goes only to the file ----
 LOG_DIR = os.path.join(HERE, "logs")
 _log_file = None
 
@@ -64,13 +64,13 @@ def log(msg, cat="总线", level="info"):
 
 
 def attach_trace(bus):
-    """把原始收发接进日志。注意要清空 trace_skip：默认它把 SYNC_READ 滤掉了，
-    而我们要调的正是那一条。"""
+    """Hook raw TX/RX into the log. Note that trace_skip must be cleared: by default it filters out SYNC_READ,
+    and that is exactly the one we want to debug."""
     bus.trace_skip = set()
     bus.trace = lambda s: log(s, "总线", "debug")
 
 
-# ---- 半精度：固件侧多半没有现成的，按 IEEE 754 binary16 走，方便对着抄 ----
+# ---- Half precision: the firmware side probably has nothing ready-made; follow IEEE 754 binary16 so it's easy to copy ----
 def f32_to_f16(x):
     return struct.unpack("<H", struct.pack("<e", x))[0]
 
@@ -80,9 +80,9 @@ def f16_to_f32(h):
 
 
 def encode_block(gyro_dps=(0.0, 0.0, 0.0), quat_xyz=(0.0, 0.0, 0.0), counter=0, status=0):
-    """15 字节：gyro x/y/z（i16 小端，17.5 mdps/LSB）+ quat x/y/z（half）+ 采样计数 + 状态 + 保留。
+    """15 bytes: gyro x/y/z (i16 little-endian, 17.5 mdps/LSB) + quat x/y/z (half) + sample counter + status + reserved.
 
-    陀螺和四元数都按主控的判据校验：生成一个主控必然拒绝的块却不报错，是这种工具最坏的失败方式。
+    Both gyro and quaternion are validated with the controller's criteria: generating a block the controller is certain to reject without raising an error is the worst way for this kind of tool to fail.
     """
     raw = [int(round(v / GYRO_LSB_DPS)) for v in gyro_dps]
     if any(abs(v) > GYRO_MAX_LSB for v in raw):
@@ -105,12 +105,12 @@ def _qmul(a, b):
 
 
 def decode_block(b):
-    """解 15 字节，判据逐条照抄 imu.rs：
+    """Decode 15 bytes, criteria copied item by item from imu.rs:
 
-    - 四元数三分量全 0 → 融合还没出数，主控沿用上一帧、不计入 ready
-    - 任一分量不是有限数，或 norm² > 1.02 → 主控**拒绝**这一帧（工具必须一样严，
-      不然坏固件在这里全绿、装上真机 imu_ready() 永远 false）
-    - w = √(1 − norm²)，再乘 mount 的共轭，norm ≤ 0.5 也拒绝
+    - All three quaternion components are 0 → fusion hasn't produced output yet; the controller reuses the previous frame and doesn't count it toward ready
+    - Any component not finite, or norm² > 1.02 → the controller **rejects** this frame (the tool must be just as strict,
+      otherwise bad firmware is all green here and imu_ready() is forever false on the real robot)
+    - w = √(1 − norm²), then multiplied by the conjugate of mount; norm ≤ 0.5 is also rejected
     """
     if len(b) != BLOCK_LEN:
         raise ValueError(f"要 {BLOCK_LEN} 字节，给了 {len(b)}")
@@ -127,7 +127,7 @@ def decode_block(b):
         if n > 0.5:
             accepted = True
             quat = tuple(v / n for v in q)
-            # gravity = 躯干系下的重力方向，直立时 [0, 0, -1]（imu.rs 同款）
+            # gravity = gravity direction in the torso frame, [0, 0, -1] when upright (same as imu.rs)
             w0, x0, y0, z0 = quat
             gravity = (-2 * (x0 * z0 - w0 * y0), -2 * (y0 * z0 + w0 * x0),
                        -(1 - 2 * (x0 * x0 + y0 * y0)))
@@ -143,28 +143,28 @@ def decode_block(b):
         "counter": b[12],
         "status": b[13],
         "reserved": b[14],
-        "accepted": accepted,                  # 主控会不会把这一帧计进 ready
-        "window_hex": b[:IMU_WINDOW].hex(),     # StaleImuTracker 比的就是这 12 字节
+        "accepted": accepted,                  # whether the controller would count this frame toward ready
+        "window_hex": b[:IMU_WINDOW].hex(),     # these 12 bytes are exactly what StaleImuTracker compares
     }
 
 
 class SimImu200:
-    """假小板：塞进 sim_bus.SimSerial 就能被真的主控代码读到。
+    """Fake board: plug it into sim_bus.SimSerial and the real controller code can read it.
 
-    按协议文件的行为写：
-    - 块由 IMU 的数据就绪驱动（默认 120 Hz），**不是被读一次才更新一次** —— 计数器是采样计数，
-      主控 50 Hz 读的话步进是 2~3。做成"读一次加一"会掩盖"IMU 死了但总线处理器还活着"这种故障
-    - 总线处理器比 IMU 先起来：bus_up_ms 之后能应答，imu_ready_ms 之后才出四元数，中间回全 0
-    - 陀螺带噪声：真芯片静置时低位也在跳，块逐字节都在变。固件要是做了平滑导致 12 字节不变，
-      主控 0.5 秒就报 frozen
-    - answer=False 装成不应答的板子（真机后果：整条 sync_read 失败，15 颗舵机数据一起丢）
+    Written to match the behavior in the protocol file:
+    - The block is driven by the IMU's data-ready (default 120 Hz), **not updated once per read**: the counter is a sample counter,
+      so with the controller reading at 50 Hz it steps by 2~3. Making it "increment once per read" would mask faults like "IMU dead but the bus processor still alive"
+    - The bus processor comes up before the IMU: it can reply after bus_up_ms, and only outputs quaternions after imu_ready_ms, returning all zeros in between
+    - The gyro has noise: a real chip's low bits jump even at rest, so the block changes byte by byte. If the firmware smooths so the 12 bytes don't change,
+      the controller reports frozen within 0.5 s
+    - answer=False pretends to be a board that doesn't reply (consequence on the real robot: the whole sync_read fails, losing data from all 15 servos)
     """
 
     def __init__(self, sid=IMU_ID, sample_hz=120, bus_up_ms=0, imu_ready_ms=500,
                  answer=True, noise=True):
         self.r = bytearray(feetech.DUMP_END)
-        self.r[0], self.r[1] = 0, 1           # 固件版本 0.1，别冒充舵机的 3.46
-        self.r[2], self.r[5], self.r[6], self.r[8] = 0, sid, 0, 1   # END 小端、ID、1 Mbps、应答级别 1
+        self.r[0], self.r[1] = 0, 1           # firmware version 0.1, don't impersonate the servos' 3.46
+        self.r[2], self.r[5], self.r[6], self.r[8] = 0, sid, 0, 1   # END little-endian, ID, 1 Mbps, reply level 1
         self.sample_hz, self.bus_up_ms, self.imu_ready_ms = sample_hz, bus_up_ms, imu_ready_ms
         self.answer, self.noise = answer, noise
         self.counter, self.samples, self.last_ms = 0, 0, 0.0
@@ -176,13 +176,13 @@ class SimImu200:
         return self.r[5]
 
     def tick(self, clock_ms=0.0):
-        """按虚拟时钟推进采样：每 1/sample_hz 秒换一块新数据，跟被读几次无关。"""
+        """Advance sampling on the virtual clock: a new block every 1/sample_hz seconds, regardless of how many times it's read."""
         while clock_ms - self.last_ms >= 1000.0 / self.sample_hz:
             self.last_ms += 1000.0 / self.sample_hz
             self.samples += 1
             self.counter = (self.counter + 1) & 0xFF
             t = self.last_ms / 1000.0
-            n = (self.samples % 7 - 3) * 0.02 if self.noise else 0.0   # 低位抖动，块才会逐字节变
+            n = (self.samples % 7 - 3) * 0.02 if self.noise else 0.0   # low-bit jitter so the block changes byte by byte
             if self.last_ms < self.imu_ready_ms:
                 self.block = encode_block(gyro_dps=(0, 0, 0), quat_xyz=(0, 0, 0),
                                           counter=self.counter, status=0x01)
@@ -203,12 +203,12 @@ class SimImu200:
         return bytes(self.r[addr:min(addr + n, feetech.DUMP_END)])
 
     def write(self, addr, data):
-        pass          # 协议：主控从不写这块板；写了照样 ACK，但什么都不改
+        pass          # protocol: the controller never writes this board; writes are still ACKed but change nothing
 
 
-# ---- 主控侧：一致性检查 ----
+# ---- Controller side: conformance check ----
 def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
-    """拿主控会发的包去问板子，逐条判。返回 [(通过?, 说明), ...]。"""
+    """Query the board with the packets the controller would send, judging item by item. Returns [(passed?, description), ...]."""
     out = []
 
     def ok(cond, what, level=None):
@@ -216,7 +216,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
         log(("✓ " if cond else "✗ ") + what, "总线", level or ("info" if cond else "warn"))
         return cond
 
-    # 1. 上电：ping 最多等 5 秒，记下第一次应答的时刻
+    # 1. Power-up: ping waits up to 5 s, record the time of the first reply
     t0 = time.monotonic()
     while time.monotonic() - t0 < 5.0:
         if bus.ping(sid) is not None:
@@ -226,7 +226,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
     if not ok(bus.ping(sid) is not None, f"PING ID {sid} 有应答（上电后 {boot_ms:.0f} ms）"):
         return out
 
-    # 2. 单播 READ 能读到块（调试台要用）
+    # 2. Unicast READ can read the block (needed by the debug console)
     try:
         _, blk = bus.read(sid, BLOCK_ADDR, BLOCK_LEN)
         ok(len(blk) == BLOCK_LEN, f"READ 地址 {BLOCK_ADDR} 长 {BLOCK_LEN} 回了 {len(blk)} 字节")
@@ -236,7 +236,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
         ok(False, f"READ 地址 {BLOCK_ADDR}：{type(e).__name__}: {e}")
         return out
 
-    # 3. 版本/型号寄存器（0–4）能读，END 是小端
+    # 3. Version/model registers (0–4) are readable, END is little-endian
     try:
         _, head = bus.read(sid, 0, 5)
         ok(head[2] == 0, f"END 字节序 = 0 小端（实际 {head[2]}）")
@@ -244,7 +244,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
     except Exception as e:
         ok(False, f"READ 地址 0 长 5：{type(e).__name__}: {e}")
 
-    # 4. 主控真正发的那条：16 个 ID 一起读
+    # 4. The one the controller really sends: read 16 IDs together
     ids = FULL_IDS if full_bus else [sid]
     stats0 = dict(bus.stats)
     counters, accepted, windows, times, misses, partial = [], 0, [], [], 0, 0
@@ -253,7 +253,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
     for k in range(frames):
         t = time.perf_counter()
         got = bus.sync_read(ids, BLOCK_ADDR, BLOCK_LEN)
-        times.append((time.perf_counter() - t) * 1000)      # 只包这一句，不含我们自己的 sleep
+        times.append((time.perf_counter() - t) * 1000)      # wraps only this statement, excluding our own sleep
         v = got.get(sid)
         if not v:
             misses += 1
@@ -285,12 +285,12 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
        f"应答没错位（bad_id {dstats.get('bad_id', 0)}）—— 错位一次后面 15 个全废")
     ok(dstats.get("bad_checksum", 0) == 0, f"没有校验错（{dstats.get('bad_checksum', 0)}）")
 
-    # 5. 计数器：采样计数，50 Hz 读 120 Hz 采样 → 每帧 +1~4；恒 0 说明板子没在采样
+    # 5. Counter: sample counter, reading at 50 Hz with 120 Hz sampling → +1~4 per frame; constantly 0 means the board isn't sampling
     steps = [(b - a) % 256 for a, b in zip(counters, counters[1:])]
     ok(steps and all(1 <= s <= 4 for s in steps),
        f"采样计数每帧 +1~4（实际 {sorted(set(steps))[:5]}）—— 恒 0 说明 IMU 没在出数，总线处理器却还活着")
 
-    # 6. 冻结：主控比的是前 12 字节，连续 25 帧相同就报 frozen
+    # 6. Frozen: the controller compares the first 12 bytes; 25 identical frames in a row reports frozen
     run = best = 0
     for a, b in zip(windows, windows[1:]):
         run = run + 1 if a == b else 0
@@ -298,21 +298,21 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
     ok(best < STALE_RUN_MAX,
        f"12 字节窗口最长连续相同 {best} 帧（主控 ≥{STALE_RUN_MAX} 帧就报 frozen）")
 
-    # 7. 主控会认的帧够不够，以及多久到 ready
+    # 7. Whether there are enough frames the controller will accept, and how long until ready
     ok(accepted >= READY_FRAMES,
        f"{frames} 帧里主控会接受 {accepted} 帧（累计 {READY_FRAMES} 帧才 ready）"
        + (f"，{ready_ms:.0f} ms 到 ready" if ready_ms else "，没到 ready"))
     if first_quat_ms is not None:
         log(f"第一个有效四元数在开跑后 {first_quat_ms:.0f} ms", "总线")
 
-    # 8. 时序：只算总线事务本身，判据是 tick 预算不是超时
+    # 8. Timing: count only the bus transaction itself; the criterion is the tick budget, not the timeout
     times.sort()
     p99 = times[max(0, int(len(times) * 0.99) - 1)]
     ok(p99 < TICK_BUDGET_MS,
        f"事务耗时 min {times[0]:.2f} / 平均 {sum(times)/len(times):.2f} / p99 {p99:.2f} / max {times[-1]:.2f} ms"
        f"（预算 {TICK_BUDGET_MS} ms，不是超时 60 ms）")
 
-    # 9. 广播 PING 不该应答（手册 §4.1：总线上多个设备时不能用广播 PING）
+    # 9. Broadcast PING shouldn't be answered (manual §4.1: broadcast PING can't be used with multiple devices on the bus)
     try:
         bus._send(feetech.BROADCAST, feetech.PING)
         time.sleep(0.01)
@@ -321,7 +321,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
     except Exception as e:
         log(f"广播 PING 测试跳过：{type(e).__name__}: {e}", "总线", "warn")
 
-    # 10. 写一个寄存器：应该 ACK 且不影响数据（主控从不写它，但调试台可能手滑）
+    # 10. Write a register: should be ACKed without affecting the data (the controller never writes it, but the debug console might slip)
     try:
         before = bus.read(sid, BLOCK_ADDR, BLOCK_LEN)[1][:IMU_WINDOW]
         bus.write_u8(sid, 40, 0)
@@ -338,7 +338,7 @@ def check(bus, sid=IMU_ID, frames=200, hz=50, full_bus=True, frame_log=None):
 def run_demo():
     from sim_bus import SimSerial
     port = SimSerial(JOINT_IDS)
-    port.latency_ms = 0.25                       # 每包 0.25 ms，接近 1 Mbps 的线上时间
+    port.latency_ms = 0.25                       # 0.25 ms per packet, close to the on-wire time at 1 Mbps
     port.servos[IMU_ID] = SimImu200(imu_ready_ms=200)
     bus = feetech.FeetechBus(None, ser=port)
     attach_trace(bus)

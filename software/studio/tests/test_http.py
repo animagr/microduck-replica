@@ -1,5 +1,5 @@
-"""真的 uvicorn + wsproto 集成测试（跟板子上同一套实现，不用 TestClient）。
-覆盖 review-impl-plan S0 测试第 4、5、7 条：Host 421、Origin 矩阵、登录、没登录的 WebSocket、推送频率。
+"""Integration tests with real uvicorn + wsproto (the same implementation as on the board, not TestClient).
+Covers review-impl-plan S0 test items 4, 5 and 7: Host 421, the Origin matrix, login, WebSocket without login, push rate.
 """
 import asyncio
 import http.client
@@ -53,7 +53,7 @@ def http_call(port, method, path, body=None, headers=None):
 
 
 class WsClient:
-    """最小的 WebSocket 客户端：握手结果 + 按条收 JSON。"""
+    """Minimal WebSocket client: handshake result + receive JSON message by message."""
 
     def __init__(self, port, origin=None, cookie=None, host=None):
         self.port, self.origin, self.cookie, self.host = port, origin, cookie, host
@@ -140,7 +140,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.origin = f"http://127.0.0.1:{self.port}"
 
     def make_pad(self, log, robotd_port, configd_port):
-        return None                     # 台架模式那样：没有手柄页后端（PadHttpTest 里换成真的）
+        return None                     # like bench mode: no gamepad page backend (replaced with the real one in PadHttpTest)
 
     async def asyncTearDown(self):
         self.server.should_exit = True
@@ -158,7 +158,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         return h["set-cookie"].split(";")[0].split("=", 1)[1], h["set-cookie"]
 
     async def test_no_password_means_open(self):
-        """用户 10-18：不用设密码，直接连。没设密码时不登录也能拿到会话、连上 WebSocket。"""
+        """User Oct 18: no password needed, connect directly. With no password set, a session and a WebSocket connection are available without login."""
         import os
         os.remove(self.auth.pw_path)
         st, _, body = await self.call("GET", "/api/session")
@@ -167,7 +167,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         await c.open()
         self.assertTrue(c.accepted)
         c.close()
-        c2 = WsClient(self.port, origin="http://evil.example.com")      # 别的网站照样进不来
+        c2 = WsClient(self.port, origin="http://evil.example.com")      # other websites still can't get in
         await c2.open()
         self.assertFalse(c2.accepted)
         c2.close()
@@ -179,8 +179,8 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(st, 200)
 
     async def test_probe_svg_for_finding_the_duck(self):
-        """任务 17：连 WiFi 以后页面用 new Image() 加载 http://duck-xxxx:8000/probe.svg 找鸭子的新地址：
-        设了密码也不用登录；duck-xxxx、duck-xxxx.local 这两种 Host 都给；是 SVG 图片；不缓存（每次都真的问到鸭子）。"""
+        """Task 17: after connecting to WiFi, the page loads http://duck-xxxx:8000/probe.svg with new Image() to find the duck's new address:
+        no login needed even with a password set; both duck-xxxx and duck-xxxx.local Hosts are served; it's an SVG image; not cached (every time it really asks the duck)."""
         import socket
         hn = socket.gethostname().lower()
         for host in (f"{hn}:{self.port}", f"{hn}.local:{self.port}", f"127.0.0.1:{self.port}"):
@@ -189,12 +189,12 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(h["content-type"].startswith("image/svg+xml"), h)
             self.assertEqual(h["cache-control"], "no-cache")
             self.assertIn(b"<svg", body)
-            self.assertLess(len(body), 1024)                     # 很小：每 2 秒探一次也不费事
+            self.assertLess(len(body), 1024)                     # tiny: probing every 2 seconds costs nothing
         st, _, _ = await self.call("GET", "/probe.svg", headers={"Host": "evil.example.com"})
-        self.assertEqual(st, 421)                                 # Host 校验照旧
+        self.assertEqual(st, 421)                                 # Host check still applies
 
     async def test_ca_cert_is_downloadable_before_login(self):
-        """手机装证书要在登录之前完成：不登录也能下载，是 CA 证书 + 附件下载，且不缓存。"""
+        """Installing the certificate on a phone has to happen before login: downloadable without login, it's a CA certificate + attachment download, and not cached."""
         body_want = self.ca_path.read_bytes()
         st, h, body = await self.call("GET", "/ca.crt")
         self.assertEqual(st, 200)
@@ -204,7 +204,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(h["cache-control"], "no-store")
         self.assertEqual(body, body_want)
         st, _, _ = await self.call("GET", "/ca.crt", headers={"Host": "evil.example.com"})
-        self.assertEqual(st, 421)                                # Host 校验照旧
+        self.assertEqual(st, 421)                                # Host check still applies
 
     async def test_ca_cert_missing_is_404(self):
         import os
@@ -231,12 +231,12 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
             await self.call("POST", "/api/login", {"password": "wrong"}, {"Origin": self.origin})
         st, _, body = await self.call("POST", "/api/login", {"password": PW}, {"Origin": self.origin})
         self.assertEqual(st, 401)
-        self.assertGreater(json.loads(body)["wait"], 0)          # 退避期间对的密码也不收
+        self.assertGreater(json.loads(body)["wait"], 0)          # during backoff even the correct password isn't accepted
 
     async def test_logout_needs_csrf(self):
         token, _ = await self.login()
         ck = {"Cookie": f"{COOKIE}={token}", "Origin": self.origin}
-        await self.call("POST", "/api/logout", {}, ck)                       # 没带 X-CSRF：不注销
+        await self.call("POST", "/api/logout", {}, ck)                       # no X-CSRF: not logged out
         self.assertIsNotNone(self.auth.session(token))
         st, _, body = await self.call("GET", "/api/session", headers=ck)
         csrf = json.loads(body)["csrf"]
@@ -300,7 +300,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.auth.has_password())
         self.assertFalse(self.auth.pw_path.exists())
 
-    # ---- 「更多」页的 SSH 开关（用户 10-21：出了问题自己 SSH 修，不用重烧卡；密码用户自己定） ----
+    # ---- SSH switch on the "更多" (More) page (user Oct 21: if something goes wrong, SSH in and fix it yourself without reflashing the card; the user sets the password) ----
 
     async def ssh_post(self, payload):
         token, _ = await self.login()
@@ -413,13 +413,13 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         with unittest.mock.patch("studio.helper.available", return_value=False):
             st, data = await self.ssh_post({"action": "status"})
         self.assertEqual(st, 200, data)
-        self.assertIsNone(data["ssh"]["password_login"])            # 小助手不在：密码登录开没开读不到
+        self.assertIsNone(data["ssh"]["password_login"])            # helper missing: whether password login is on can't be read
         self.assertEqual([k["fp"] for k in data["ssh"]["key_list"]], [fp])
 
     async def test_ws_without_login_tells_page_to_login(self):
         c = WsClient(self.port, origin=self.origin)
         await c.open()
-        # 页面要靠 4401 才知道该跳登录页；握手直接 403 的话浏览器只看到 1006，会一直重连
+        # The page relies on 4401 to know it should jump to the login page; if the handshake is rejected with 403 the browser only sees 1006 and keeps reconnecting
         self.assertEqual(c.close_code, 4401, f"accepted={c.accepted} rejected={c.rejected}")
         c.close()
 
@@ -438,14 +438,14 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         await c.pump(until=lambda: False, timeout=1.0)
         states = [m for m in c.msgs if m["t"] == "state"]
         self.assertEqual(c.msgs[0]["t"], "hello")
-        self.assertGreaterEqual(len(states), 7)                  # 可见：约 10 Hz
+        self.assertGreaterEqual(len(states), 7)                  # visible: about 10 Hz
         self.assertEqual(states[-1]["posture"], "holding")
         await c.send({"t": "hb", "seq": 1, "visible": False})
         await c.pump(until=lambda: False, timeout=0.3)
         c.msgs.clear()
         await c.pump(until=lambda: False, timeout=2.2)
         kinds = [m["t"] for m in c.msgs if m["t"] != "log"]
-        self.assertNotIn("state", kinds)                         # 后台：只剩心跳
+        self.assertNotIn("state", kinds)                         # background: only heartbeats left
         self.assertTrue(1 <= kinds.count("hb") <= 3, kinds)
         c.close()
 
@@ -462,7 +462,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_servo_session_via_ws(self):
-        """舵机页：打开总线（模拟舵机）→ 收到 15 颗 → 卸力走总线、不找主程序 → 交还后恢复轮询。"""
+        """Servo page: open the bus (simulated servos) → receive 15 servos → relax goes over the bus, not to the main program → polling resumes after hand-back."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -482,7 +482,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         await c.pump(until=lambda: any(m.get("t") == "state" and m["estop"]["state"] == "confirmed" for m in c.msgs),
                      timeout=3.0)
         self.assertTrue(any(m.get("t") == "result" and m.get("id") == "r1" and m["ok"] for m in c.msgs))
-        self.assertEqual(len([m for _, m in self.fake.calls if m == "robot.relax"]), 0)   # 没去找主程序
+        self.assertEqual(len([m for _, m in self.fake.calls if m == "robot.relax"]), 0)   # didn't go to the main program
         await c.send({"t": "cmd", "id": "x1", "name": "servo.close"})
         await c.pump(until=lambda: any(m.get("t") == "result" and m.get("id") == "x1" for m in c.msgs), timeout=3.0)
         self.assertEqual(self.servo.state, "closed")
@@ -531,7 +531,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
                 if hasattr(client,'w'):client.close()
 
     async def test_imu_view_and_ops_via_ws(self):
-        """IMU 页：收到 {t:'imu'}（芯片、安装方向取自主程序）；solve 回结果；写入这一步先拒、说清楚原因。"""
+        """IMU page: receives {t:'imu'} (chip and mounting orientation taken from the main program); solve returns a result; the write step is refused for now with a clear reason."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -543,14 +543,14 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         await c.send({"t": "cmd", "id": "w1", "name": "imu.op", "args": {"op": "save"}})
         await c.pump(until=lambda: {m.get("id") for m in c.msgs if m.get("t") == "result"} >= {"s1", "w1"}, timeout=3.0)
         res = {m["id"]: m for m in c.msgs if m.get("t") == "result"}
-        self.assertTrue(res["s1"]["ok"])                       # 指令本身成了；读数不够，结果里 ok=False
+        self.assertTrue(res["s1"]["ok"])                       # the command itself succeeded; not enough readings, so ok=False in the result
         self.assertFalse(res["s1"]["data"]["ok"])
         self.assertFalse(res["w1"]["ok"])
         self.assertIn("写进主程序", res["w1"]["reason"])
         c.close()
 
     async def test_servo_refused_while_walking(self):
-        """鸭子在走 / 策略在跑：点进舵机页不接管（关节会冻在半步），页面只读。"""
+        """Duck walking / policy running: entering the servo page doesn't take over (joints would freeze mid-step); the page is read-only."""
         self.fake.set_posture("policy")
         await asyncio.sleep(1.2)
         token, _ = await self.login()
@@ -565,7 +565,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_servo_auto_hand_back_when_nobody_on_page(self):
-        """舵机页没人在看（页面关了、断网）超过 SERVO_IDLE_S：自动交还主程序。"""
+        """Nobody watching the servo page (page closed, network lost) for longer than SERVO_IDLE_S: automatically hand back to the main program."""
         from studio import app as app_mod
         token, _ = await self.login()
         with unittest.mock.patch.object(app_mod, "SERVO_IDLE_S", 0.5):
@@ -575,7 +575,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
             await c.send({"t": "cmd", "id": "o1", "name": "servo.open"})
             await c.pump(until=lambda: any(m.get("t") == "result" for m in c.msgs), timeout=3.0)
             self.assertEqual(self.servo.state, "open")
-            c.close()                                              # 页面关了
+            c.close()                                              # page closed
             end = time.monotonic() + 15
             while self.servo.state == "open" and time.monotonic() < end:
                 await asyncio.sleep(0.2)
@@ -583,7 +583,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.rd.paused)
 
     async def test_page_gone_while_relax_in_flight(self):
-        """代码审查 #6：按下卸力后页面马上断了，卸力照样发完、确认。"""
+        """Code review #6: the page disconnects right after relax is pressed; relax is still sent and confirmed."""
         self.fake.delays["robot.relax"] = 0.5
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
@@ -598,7 +598,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([m for _, m in self.fake.calls if m == "robot.relax"]), 1)
 
     async def test_servo_table_only_on_servo_page(self):
-        """总览重排审查 O12：舵机表一帧 5.6 KB，只有舵机页用——别的页面不推。"""
+        """Overview reorg review O12: the servo table is 5.6 KB per frame and only the servo page uses it -- not pushed to other pages."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -612,7 +612,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_state_carries_onboarding_and_board_temperature(self):
-        """总览上手清单（后端 0.5 秒判一次、state 里只带缓存）、主板温度格；「已经校过，核对一下」走 onboard.op。"""
+        """Overview onboarding checklist (backend evaluates every 0.5 s, state only carries the cache), board temperature cell; "已经校过，核对一下" (already calibrated, check it) goes through onboard.op."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -630,13 +630,13 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((Path(self.tmp.name) / "state" / "onboarding.json").exists())
         c.msgs.clear()
         await c.pump(until=lambda: any(m.get("t") == "state" and m.get("onboarding") for m in c.msgs), timeout=2.5)
-        st = [m for m in c.msgs if m.get("t") == "state" and m.get("onboarding")][-1]   # 没变的帧不带清单（C5）
+        st = [m for m in c.msgs if m.get("t") == "state" and m.get("onboarding")][-1]   # frames with no change don't carry the checklist (C5)
         self.assertEqual(next(r for r in st["onboarding"]["rows"] if r["key"] == "servo")["state"], "ok")
         c.close()
 
     async def test_onboard_skip_and_unskip_via_ws(self):
-        """上手清单的「已完成」「跳过」「取消」走 onboard.op；IMU 方向主程序明说没确认时要点两次：
-        没带 confirmed 后端拒（不能只靠页面的两步确认），带了就记（用户 10-20：每一步都能跳）。"""
+        """The onboarding checklist's "已完成" (Done), "跳过" (Skip) and "取消" (Cancel) go through onboard.op; when the main program explicitly says IMU orientation is not confirmed, two clicks are needed:
+        without confirmed the backend refuses (can't rely only on the page's two-step confirmation), with it, it's recorded (user Oct 20: every step can be skipped)."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -661,7 +661,7 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await op("d2", {"op": "undone", "step": "imu"}))["ok"])
         self.assertEqual(await imu_state(), "todo")
         self.fake.bus["native"]["imu_mount_verified"] = False
-        await asyncio.sleep(1.3)                                   # 等 busStatus 轮询到
+        await asyncio.sleep(1.3)                                   # wait for busStatus polling to come around
         r = await op("s3", {"op": "skip", "step": "imu"})
         self.assertFalse(r["ok"])
         self.assertIn("要点两次确认：确定跳过？主程序没确认 IMU 方向", r["reason"])
@@ -672,13 +672,13 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_onboarding_only_when_changed(self):
-        """代码审查 C5：上手清单没变时状态帧不带它（onboarding_same），每秒还是带一份整的。"""
+        """Code review C5: when the onboarding checklist hasn't changed, state frames don't carry it (onboarding_same), but a full copy is still sent every second."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
         await c.send({"t": "hb", "seq": 1, "visible": True, "route": "/"})
         await c.pump(until=lambda: any(m.get("t") == "state" and m.get("onboarding") for m in c.msgs), timeout=4.0)
-        await c.pump(until=lambda: False, timeout=1.0)       # 等清单稳定下来（刚连上时会记「站起来过」）
+        await c.pump(until=lambda: False, timeout=1.0)       # wait for the checklist to settle (right after connecting it records "站起来过" (has stood up))
         c.msgs.clear()
         await c.pump(until=lambda: False, timeout=2.1)
         sts = [m for m in c.msgs if m.get("t") == "state"]
@@ -691,13 +691,13 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_ws_without_heartbeat_counts_as_not_looking(self):
-        """代码审查 #11：手机走出 WiFi，连接半开、没心跳：不能一直当成有人在看。"""
+        """Code review #11: a phone walks out of WiFi range, the connection is half-open with no heartbeat: must not keep counting as someone watching."""
         from studio import app as app_mod
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         with unittest.mock.patch.object(app_mod, "HB_QUIET_S", 0.4):
             await c.open()
-            await c.pump(until=lambda: False, timeout=1.2)           # 一直不发心跳
+            await c.pump(until=lambda: False, timeout=1.2)           # never sends a heartbeat
             c.msgs.clear()
             await c.pump(until=lambda: False, timeout=1.5)
         self.assertNotIn("state", [m["t"] for m in c.msgs])
@@ -717,8 +717,8 @@ class HttpTest(unittest.IsolatedAsyncioTestCase):
 
 
 class PadHttpTest(HttpTest):
-    """开着手柄页后端，把上面的网页测试整套再跑一遍（卸力、舵机页接管交还、IMU、心跳……不能被手柄页弄坏），
-    再加手柄页自己的来回。假 robotd 同时当 configd；电脑上没有 bluetoothctl、也没有 padd 旁路。"""
+    """With the gamepad page backend on, run the whole web test suite above again (relax, servo page takeover / hand-back, IMU, heartbeat... must not be broken by the gamepad page),
+    plus the gamepad page's own round trips. The fake robotd also acts as configd; there's no bluetoothctl or padd bypass on a computer."""
 
     def make_pad(self, log, robotd_port, configd_port):
         return default_pad(log, configd_addr=f"tcp:127.0.0.1:{configd_port}", robotd_addr=f"tcp:127.0.0.1:{robotd_port}",
@@ -820,8 +820,8 @@ class PadHttpTest(HttpTest):
                 c.close()
 
     async def test_pad_page_via_ws(self):
-        """手柄页开着时：收到 {t:'pad'}；顶上卸力照常落到主程序（只发一次）；页面断开后方向盘是空的。
-        遥控、站走坐、组合动作的逻辑在 tests/test_pad.py 里测。"""
+        """With the gamepad page on: receives {t:'pad'}; the top relax still reaches the main program (sent only once); after the page disconnects the steering is empty.
+        The logic for remote control, stand / walk / sit and combo actions is tested in tests/test_pad.py."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -845,7 +845,7 @@ class PadHttpTest(HttpTest):
     def pads(self, c):
         return [m for m in c.msgs if m.get("t") == "pad"]
 
-    # ---- 用户 10-18：「舵机这个页面出去的时候应该保持住使能，不应该泄力，不应该失能」 ----
+    # ---- User Oct 18: "when leaving the servo page, torque should stay enabled; it shouldn't go limp or be disabled" ----
 
     async def servo_open_holding(self, c):
         await c.send({"t": "hb", "seq": 1, "visible": True, "route": "/servos"})
@@ -863,7 +863,7 @@ class PadHttpTest(HttpTest):
         await c.open()
         await self.servo_open_holding(c)
         relax0 = len([m for _, m in self.fake.calls if m == "robot.relax"])
-        # 离开舵机页（页面卸载时发 servo.close {if_idle}）：有舵机保持着，不交还、不卸力
+        # Leaving the servo page (servo.close {if_idle} sent on page unload): with servos holding, no hand-back and no relax
         await c.send({"t": "hb", "seq": 2, "visible": True, "route": "/"})
         await c.send({"t": "cmd", "id": "x1", "name": "servo.close", "args": {"if_idle": True}})
         await c.pump(until=lambda: any(m.get("id") == "x1" for m in c.msgs), timeout=5.0)
@@ -874,38 +874,38 @@ class PadHttpTest(HttpTest):
         c.msgs.clear()
         await c.pump(until=lambda: any(m.get("t") == "state" for m in c.msgs), timeout=2.0)
         st = [m for m in c.msgs if m.get("t") == "state"][-1]
-        self.assertGreaterEqual(st["servo_session"]["holding"], 2)            # 别的页上的提示条要用
+        self.assertGreaterEqual(st["servo_session"]["holding"], 2)            # used by the banner on other pages
         self.assertEqual(len([m for _, m in self.fake.calls if m == "robot.relax"]), relax0)
-        # 全部松开以后再离开：照旧交还
+        # Leaving after releasing all of them: hands back as before
         await c.send({"t": "cmd", "id": "t2", "name": "servo.op", "args": {"op": "torque", "on": 0}})
         end = time.monotonic() + 5
         while self.servo.holding() > 0 and time.monotonic() < end:
             await c.pump(until=lambda: False, timeout=0.2)
         await c.send({"t": "cmd", "id": "x2", "name": "servo.close", "args": {"if_idle": True}})
-        await c.pump(until=lambda: any(m.get("id") == "x2" for m in c.msgs), timeout=8.0)   # 交还做完（关总线、恢复轮询）才回
+        await c.pump(until=lambda: any(m.get("id") == "x2" for m in c.msgs), timeout=8.0)   # replies only after hand-back is done (bus closed, polling resumed)
         self.assertEqual(self.servo.state, "closed")
         self.assertFalse(self.rd.paused)
         c.msgs.clear()
         await c.pump(until=lambda: any(m.get("t") == "state" for m in c.msgs), timeout=2.0)
         st = [m for m in c.msgs if m.get("t") == "state"][-1]
         self.assertIsNone(st["servo_session"])
-        self.assertIsNotNone(st["servo_handback_s"])                          # 「已交还……要手动起 robotd」那一句用
+        self.assertIsNotNone(st["servo_handback_s"])                          # used by the "已交还……要手动起 robotd" (handed back… start robotd manually) message
         c.close()
 
     async def test_nobody_watching_but_holding_does_not_hand_back(self):
-        """60 秒没人看舵机页：有舵机保持着就不交还、不卸力，只记 warn；全部松开以后照旧自动交还。"""
+        """Nobody watching the servo page for 60 seconds: with servos holding, no hand-back and no relax, only a warn is logged; after all are released, it hands back automatically as before."""
         from studio import app as app_mod
         token, _ = await self.login()
         with unittest.mock.patch.object(app_mod, "SERVO_IDLE_S", 0.5):
             c = WsClient(self.port, origin=self.origin, cookie=token)
             await c.open()
             await self.servo_open_holding(c)
-            c.close()                                                          # 页面关了
-            await asyncio.sleep(12.0)                                         # servo_watch 5 秒一轮
+            c.close()                                                          # page closed
+            await asyncio.sleep(12.0)                                         # servo_watch runs every 5 seconds
             self.assertEqual(self.servo.state, "open")
             self.assertGreaterEqual(self.servo.holding(), 2)
             warns = [e for e in self.rd.log.recent(200) if "不自动交还、不卸力" in e["msg"]]
-            self.assertEqual(len(warns), 1)                                    # 1 分钟只记一次
+            self.assertEqual(len(warns), 1)                                    # logged only once per minute
             await asyncio.to_thread(self.servo.ops.handle, {"op": "torque", "on": 0})
             end = time.monotonic() + 15
             while self.servo.state == "open" and time.monotonic() < end:
@@ -914,8 +914,8 @@ class PadHttpTest(HttpTest):
         self.assertFalse(self.rd.paused)
 
     async def test_pad_push_rate_follows_pad_visible_not_route(self):
-        """总览重排审查 O1：手柄那一块在屏幕上（心跳 pad_visible）才 10 Hz；地址是 #/pad 但没在屏幕上 → 1 Hz。
-        老页面的心跳没带 pad_visible：按 route == /pad 兜底。"""
+        """Overview reorg review O1: 10 Hz only while the gamepad block is on screen (heartbeat pad_visible); URL is #/pad but not on screen → 1 Hz.
+        Old pages' heartbeats lack pad_visible: fall back to route == /pad."""
         token, _ = await self.login()
         c = WsClient(self.port, origin=self.origin, cookie=token)
         await c.open()
@@ -930,7 +930,7 @@ class PadHttpTest(HttpTest):
         await c.pump(until=lambda: False, timeout=1.0)
         snaps = self.pads(c)
         self.assertGreaterEqual(len(snaps), 7)
-        # 长列表没变时不每帧推（审查 O12）：大多数帧没带 actions，带了 lists_same；每秒至少一份整的
+        # Long lists aren't pushed every frame when unchanged (review O12): most frames don't carry actions but carry lists_same; at least one full copy per second
         slim = [m for m in snaps if m.get("lists_same")]
         self.assertGreaterEqual(len(slim), len(snaps) - 2)
         self.assertTrue(all("actions" not in m["motion"] for m in slim))
@@ -938,7 +938,7 @@ class PadHttpTest(HttpTest):
         await c.pump(until=lambda: False, timeout=1.2)
         self.assertTrue(any("actions" in m["motion"] for m in self.pads(c)))
         c.close()
-        c2 = WsClient(self.port, origin=self.origin, cookie=token)               # 老页面：心跳里没有 pad_visible
+        c2 = WsClient(self.port, origin=self.origin, cookie=token)               # old page: no pad_visible in the heartbeat
         await c2.open()
         await c2.send({"t": "hb", "seq": 1, "visible": True, "route": "/pad"})
         await c2.pump(until=lambda: False, timeout=0.3)
@@ -948,7 +948,7 @@ class PadHttpTest(HttpTest):
         c2.close()
 
     async def test_new_page_sticks_dropped_until_open(self):
-        """总览重排审查 O1：新连接默认不在手柄区，没发 drive {open} 的摇杆帧被丢掉，不会到 robotd。"""
+        """Overview reorg review O1: new connections are not in the gamepad area by default; joystick frames without drive {open} are dropped and don't reach robotd."""
         self.fake.set_posture("policy")
         await asyncio.sleep(1.2)
         token, _ = await self.login()
@@ -977,8 +977,8 @@ def free_port():
 
 
 class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
-    """第三批代码审查 D1、D2、D3、D9、D12：舵机会话的标记 / 重启接着管、离开时的竞态、robotd 被手动起来、交还提示。
-    跟 HttpTest 不一样的地方：给了 state 目录（标记写在这里）；robotd 可以是「不在」（连一个没人听的端口）。"""
+    """Third-round code review D1, D2, D3, D9, D12: servo session marker / continuing after restart, races when leaving, robotd started manually, hand-back prompts.
+    Differences from HttpTest: a state directory is given (the marker is written here); robotd can be "absent" (connecting to a port nobody listens on)."""
 
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -994,7 +994,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         if robotd_up:
             self.s1, p1 = await self.fake.serve_tcp()
         else:
-            p1 = free_port()                                # 没人听：robotd 不在
+            p1 = free_port()                                # nobody listening: robotd absent
         self.p1 = p1
         self.rd = Robotd(f"tcp:127.0.0.1:{p1}", f"tcp:127.0.0.1:{self.p2}", self.log)
         self.servo = servo or ServoSession(self.log, sim=True)
@@ -1050,7 +1050,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         return next((m for m in c.msgs if m.get("id") == cid), None)
 
     async def state(self, c):
-        """最新的一份（socket 里可能还压着之前的几份：先收 0.4 秒再取最后一份）。"""
+        """The latest one (the socket may still have several earlier ones queued: receive for 0.4 seconds first, then take the last one)."""
         c.msgs.clear()
         await c.pump(until=lambda: False, timeout=0.4)
         await c.pump(until=lambda: any(m.get("t") == "state" for m in c.msgs), timeout=3.0)
@@ -1062,7 +1062,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         r = await self.cmd(c, "t1", "servo.op", {"op": "torque", "ids": [20, 21], "on": 1})
         self.assertTrue(r["ok"], r)
 
-    # ---- D1：标记、Studio 退出不卸力、重启接着管 ----
+    # ---- D1: marker, Studio exit doesn't relax, continue after restart ----
 
     async def test_native_persistent_guard_prevents_boot_servo_autorestore(self):
         self.marker.write_text(json.dumps({'v':1,'sim':True,'at':1.7e9,'by':'x'}),encoding='utf-8')
@@ -1078,17 +1078,17 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         await self.start(robotd_up=True)
         c = await self.client()
         await self.open_holding(c)
-        self.assertTrue(self.marker.exists())                                   # 开总线就写
+        self.assertTrue(self.marker.exists())                                   # written as soon as the bus opens
         m = json.loads(self.marker.read_text(encoding="utf-8"))
         self.assertTrue(m["sim"])
         self.assertIn("by", m)
         c.close()
         sim = self.servo.sim_serial
-        await self.stop()                                                       # Studio 正常退出
-        self.assertEqual([sim._by_id(i).r[40] for i in (20, 21)], [1, 1])      # 退出不卸力
+        await self.stop()                                                       # Studio exits normally
+        self.assertEqual([sim._by_id(i).r[40] for i in (20, 21)], [1, 1])      # exiting doesn't relax
         self.assertTrue(self.marker.exists())
         self.assertTrue(self.logs("Studio 退出：舵机会话开着"))
-        # 重启：robotd 不在 → 接着管（演示舵机每次打开是新的一套，这里只看会话恢复了）
+        # Restart: robotd absent → take over again (demo servos are a fresh set each time they're opened; here we only check that the session was restored)
         self.s1.close()
         self.s1 = None
         self.servo = ServoSession(self.log, sim=True)
@@ -1101,7 +1101,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         st = await self.state(c)
         self.assertTrue(st["servo_session"]["restored"])
         self.assertEqual(st["posture"], "servo_session")
-        r = await self.cmd(c, "r1", "relax")                                     # 顶栏卸力走总线
+        r = await self.cmd(c, "r1", "relax")                                     # top-bar relax goes over the bus
         self.assertTrue(r["ok"], r)
         c.close()
 
@@ -1111,7 +1111,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.until(lambda: self.servo.state == "open"))
         self.assertTrue(self.logs("标记坏了"))
         self.assertTrue(await self.until(lambda: self.logs("会话恢复")))
-        self.assertTrue(json.loads(self.marker.read_text(encoding="utf-8"))["sim"])   # 接管以后重新写好
+        self.assertTrue(json.loads(self.marker.read_text(encoding="utf-8"))["sim"])   # rewritten after takeover
 
     async def test_marker_with_robotd_running_is_dropped(self):
         self.marker.write_text(json.dumps({"v": 1, "sim": True, "port": None, "at": 1.7e9, "by": "x"}), encoding="utf-8")
@@ -1124,7 +1124,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         self.marker.write_text(json.dumps({"v": 1, "sim": False, "port": None, "at": 1.7e9, "by": "x"}), encoding="utf-8")
         await self.start(robotd_up=False, servo=ServoSession(self.log, sim=False, port=None))
         self.assertTrue(await self.until(lambda: self.servo.orphan is not None))
-        self.assertTrue(self.marker.exists())                                   # 没接管上：标记留着
+        self.assertTrue(self.marker.exists())                                   # not taken over: the marker stays
         c = await self.client("/")
         st = await self.state(c)
         self.assertIsNotNone(st["servo_orphan"])
@@ -1136,18 +1136,18 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_handback_removes_marker_and_note_stays_until_robotd_connects(self):
-        """D12：「已交还……sudo systemctl start robotd」一直到主程序连上为止（不再 10 分钟自己消失）。"""
+        """D12: "已交还……sudo systemctl start robotd" (handed back… sudo systemctl start robotd) stays until the main program connects (no longer disappears by itself after 10 minutes)."""
         await self.start(robotd_up=False)
         c = await self.client()
         await self.open_holding(c)
         r = await self.cmd(c, "x1", "servo.close", {}, timeout=15)
         self.assertTrue(r["ok"], r)
         self.assertFalse(self.marker.exists())
-        self.servo.handed_back_at -= 700                                        # 过了 10 分钟：以前这里就消失了
+        self.servo.handed_back_at -= 700                                        # 10 minutes have passed: previously it would disappear here
         await asyncio.sleep(2.5)
         st = await self.state(c)
         self.assertIsNotNone(st["servo_handback_s"])
-        self.s1, _ = await self.fake.serve_tcp(port=self.p1)                     # 主程序起来了
+        self.s1, _ = await self.fake.serve_tcp(port=self.p1)                     # the main program came up
         ok = False
         end = time.monotonic() + 15
         while time.monotonic() < end and not ok:
@@ -1157,7 +1157,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_helper_available_is_exposed_for_handback_note(self):
-        """D12：小助手可用时页面把「已交还」那句换成「正在把主程序起回来…」；后端把可用性推给页面。"""
+        """D12: when the helper is available, the page replaces the "已交还" (handed back) sentence with "正在把主程序起回来…" (bringing the main program back…); the backend pushes availability to the page."""
         await self.start(robotd_up=False)
         self.servo.helper_available = True
         self.servo.handed_back_at = time.monotonic()
@@ -1168,7 +1168,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_open_port_switch_while_open_is_refused_and_keeps_paused(self):
-        """F1：调舵机中换口失败：state 仍 open、串口 / sim 没变、扭矩没写、robotd 仍 paused。"""
+        """F1: switching ports while tuning servos fails: state still open, serial port / sim unchanged, no torque written, robotd still paused."""
         await self.start()
         c = await self.client()
         await self.open_holding(c)
@@ -1183,7 +1183,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_marker_from_other_boot_is_dropped_without_take(self):
-        """F2：上次开机留下的标记（boot_id 不同）= 断过电，舵机早松了：不接管、不 pause、删标记。"""
+        """F2: a marker left from a previous boot (different boot_id) = power was lost and the servos went limp long ago: don't take over, don't pause, delete the marker."""
         self.marker.write_text(json.dumps({"v": 1, "sim": True, "port": None, "at": 1.7e9, "by": "x",
                                            "boot_id": "old-boot"}), encoding="utf-8")
         with unittest.mock.patch("studio.app.boot_id", return_value="new-boot"), \
@@ -1198,7 +1198,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(take.called)
 
     async def test_marker_with_same_boot_id_is_restored(self):
-        """F2：boot_id 相同就照旧恢复（不是所有带 boot_id 的标记都作废）。"""
+        """F2: with the same boot_id it is restored as before (not every marker with a boot_id is invalid)."""
         self.marker.write_text(json.dumps({"v": 1, "sim": True, "port": None, "at": 1.7e9, "by": "x",
                                            "boot_id": "same-boot"}), encoding="utf-8")
         with unittest.mock.patch("studio.app.boot_id", return_value="same-boot"):
@@ -1211,7 +1211,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(m["boot_id"], "same-boot")
 
     async def test_handback_note_reports_unconfirmed_relax(self):
-        """F6：卸力没确认的颗要跟着交还成功一起给页面看。"""
+        """F6: servos whose relax wasn't confirmed must be shown to the page along with the successful hand-back."""
         await self.start(robotd_up=False)
         c = await self.client()
         await self.open_holding(c)
@@ -1225,7 +1225,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_handback_keeps_marker_when_helper_fails_and_flag_remains(self):
-        """F7：交还后主程序没起来、旗还在：标记留着，Studio 重启才能接着管。"""
+        """F7: the main program didn't come up after hand-back and the flag is still there: the marker stays, so Studio can take over again after a restart."""
         await self.start(robotd_up=False)
         c = await self.client()
         await self.open_holding(c)
@@ -1244,7 +1244,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_handback_drops_marker_when_helper_fails_without_flag(self):
-        """F7：没起来但旗不在：标记删掉，提示手动起主程序。"""
+        """F7: didn't come up but the flag is gone: delete the marker and prompt to start the main program manually."""
         await self.start(robotd_up=False)
         c = await self.client()
         await self.open_holding(c)
@@ -1259,7 +1259,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_take_failure_with_flag_adds_recovery_hint(self):
-        """F8：bus-take 失败、旗挡住了主程序：把恢复办法接在失败原因后面。"""
+        """F8: bus-take failed and the flag blocks the main program: append the recovery steps after the failure reason."""
         await self.start(robotd_up=False)
         c = await self.client()
         with unittest.mock.patch.object(helper, "available", return_value=True), \
@@ -1274,7 +1274,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_marker_write_failure_is_visible_and_keeps_session(self):
-        """F10：标记写不进去不能关会话（舵机可能保持着），但要让页面看得到。"""
+        """F10: if the marker can't be written, the session must not be closed (servos may be holding), but the page must be able to see it."""
         await self.start()
         c = await self.client()
         real_replace = os.replace
@@ -1297,7 +1297,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_handback_without_helper_does_not_claim_robotd_started(self):
-        """F12：没装小助手时只说手动起，不记「主程序起来了」。"""
+        """F12: without the helper installed, only say to start it manually; don't log "主程序起来了" (main program came up)."""
         await self.start(robotd_up=False)
         c = await self.client()
         await self.open_holding(c)
@@ -1308,10 +1308,10 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.logs("主程序起来了"))
         c.close()
 
-    # ---- D2、D3：离开时的竞态和判断 ----
+    # ---- D2, D3: races and decisions when leaving ----
 
     async def test_torque_then_leave_in_one_packet_keeps_holding(self):
-        """D2：「保持」和「离开」同一个 TCP 包里到：等保持做完、当场读扭矩，不交还。"""
+        """D2: "hold" and "leave" arrive in the same TCP packet: wait for hold to finish, read torque on the spot, don't hand back."""
         await self.start()
         c = await self.client()
         r = await self.cmd(c, "o1", "servo.open")
@@ -1331,7 +1331,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_torque_then_leave_same_packet_40_times(self):
-        """D2：同一包里「保持 + 离开」重复 40 次，每一次都不能在交还后还上着力（repro_torque_race.py 的确定性版）。"""
+        """D2: "hold + leave" in the same packet repeated 40 times; not once may the servos still be torqued after hand-back (deterministic version of repro_torque_race.py)."""
         await self.start()
         c = await self.client()
         self.assertTrue((await self.cmd(c, "o1", "servo.open"))["ok"])
@@ -1358,11 +1358,11 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
             c.close()
 
     async def test_leave_while_calibrating_keeps_session_and_calibration_finishes(self):
-        """D3a：一键校准跑着时离开：不交还，校准 15 颗都做完。"""
+        """D3a: leaving while one-click calibration runs: no hand-back, and calibration finishes all 15 servos."""
         await self.start()
         c = await self.client()
         self.assertTrue((await self.cmd(c, "o1", "servo.open"))["ok"])
-        # 点了「一键校准」马上切页（同一个包里到：演示舵机校得很快，分开发的话离开时可能已经校完了）
+        # Switch pages right after clicking "一键校准" (one-click calibration) (arriving in the same packet: demo servos calibrate quickly, so if sent separately calibration might be done by the time of leaving)
         c.w.write(b"".join(c.ws.send(TextMessage(json.dumps(m))) for m in (
             {"t": "cmd", "id": "cal", "name": "servo.op", "args": {"op": "calibrate", "ids": "20-24,30-34,10-14"}},
             {"t": "hb", "seq": 2, "visible": True, "route": "/"},
@@ -1380,7 +1380,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         c.close()
 
     async def test_other_page_on_servos_keeps_session(self):
-        """D3b：A 页还在舵机页（0 颗保持），B 页离开：不把 A 的会话交还。"""
+        """D3b: page A is still on the servo page (0 servos holding) and page B leaves: A's session is not handed back."""
         await self.start()
         a = await self.client()
         self.assertTrue((await self.cmd(a, "o1", "servo.open"))["ok"])
@@ -1393,7 +1393,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         b.close()
 
     async def test_unreadable_torque_counts_as_maybe_holding(self):
-        """D3c：读不到扭矩的舵机不当 0：离开不交还，提示条能写出来。"""
+        """D3c: servos whose torque can't be read aren't treated as 0: leaving doesn't hand back, and the banner can say so."""
         await self.start()
         c = await self.client()
         self.assertTrue((await self.cmd(c, "o1", "servo.open"))["ok"])
@@ -1406,11 +1406,11 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(st["servo_session"]["unknown"], 1)
         c.close()
 
-    # ---- D9：会话期间 robotd 被手动起来 ----
+    # ---- D9: robotd started manually during the session ----
 
     async def test_robotd_started_by_hand_closes_bus_without_writing(self):
         await self.start(robotd_up=True)
-        self.servo.probe_robotd = True                     # 演示舵机默认不查（配的假 robotd 一直在）；这里当真串口查
+        self.servo.probe_robotd = True                     # demo servos aren't checked by default (their fake robotd is always there); here we check as if on a real serial port
         c = await self.client()
         await self.open_holding(c)
         sim = self.servo.sim_serial
@@ -1418,7 +1418,7 @@ class ServoSessionBatch3Test(unittest.IsolatedAsyncioTestCase):
         # finishes dropping its marker, unpausing robotd and reporting conflict.
         self.assertTrue(await self.until(lambda: self.servo.state == "closed" and not self.rd.paused
                                         and not self.marker.exists() and bool(self.logs("主程序被手动起来了")), timeout=12))
-        self.assertEqual([sim._by_id(i).r[40] for i in (20, 21)], [1, 1])      # 没写舵机（robotd 自己会全部松开）
+        self.assertEqual([sim._by_id(i).r[40] for i in (20, 21)], [1, 1])      # servos not written (robotd will release them all itself)
         self.assertFalse(self.marker.exists())
         self.assertFalse(self.rd.paused)
         self.assertTrue(self.logs("主程序被手动起来了"))

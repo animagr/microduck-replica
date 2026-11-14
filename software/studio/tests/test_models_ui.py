@@ -1,4 +1,4 @@
-"""把模型管理的前端状态与实体改键单测纳入标准 unittest 回归。"""
+"""Brings the model management frontend state and physical key remapping unit tests into the standard unittest regression."""
 import shutil
 import subprocess
 import unittest

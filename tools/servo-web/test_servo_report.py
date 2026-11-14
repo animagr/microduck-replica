@@ -1,4 +1,4 @@
-"""舵机体检（servo_report.py）：对着协议级模拟器跑，确认判据对、而且一个写指令都不发。
+"""Servo checkup (servo_report.py): run against the protocol-level simulator to confirm the criteria are right and that not a single write instruction is sent.
 Run: python -m pytest -q test_servo_report.py
 """
 import contextlib
@@ -17,15 +17,15 @@ IDS = [20, 21, 22, 23]
 
 class ReportTests(unittest.TestCase):
     def setUp(self):
-        self.port = SimSerial([20, 22, 23])            # 21 不在总线上（烧了 / 没接）
+        self.port = SimSerial([20, 22, 23])            # 21 isn't on the bus (burned out / not connected)
         sv = {s.id: s for s in self.port.servos.values()}
-        sv[20].r[19] = 1 + 4 + 8 + 32                  # 该开的都开了
-        sv[22].r[19] = 4                               # 出厂：只开了过热
+        sv[20].r[19] = 1 + 4 + 8 + 32                  # everything that should be on is on
+        sv[22].r[19] = 4                               # factory: only over-temperature enabled
         sv[23].r[19] = 1 + 4 + 8
-        sv[23].r[65] = 8                               # 正在报过流
+        sv[23].r[65] = 8                               # currently reporting over-current
         sv[23].off = -300
         for s in sv.values():
-            s.r[14], s.r[15] = 84, 40                  # 电压窗口 4.0–8.4 V；模拟器电压 7.4 V
+            s.r[14], s.r[15] = 84, 40                  # voltage window 4.0–8.4 V; simulator voltage 7.4 V
         self.sent = []
         handle = self.port._handle
         self.port._handle = lambda sid, instr, p: (self.sent.append(instr), handle(sid, instr, p))[1]

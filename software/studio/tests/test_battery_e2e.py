@@ -1,11 +1,11 @@
-"""电池（battery-plan.md v2）的端到端：假 robotd（电池剧本）+ 真 Studio（估算器 20 倍速快进）+ 无头 Edge。
-tests/battery_e2e.mjs 看总览电池格的各种状态（静置、点开详情、读不到、估算中、黄、红、电压很低、手机宽度），
-再到设置页改红线（先试一个不合法的）、「我量了电池电压」、切到台架电源；这里核对。
+"""End-to-end test for the battery (battery-plan.md v2): fake robotd (battery script) + real Studio (estimator fast-forwarded at 20x) + headless Edge.
+tests/battery_e2e.mjs checks the various states of the overview battery cell (resting, expanded details, unreadable, estimating, yellow, red, very low voltage, phone width),
+then on the settings page changes the red line (trying an invalid one first), "我量了电池电压" (I measured the battery voltage), and switches to bench power; this file checks the results.
 
-要电脑上有 Node（≥ 22）和 Edge；没有就跳过。设 STUDIO_E2E=0 也跳过。
-端口默认 Studio 18103、假 robotd 17055 / configd 17056、Edge 调试口 9353（协调员分给电池的），被占了就换空闲的。
-BATTERY_E2E_DIR=目录：日志、Edge 的 profile 放这里（默认临时目录，跑完删）；BATTERY_SHOTS=目录：顺手截图。
-单独跑：
+Requires Node (≥ 22) and Edge on the computer; skipped if missing. Also skipped with STUDIO_E2E=0.
+Default ports: Studio 18103, fake robotd 17055 / configd 17056, Edge debug port 9353 (assigned to battery by the coordinator); if taken, free ones are used instead.
+BATTERY_E2E_DIR=dir: logs and Edge profile go here (default is a temp directory, deleted after the run); BATTERY_SHOTS=dir: take screenshots along the way.
+To run on its own:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.','dev'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_battery_e2e'])"
 """
 import json
@@ -42,7 +42,7 @@ class BatteryE2E(unittest.TestCase):
         out = lambda name: open(cls.dir / name, "w", encoding="utf-8")   # noqa: E731
         procs = {}
         try:
-            # 一开始软着（卸力）：静置读数最准，「我量了电池电压」也要卸力
+            # Starts limp (relaxed): resting readings are most accurate, and "我量了电池电压" (I measured the battery voltage) also requires relax
             procs["fake"] = subprocess.Popen(
                 [sys.executable, "-I", str(ROOT / "dev" / "fake_robotd.py"), "--fixture", str(FIXTURE),
                  "--robotd-port", str(p_rd), "--configd-port", str(p_cfg), "--posture", "limp"],
@@ -83,17 +83,17 @@ class BatteryE2E(unittest.TestCase):
 
     def test_overview_states(self):
         calm = self.step("calm")
-        self.assertRegex(calm["text"], r"电池 (4[5-9]|50) % 7\.6\d V · 静置")       # 二号鸭那组：7.62 V → 约 48%
+        self.assertRegex(calm["text"], r"电池 (4[5-9]|50) % 7\.6\d V · 静置")       # duck #2's set: 7.62 V → about 48%
         self.assertNotIn("warn", calm["cls"])
         self.assertIn("读不到电压", self.step("nodata")["text"])
         self.assertIn("估算中", self.step("estimating")["text"])
-        self.assertNotIn("电量", self.step("estimating")["todo"])                    # 估算中不出黄红（审查 B-R2）
+        self.assertNotIn("电量", self.step("estimating")["todo"])                    # no yellow / red while estimating (review B-R2)
         warn = self.step("warn")
-        self.assertRegex(warn["text"], r"电池 (2\d|30) %")                          # 7.40 V 加二号鸭那组偏差：7.42 V → 30%
+        self.assertRegex(warn["text"], r"电池 (2\d|30) %")                          # 7.40 V plus duck #2's offset: 7.42 V → 30%
         self.assertRegex(warn["todo"], r"电量约 (2\d|30)%")
         red = self.step("red")
         self.assertRegex(red["todo"], r"电量只剩约 \d+%")
-        self.assertIn("不会自己停", red["todo"])                                       # 只警告的文案
+        self.assertIn("不会自己停", red["todo"])                                       # warning-only wording
         low = self.step("lowvolt")
         self.assertIn("电压很低", low["todo"])
         self.assertTrue(low["badge"])
@@ -124,7 +124,7 @@ class BatteryE2E(unittest.TestCase):
         self.assertTrue(any("红线 15% → 20%" in m for m in self.step("saved")["logs"]))
         self.assertIn("差 +0.18 V", self.step("calc")["msg"])
         self.assertIn("校准 +0.18 V", self.step("calibrated")["now"])
-        # 最后改回 2S 锂电；红线、校准留着
+        # Finally switch back to 2S lithium; the red line and calibration stay
         self.assertEqual((self.settings_file["preset"], self.settings_file["red_pct"], self.settings_file["cal_offset_v"]),
                          ("2s_liion", 20, 0.18))
 

@@ -1,5 +1,5 @@
-"""模拟模式：虚拟舵机按速度 / 加速度走梯形曲线，页面上接 / 拔虚拟 IMU 小板。不接硬件。
-还有 0.15.0 审查修的：开扭矩先对齐目标、收尾不改目标、模拟校准不碰真的 calib/ 和 poses/。
+"""Simulation mode: virtual servos follow trapezoidal profiles by speed / acceleration, and the page attaches / removes the virtual IMU board. No hardware attached.
+Also covers the fixes from the 0.15.0 review: align targets before torque-on, don't change targets on wrap-up, simulated calibration doesn't touch the real calib/ and poses/.
 Run: python -m pytest -q test_sim.py
 """
 import asyncio
@@ -27,7 +27,7 @@ class Clock:
 
 
 def profile(bus, sid, goal, speed, acc=0):
-    """跟 server 的 goals_profile 一样写 41..47：加速度、目标、时间 0、速度。"""
+    """Write 41..47 the same way as server's goals_profile: acceleration, target, time 0, speed."""
     bus.sync_write(41, 7, [(sid, bytes([acc]) + struct.pack("<H", goal) + struct.pack("<H", 0)
                             + struct.pack("<H", speed))])
 
@@ -47,7 +47,7 @@ class FakeServoMotionTests(unittest.TestCase):
             self.bus.states([20, 21])
 
     def test_torque_on_by_default_and_moves_at_the_profile_speed(self):
-        profile(self.bus, 20, 3048, speed=1000)            # 1000 步，1000 步/秒 → 约 1 秒
+        profile(self.bus, 20, 3048, speed=1000)            # 1000 steps at 1000 steps/s → about 1 s
         self.run_for(0.5)
         mid = self.bus.states([20])[20]["pos"]
         self.assertTrue(400 < mid - 2048 < 600, mid)
@@ -56,29 +56,29 @@ class FakeServoMotionTests(unittest.TestCase):
         self.assertEqual(self.bus.states([20])[20]["moving"], 0)
 
     def test_acceleration_limit_ramps_up(self):
-        profile(self.bus, 20, 4000, speed=3000, acc=10)    # 10 × 8.7°/s² ≈ 990 步/s²
+        profile(self.bus, 20, 4000, speed=3000, acc=10)    # 10 × 8.7°/s² ≈ 990 steps/s²
         self.run_for(0.2)
         moved = self.bus.states([20])[20]["pos"] - 2048
-        self.assertTrue(10 < moved < 40, moved)             # ½·a·t² ≈ 20 步，远不到满速的 600
+        self.assertTrue(10 < moved < 40, moved)             # ½·a·t² ≈ 20 steps, far below the 600 at full speed
 
     def test_unlimited_speed_reaches_quickly_and_torque_off_freezes(self):
-        self.bus.write_u16(21, 42, 2548)                    # 滑块：只写目标，速度不限
+        self.bus.write_u16(21, 42, 2548)                    # slider: write only the target, no speed limit
         self.run_for(0.3)
         self.assertEqual(self.bus.states([21])[21]["pos"], 2548)
         self.bus.write_u8(21, 40, 0)
         self.bus.write_u16(21, 42, 1548)
         self.run_for(0.5)
-        self.assertEqual(self.bus.states([21])[21]["pos"], 2548)   # 扭矩关：停在原地
+        self.assertEqual(self.bus.states([21])[21]["pos"], 2548)   # torque off: stays in place
 
     def test_calibrate_and_readback(self):
         self.bus.calibrate_to(20, 2100)
         self.assertEqual(self.bus.read_u16(20, 56), 2100)
 
     def test_offset_register_is_sign_magnitude(self):
-        self.bus.write_u8(20, 40, 0)                        # 扭矩关：读数只随偏移变，不会被拉回目标
+        self.bus.write_u8(20, 40, 0)                        # torque off: the reading only changes with the offset, it isn't pulled back to the target
         with patch.object(server, "BUS", self.bus):
             server.write_off(20, -5)
-            self.assertEqual(self.bus.read_u16(20, 31), 0x8005)   # 跟真舵机一样 BIT15 = 负，不是补码
+            self.assertEqual(self.bus.read_u16(20, 31), 0x8005)   # same as real servos, BIT15 = negative, not two's complement
             self.assertEqual(server.read_off(20), -5)
             self.assertEqual(server.read_pos(20), 2043)
             server.write_off(20, 12)
@@ -88,14 +88,14 @@ class FakeServoMotionTests(unittest.TestCase):
         self.bus.write_u8(20, 40, 0)
         self.bus.write_u16(20, 42, 3000)
         self.run_for(0.5)
-        self.assertEqual(self.bus.states([20])[20]["pos"], 2048)   # 关着：记住目标，不动
+        self.assertEqual(self.bus.states([20])[20]["pos"], 2048)   # off: remembers the target, doesn't move
         self.bus.write_u8(20, 40, 1)
         self.run_for(1.0)
-        self.assertEqual(self.bus.states([20])[20]["pos"], 3000)   # 这就是审查说的「一开扭矩就冲过去」
+        self.assertEqual(self.bus.states([20])[20]["pos"], 3000)   # this is what the review called "rushing over as soon as torque turns on"
 
 
 class RecordingBus(server.FakeBus):
-    """记下每次写了哪个地址；dead 里的 ID 读状态读不到。"""
+    """Record which address each write went to; IDs in dead can't have their state read."""
 
     def __init__(self, ids):
         super().__init__(ids)
@@ -132,25 +132,25 @@ class TorqueAndSpeedTests(unittest.TestCase):
 
     def test_torque_on_aligns_goal_to_where_the_joint_was_moved_by_hand(self):
         self.bus.write_u8(20, 40, 0)
-        self.bus.write_u16(20, 42, 3000)                    # 扭矩关着时发过姿势（或者校准过），目标还在 3000
-        self.bus.pos[20] = 1500.0                           # 然后用手把关节掰到 1500
-        self.bus.write_u16(21, 42, 2548)                    # 21 一直开着，正在往 2548 走
+        self.bus.write_u16(20, 42, 3000)                    # a pose was sent (or calibration done) while torque was off; the target is still 3000
+        self.bus.pos[20] = 1500.0                           # then the joint is moved by hand to 1500
+        self.bus.write_u16(21, 42, 2548)                    # 21 has been on all along, moving toward 2548
         r = server.handle({"op": "torque", "ids": [20, 21], "on": 1})
-        self.assertEqual(r["aligned"], {"20": 1500})        # 只对齐关着的那颗，开着的不动它的目标
+        self.assertEqual(r["aligned"], {"20": 1500})        # only align the one that was off; leave the target of the one that's on alone
         self.assertEqual(sorted(r["ids"]), [20, 21])
         self.assertEqual(self.bus.torque[20], 1)
         self.assertEqual(self.bus.goal[21], 2548)
         self.run_for(1.0)
-        self.assertEqual(self.bus.states([20])[20]["pos"], 1500)    # 不跳
+        self.assertEqual(self.bus.states([20])[20]["pos"], 1500)    # no jump
         order = [w[0] for w in self.bus.writes]
-        self.assertLess(order.index(42), order.index(40))   # 先写目标，再开扭矩
+        self.assertLess(order.index(42), order.index(40))   # write the target first, then turn torque on
 
     def test_torque_stays_off_when_position_cannot_be_read(self):
         self.bus.write_u8(22, 40, 0)
         self.bus.dead = {22}
         r = server.handle({"op": "torque", "ids": [22], "on": 1})
         self.assertIn("22", r["bad"])
-        self.assertEqual(self.bus.torque[22], 0)            # 读不到位置就不开，免得冲向旧目标
+        self.assertEqual(self.bus.torque[22], 0)            # if the position can't be read, don't turn on, to avoid rushing to an old target
 
     def test_release_speed_never_rewrites_the_goal(self):
         self.bus.write_u16(20, 42, 1234)
@@ -188,7 +188,7 @@ class ConnectReadOnlyTests(unittest.TestCase):
 
 
 class SimCalibrationTests(unittest.TestCase):
-    """模拟模式按官方折叠校准：只改虚拟舵机，真的 calib/ 和 poses/ 一个字节都不动。"""
+    """Simulation mode calibrates per the official fold: only virtual servos change; not a single byte of the real calib/ and poses/ is touched."""
 
     def setUp(self):
         self.clock = Clock()
@@ -200,7 +200,7 @@ class SimCalibrationTests(unittest.TestCase):
         real_calib, poses = os.path.join(tmp, "calib"), os.path.join(tmp, "poses")
         os.makedirs(real_calib)
         os.makedirs(poses)
-        # 真 calib/ 里有一份上次真机校准的备份：模拟里点撤销绝不能拿它去写
+        # The real calib/ holds a backup from the last real-hardware calibration: clicking undo in simulation must never write it
         self.real_backup = os.path.join(real_calib, "eeprom-20260920-015310000.json")
         with open(self.real_backup, "w", encoding="utf-8") as f:
             json.dump({"time": "2026-09-20 01:53:10", "servos": {"20": {"offset": 33}}, "shifted": []}, f)
@@ -209,7 +209,7 @@ class SimCalibrationTests(unittest.TestCase):
             json.dump({"name": "站", "time": "2026-09-20 02:00", "rows": [{"id": i, "pos": 2100} for i in IDS]}, f)
         dirs = os.path.join(tmp, "directions.json")
         with open(dirs, "w", encoding="utf-8") as f:
-            json.dump({str(i): -1 for i in IDS}, f)         # 跟实机一致：15 颗全 −1
+            json.dump({str(i): -1 for i in IDS}, f)         # same as the real robot: all 15 are −1
         self.snap = {p: open(p, "rb").read() for p in (self.real_backup, self.pose)}
         self.bus = server.FakeBus(IDS)
         stack.enter_context(patch.multiple(server, BUS=self.bus, IDS=IDS, PRESENT=IDS, LOG=[], OFFSET_SIGN=None,
@@ -218,7 +218,7 @@ class SimCalibrationTests(unittest.TestCase):
         self.real_calib = real_calib
 
     def fold_by_hand(self, errors=None):
-        """扭矩关着，用手摆成校准用折叠；读数离目标差 errors 步（零点没校准时就是这样）。"""
+        """Torque off, posed by hand into the calibration fold; readings are off from the targets by errors steps (that's how it is when zero isn't calibrated)."""
         _, want = server.official_targets("@official:FOLD")
         for i in IDS:
             self.bus.torque[i] = 0
@@ -228,10 +228,10 @@ class SimCalibrationTests(unittest.TestCase):
     def test_official_fold_targets_with_all_minus_one(self):
         _, want = server.official_targets("@official:FOLD")
         self.assertEqual((want[22], want[23], want[12], want[13]), (1025, 1025, 3071, 3071))
-        self.assertTrue(all(want[i] == 2048 for i in IDS if i not in (22, 23, 12, 13)))   # 头颈摆正、嘴闭上
+        self.assertTrue(all(want[i] == 2048 for i in IDS if i not in (22, 23, 12, 13)))   # head/neck straight, mouth closed
 
     def test_plan_lists_current_target_and_degrees(self):
-        self.fold_by_hand({12: -1707})                      # 右髋 pitch 差 150°：装的时候转了（或 ± 反了）
+        self.fold_by_hand({12: -1707})                      # right hip pitch off by 150°: rotated during assembly (or ± reversed)
         m = server.handle({"op": "calib_plan", "ids": IDS, "ref": "@official:FOLD", "for": "all"})
         rows = {r["id"]: r for r in m["rows"]}
         self.assertEqual((rows[22]["pos"], rows[22]["target"], rows[22]["diff_deg"]), (1028, 1025, -0.3))
@@ -242,19 +242,19 @@ class SimCalibrationTests(unittest.TestCase):
         want = self.fold_by_hand({12: -1707, 22: 10})
         r = server.handle({"op": "calib_mid_all", "ids": IDS, "ref": "@official:FOLD"})
         self.assertEqual(sorted(r["ok"]), sorted(IDS))
-        self.assertEqual(list(r["big"]), ["12"])            # 差得多的不拦，只标出来
+        self.assertEqual(list(r["big"]), ["12"])            # large differences aren't blocked, just flagged
         self.assertTrue(any("30° 以上" in e["msg"] and e["level"] == "warn" for e in server.LOG))
         st = self.bus.states(IDS)
         self.assertTrue(all(st[i]["pos"] == want[i] for i in IDS))
-        self.assertTrue(all(self.bus.torque[i] == 0 for i in IDS))            # 扭矩原来关着，校完还关着
-        self.assertTrue(all(self.bus.goal[i] == st[i]["pos"] for i in IDS))   # 目标 = 当前读数
-        for i in IDS:                                       # 用手把鸭子展开，再开扭矩
+        self.assertTrue(all(self.bus.torque[i] == 0 for i in IDS))            # torque was off before, still off after calibration
+        self.assertTrue(all(self.bus.goal[i] == st[i]["pos"] for i in IDS))   # target = current reading
+        for i in IDS:                                       # unfold the duck by hand, then turn torque on
             self.bus.pos[i] = 2048.0
         server.handle({"op": "torque", "on": 1})
         for _ in range(100):
             self.clock.t += 0.01
             self.bus.states(IDS)
-        self.assertTrue(all(self.bus.states([i])[i]["pos"] == 2048 for i in IDS))   # 不会甩回折叠
+        self.assertTrue(all(self.bus.states([i])[i]["pos"] == 2048 for i in IDS))   # doesn't snap back to the fold
 
     def test_sim_calibration_and_undo_never_touch_real_files(self):
         before = self.fold_by_hand()
@@ -266,8 +266,8 @@ class SimCalibrationTests(unittest.TestCase):
         r = server.handle({"op": "calib_undo"})
         self.assertEqual(sorted(r["ok"]), sorted(IDS))
         st = self.bus.states(IDS)
-        self.assertTrue(all(st[i]["pos"] == before[i] + 3 for i in IDS))    # 虚拟舵机回到校准前
-        self.assertEqual(sorted(os.listdir(self.real_calib)), ["eeprom-20260920-015310000.json"])   # 没被改名 undone-
+        self.assertTrue(all(st[i]["pos"] == before[i] + 3 for i in IDS))    # virtual servos back to before calibration
+        self.assertEqual(sorted(os.listdir(self.real_calib)), ["eeprom-20260920-015310000.json"])   # not renamed to undone-
         self.assertEqual({p: open(p, "rb").read() for p in self.snap}, self.snap)
 
 
@@ -302,10 +302,10 @@ class SimImuTests(unittest.TestCase):
         server.set_sim_imu("lost")
         for _ in range(imu_bus.MISS_DEGRADE):
             server.read_states_with_imu([20, 21], server.IMU_SERVICE)
-        self.assertFalse(server.IMU_SERVICE.include_in_sync())       # 出列，舵机单独读
+        self.assertFalse(server.IMU_SERVICE.include_in_sync())       # removed, servos read separately
         server.set_sim_imu("on")
         server.IMU_SERVICE.last_probe = None
-        server.read_states_with_imu([20, 21], server.IMU_SERVICE)    # 这一帧单独 PING，放回
+        server.read_states_with_imu([20, 21], server.IMU_SERVICE)    # this frame PINGs separately and puts it back
         self.assertTrue(server.IMU_SERVICE.include_in_sync())
 
     def test_refused_on_real_bus_or_when_started_with_an_imu(self):

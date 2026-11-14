@@ -1,34 +1,34 @@
-"""今晚 A/B 用：每块录像数摔倒、算每分钟摔几次，最后把 chip 和 gyro 各自加总，判断差别算不算数（只读）。
+"""For tonight's A/B: count falls in each recording block, compute falls per minute, then sum chip and gyro separately and judge whether the difference is meaningful (read-only).
 
-用法：
-  python ab_blocks.py chip1=录像1.jsonl gyro1=录像2.jsonl chip2=... gyro2=...
-  python ab_blocks.py chip1=录像.jsonl@120-300     # 只看这份录像开头起第 120～300 秒（按 wall 墙钟算）
-标签必须以 chip 或 gyro 开头才进对比；旧录像用 old 开头，只出单块数。别的开头报错、不进对比。
-每块实际是什么模式从录像里认：imu.fusion 带 fused → chip 模式；带 chip → gyro 模式；没有 imu.fusion → 旧版。
-标签和录像里的模式对不上会报 [错误]，这块不进对比。
+Usage:
+  python ab_blocks.py chip1=recording1.jsonl gyro1=recording2.jsonl chip2=... gyro2=...
+  python ab_blocks.py chip1=recording.jsonl@120-300     # only look at seconds 120~300 from the start of this recording (by wall clock)
+Labels must start with chip or gyro to enter the comparison; old recordings use an old prefix and only get per-block numbers. Any other prefix is an error and doesn't enter the comparison.
+Each block's actual mode is identified from the recording: imu.fusion with fused → chip mode; with chip → gyro mode; no imu.fusion → old version.
+If a label doesn't match the mode in the recording, an [error] is reported and that block doesn't enter the comparison.
 
-口径：
-  直立走路帧 = policy == walk、未卸力（safety.limp 假）、未倒地（safety.fallen 假）。
-  计时只算直立走路帧里倾角 ≤30° 的（摔后躺着、斜靠、被人扶着的不算）；时间按 wall 差算，>0.1 s 的空档不计时。
-  一次摔倒 = 直立走路帧之后 safety.fallen 上升沿；离上一次倒地结束不到 3 s 的上升沿算同一次（倒地判定会来回跳）。
-            非走路状态（held / homing 等）或卸力时的上升沿单独列出，不计入。日志里写每次距上次倒地多久，卡 3 s 边界的可复核。
-  推杆摔 = 上升沿前 2 s 内推过摇杆的摔倒。
-  主指标 = 每推杆分钟摔倒 = 推杆摔 / 推摇杆分钟数（推杆时间两种模式由操作者控制得一样；站着不推杆的时间长短跟模式无关）。
-  参考   = 每直立走路分钟摔倒 = 全部摔倒 / 直立走路分钟数。两种分母结论不一致要当场说出来。
-  走路段 = 连续的直立走路帧（中间空档 <0.2 s 算连续）；段尾 1 s 内接着摔倒的算「以摔倒结束」。
-  芯片台阶 = 用本帧陀螺把上一帧重力外推，与本帧差 >5°（judge_block / glitch_rate 同口径），只数直立走路帧。
-            芯片那一路：chip 模式和旧版用 safety.gravity；gyro 模式用 imu.fusion.chip，补上和 safety.gravity 一样的
-            归一化 + 逐分量三点中值，两种模式才可比。verdict == disabled 的帧发布的已是芯片姿态，按 chip 算。
-  发布台阶 = 同样的判据用在 safety.gravity（策略实际看到的），gyro 模式下应接近 0。
-  摔前有台阶 = 摔倒前 1.5 s 内芯片那一路有台阶（没有基线：任意推杆时刻往前 1.5 s 有台阶的比例本身就有 12–47%，只作参考）。
-  机身颤（护栏）= 推着摇杆、倾角 ≤30° 的直立走路段（每段 ≥1.5 s），且段尾 2 s 内没摔，机身横滚、俯仰角速度 RMS（°/s）；
-            gyro 不高于 chip 一成。含摔前踉跄的原口径另列作参考（那个会把摔倒率再数一遍）。
-  一块里少数模式的直立走路帧 >1 s → 这块不进对比（中途改过键，要按改键时刻切块）。
-对比：两种模式各自加总，率比 = gyro / chip；p 值用精确条件二项检验（总摔倒数固定时，落在 gyro 的份额是否偏离时间占比），
-      95% 区间用 Clopper-Pearson。块数和顺序上机前定好（chip、gyro、gyro、chip…），别边看 p 值边决定加不加块。
-日志：分类、分级写到第一个录像同目录的 ab_blocks.log；报告同时追加到 ab_report.txt。
-10-15 第一版经独立审核，按审核改：old/不认识的标签不进对比、gyro 芯片路补中值、
-  倾角 ≤30° 计时、推杆分母、护栏去掉摔前段、disabled 按 chip、混模式整块不进、参数写错不崩、同一文件重复用提示。
+Definitions:
+  Upright walking frames = policy == walk, torque on (safety.limp false), not fallen (safety.fallen false).
+  Timing only counts upright walking frames with tilt ≤30° (lying after a fall, leaning, or being held up don't count); time is computed from wall differences, gaps >0.1 s aren't timed.
+  One fall = a rising edge of safety.fallen after upright walking frames; a rising edge less than 3 s after the end of the previous fall counts as the same fall (the fall detection flips back and forth).
+            Rising edges in non-walking states (held / homing etc.) or with torque off are listed separately and not counted. The log records the time since the previous fall for each, so ones near the 3 s boundary can be re-checked.
+  Stick fall = a fall with the joystick pushed within 2 s before the rising edge.
+  Primary metric = falls per stick minute = stick falls / minutes of joystick pushing (the operator keeps stick time the same for both modes; how long it stands without pushing is unrelated to mode).
+  Reference      = falls per upright walking minute = all falls / upright walking minutes. If the two denominators lead to different conclusions, say so on the spot.
+  Walking segment = consecutive upright walking frames (gaps <0.2 s count as consecutive); a fall within 1 s after the segment end counts as "ended in a fall".
+  Chip step = gravity from the previous frame extrapolated with this frame's gyro differs from this frame by >5° (same definition as judge_block / glitch_rate), counted only on upright walking frames.
+            The chip path: chip mode and the old version use safety.gravity; gyro mode uses imu.fusion.chip, with the same
+            normalization + per-component three-point median as safety.gravity added, so the two modes are comparable. Frames with verdict == disabled already publish the chip attitude, counted as chip.
+  Published step = the same criterion applied to safety.gravity (what the policy actually sees); should be near 0 in gyro mode.
+  Step before fall = the chip path has a step within 1.5 s before the fall (no baseline: the share of arbitrary stick moments with a step in the preceding 1.5 s is itself 12–47%, reference only).
+  Body shake (guardrail) = upright walking segments with the joystick pushed and tilt ≤30° (each ≥1.5 s) and no fall within 2 s after the segment end; RMS of body roll and pitch rates (°/s);
+            gyro no more than 10% higher than chip. The original definition including pre-fall stumbling is listed separately for reference (it would count the fall rate again).
+  Upright walking frames of the minority mode in a block >1 s → this block doesn't enter the comparison (the key was changed midway; split blocks at the moment of the change).
+Comparison: sum each mode separately, rate ratio = gyro / chip; p-value from an exact conditional binomial test (with the total fall count fixed, whether gyro's share deviates from its share of time),
+      95% interval by Clopper-Pearson. Decide the number and order of blocks before running on the robot (chip, gyro, gyro, chip...); don't decide whether to add blocks while watching the p-value.
+Logs: categorized and leveled, written to ab_blocks.log in the same directory as the first recording; the report is also appended to ab_report.txt.
+The 10-15 first version was independently reviewed and changed per the review: old/unknown labels excluded from comparison, median added to gyro's chip path,
+  timing with tilt ≤30°, stick denominator, pre-fall segments removed from the guardrail, disabled counted as chip, mixed-mode blocks excluded entirely, bad arguments don't crash, warning when the same file is reused.
 """
 import json
 import math
@@ -36,16 +36,16 @@ import os
 import sys
 import time
 
-GAP = 0.1            # 帧间隔超过这个不计时
-SEG_GAP = 0.2        # 走路段内允许的空档
-MERGE = 3.0          # 倒地判定来回跳的合并窗口
-PRE_FALL = 1.5       # 摔前看多久
+GAP = 0.1            # frame intervals longer than this aren't timed
+SEG_GAP = 0.2        # gap allowed within a walking segment
+MERGE = 3.0          # merge window for fall detection flipping back and forth
+PRE_FALL = 1.5       # how far to look back before a fall
 STEP_DEG = 5.0
 SHAKE_MIN = 1.5
-TILT_MAX = 30.0      # 计时/机身颤只算倾角 ≤30° 的直立走路帧（摔后躺着、被扶着的不算）
-STICK_RECENT = 2.0   # 上升沿前这么久内推过摇杆 → 算「推杆摔」
-SHAKE_SKIP = 2.0     # 机身颤只用段尾之后这么久内没摔的段
-MIX_MAX = 50         # 非多数模式的直立走路帧超过这么多（1 s）→ 这块报错
+TILT_MAX = 30.0      # timing/body shake only count upright walking frames with tilt ≤30° (lying after a fall or being held don't count)
+STICK_RECENT = 2.0   # joystick pushed within this long before the rising edge → counts as a "stick fall"
+SHAKE_SKIP = 2.0     # body shake only uses segments with no fall within this long after the segment end
+MIX_MAX = 50         # upright walking frames of the non-majority mode exceed this many (1 s) → error for this block
 
 LOG = None
 
@@ -86,7 +86,7 @@ def frame_mode(r):
     if f.get('fused') is not None:
         return 'chip'
     if f.get('chip') is not None:
-        # disabled 时发布的已经是芯片（bno08x.rs sample()/HostImuSample.quat），按 chip 算
+        # when disabled, what's published is already the chip (bno08x.rs sample()/HostImuSample.quat), counted as chip
         return 'chip' if f.get('verdict') == 'disabled' else 'gyro'
     return '?'
 
@@ -97,8 +97,8 @@ def _norm(v):
 
 
 def chip_gravs(rows, mode):
-    """芯片那一路每帧的重力。gyro 模式下 imu.fusion.chip 没过中值，这里补上和
-    safety.gravity 一样的处理（先归一化、再逐分量三点中值，断档后重新起头），两种模式才可比。"""
+    """Per-frame gravity of the chip path. In gyro mode imu.fusion.chip hasn't been median filtered, so this adds the
+    same processing as safety.gravity (normalize first, then per-component three-point median, restarting after gaps), so the two modes are comparable."""
     if mode != 'gyro':
         return [r['safety']['gravity'] for r in rows]
     raw = []
@@ -129,7 +129,7 @@ def upright(r):
 
 
 def upright_t(r):
-    """计时用：直立走路且倾角 ≤ TILT_MAX。台阶仍按 upright() 数，免得把芯片跳到 30° 以外的帧漏掉。"""
+    """For timing: upright walking and tilt ≤ TILT_MAX. Steps are still counted with upright(), so frames where the chip jumps beyond 30° aren't missed."""
     return upright(r) and tilt(r) <= TILT_MAX
 
 
@@ -174,7 +174,7 @@ def analyze(label, path, window):
     mode = max(modes, key=modes.get)
     out['modes'] = modes
     out['mode'] = mode
-    # 标签只认 chip/gyro/old 开头；只有 chip/gyro 开头的才进对比（见 main）
+    # Labels only accept chip/gyro/old prefixes; only chip/gyro prefixes enter the comparison (see main)
     want = next((m for m in ('chip', 'gyro', 'old') if label.startswith(m)), None)
     out['want'] = want
     if want is None:
@@ -182,7 +182,7 @@ def analyze(label, path, window):
         out['error'] = '标签不认识'
     if len(modes) > 1:
         log('分段', 'WARN', '%s：一块里有多种模式 %s（中途改过键？），按多数 %s 算' % (label, modes, mode))
-        # 少数模式在直立走路里超过 1 s → 不进对比，免得混块
+        # Minority mode exceeds 1 s in upright walking → excluded from comparison, to avoid mixed blocks
         minority_up = sum(1 for r in rows if upright(r) and frame_mode(r) != mode)
         if minority_up > MIX_MAX:
             log('分段', 'ERROR', '%s：非 %s 模式的直立走路帧 %d 帧（>%d），这块不进对比；请按改键时刻切块' % (
@@ -230,7 +230,7 @@ def analyze(label, path, window):
         log('统计', 'INFO', '%s：直立走路状态但倾角 >%.0f° 的 %.1f s 不计时（摔后躺着/被扶着）' % (label, TILT_MAX, t_tilted))
     out.update(t_up=t_up, t_stick=t_stick, t_tilted=t_tilted, chip_steps=len(chip_steps), pub_steps=len(pub_steps))
 
-    # 倒地事件：先找 fallen 的连续段，再合并来回跳的
+    # Fall events: first find continuous fallen segments, then merge the flip-flops
     runs, cur = [], None
     for i, r in enumerate(rows):
         f = bool(r['safety'].get('fallen'))
@@ -256,7 +256,7 @@ def analyze(label, path, window):
             ft = rows[a]['wall']
             falls.append(ft)
             since[ft] = gap_prev
-            # 上升沿前 STICK_RECENT 秒内推过摇杆 → 推杆摔（分母用推摇杆时间）
+            # Joystick pushed within STICK_RECENT s before the rising edge → stick fall (denominator uses joystick-pushing time)
             j = a - 1
             while j >= 0 and ft - rows[j]['wall'] <= STICK_RECENT:
                 if stick(rows[j]):
@@ -272,7 +272,7 @@ def analyze(label, path, window):
     out['falls_stick'] = len(falls_stick)
     out['other_falls'] = len(other)
 
-    # 走路段
+    # Walking segments
     segs, cur = [], None
     for p, c in zip(rows, rows[1:]):
         if upright(c) and c['wall'] - p['wall'] <= SEG_GAP and (upright(p) or cur is None):
@@ -293,7 +293,7 @@ def analyze(label, path, window):
     out['segs_fall'] = sum(1 for _, h in ended if h)
     fall_durs = sorted(d for d, h in ended if h)
     out['median_to_fall'] = fall_durs[len(fall_durs) // 2] if fall_durs else None
-    # 块里第一次摔倒前累计直立走路了多久
+    # Cumulative upright walking time in the block before the first fall
     acc, first = 0.0, None
     if falls:
         for p, c in zip(rows, rows[1:]):
@@ -311,9 +311,9 @@ def analyze(label, path, window):
             label, ft - w0, '推杆' if ft in falls_stick else '没推杆',
             '—' if since[ft] is None else '%.1f s' % since[ft], PRE_FALL, len(pre)))
 
-    # 机身颤
-    # 护栏只用「段尾之后 SHAKE_SKIP 秒内没摔」的推杆段（倾角 ≤ TILT_MAX）：原版把摔前踉跄算进去，
-    # 护栏量的其实是摔倒本身。原版口径另存 *_all 供参考。
+    # Body shake
+    # The guardrail only uses stick segments with "no fall within SHAKE_SKIP s after the segment end" (tilt ≤ TILT_MAX): the original counted pre-fall stumbling,
+    # so the guardrail was really measuring the falls themselves. The original definition is kept as *_all for reference.
     def shake_segs(ok):
         ss, cur = [], []
         for r in rows:
@@ -404,7 +404,7 @@ def main():
     LOG = open(os.path.join(outdir, 'ab_blocks.log'), 'a', encoding='utf-8')
     log('开始', 'INFO', ' '.join(args))
     blocks = [analyze(label, rest, window) for label, rest, window in specs]
-    # 同一份录像的重叠时间段进了对比两次 → 摔倒会被数两次；只在两块都进对比时报，写进报告
+    # Overlapping time ranges of the same recording entered the comparison twice → falls would be counted twice; reported only when both blocks are in the comparison, and written into the report
     overlap = []
     compared = lambda b: 'error' not in b and b.get('want') in ('chip', 'gyro') and b['mode'] in ('chip', 'gyro')
     for i in range(len(specs)):
@@ -448,7 +448,7 @@ def main():
 
     tot = {}
     for b in blocks:
-        # old 开头（或不认识的标签）不进对比，哪怕录像里是 chip/gyro
+        # Prefix old (or an unknown label) doesn't enter the comparison, even if the recording is chip/gyro
         if 'error' in b or b.get('want') not in ('chip', 'gyro') or b['mode'] not in ('chip', 'gyro'):
             continue
         t = tot.setdefault(b['mode'], {'falls': 0, 't': 0.0, 'falls_s': 0, 't_s': 0.0, 'n': 0,
@@ -467,7 +467,7 @@ def main():
     lines.append('')
     if 'chip' in tot and 'gyro' in tot and tot['chip']['t'] > 0 and tot['gyro']['t'] > 0:
         c, g = tot['chip'], tot['gyro']
-        # 两种分母各出一遍：直立走路（含站着不推杆）和推摇杆；两者结论不一致要当场说出来
+        # Output once for each denominator: upright walking (including standing without the stick) and joystick pushing; if the two conclusions differ, say so on the spot
         for name, kf, kt in (('主指标·推摇杆', 'falls_s', 't_s'), ('参考·直立走路', 'falls', 't')):
             if c[kt] <= 0 or g[kt] <= 0:
                 lines.append('[%s] 有一边时间为 0，不出对比。' % name)

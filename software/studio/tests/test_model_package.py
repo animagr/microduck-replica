@@ -1,4 +1,4 @@
-"""真实 ZIP/TAR 归档的导入边界；ONNX 图语义交给 robotd 无硬件预检。"""
+"""Import boundaries for real ZIP/TAR archives; ONNX graph semantics are left to robotd's hardware-free precheck."""
 import copy
 import gzip
 import hashlib
@@ -22,7 +22,7 @@ except ImportError:
     M = None
 
 
-# 摘取现有 HD1910 walk 导出合同的基础字段；不是用于替代 robotd 完整预检的假合同。
+# Base fields taken from an existing HD1910 walk export contract; not a fake contract meant to replace robotd's full precheck.
 JOINTS = (
     "left_hip_yaw,left_hip_roll,left_hip_pitch,left_knee,left_ankle,neck_pitch,"
     "head_pitch,head_yaw,head_roll,right_hip_yaw,right_hip_roll,right_hip_pitch,"
@@ -80,7 +80,7 @@ class PackageTest(unittest.TestCase):
                     warnings.simplefilter("ignore", UserWarning)
                     for name, data in (files.items() if isinstance(files, dict) else files):
                         info = zipfile.ZipInfo(prefix + name)
-                        # Windows ZipInfo 默认把反斜杠改成斜杠；保留攻击者提供的原始路径。
+                        # Windows ZipInfo converts backslashes to slashes by default; keep the raw path supplied by the attacker.
                         info.filename = info.orig_filename = prefix + name
                         info.compress_type = zipfile.ZIP_DEFLATED
                         archive.writestr(info, data)
@@ -162,7 +162,7 @@ class PackageTest(unittest.TestCase):
             info = archive.getinfo("policy.onnx")
         payload = bytearray(path.read_bytes())
         start = info.header_offset + 30 + len(info.filename.encode("utf-8")) + len(info.extra)
-        payload[start] = 0xff  # DEFLATE 的保留 block 类型，解压器会抛 zlib.error。
+        payload[start] = 0xff  # DEFLATE's reserved block type; the decompressor raises zlib.error.
         path.write_bytes(payload)
         with self.assertRaisesRegex(M.PackageError, "压缩包|归档"):
             M.extract_package(path, self.dest)

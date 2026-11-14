@@ -1,10 +1,10 @@
-// 摄像头页：鸭子的视野。
+// Camera page: the duck's view.
 //
-// 画面走 WebRTC，信令由 camera-link.js 直接和 mediad 协商：
-//   /api/camera 只告诉我们「信令端口是多少、视频来源是什么」。
-// http 打开时直连 mediad 的 8443；https 打开时走同域的 /media-ws（nginx 转发到本机 8443）——
-// 因为 https 页面里连明文 ws:// 会被浏览器当混合内容挡掉。
-// 只转发 8000 的 SSH 隧道看不到画面——这是 mediad 的既有设计，不是这里的问题。
+// Video goes over WebRTC; signaling is negotiated directly with mediad by camera-link.js:
+//   /api/camera only tells us "what the signaling port is and what the video source is".
+// Opened over http, connect directly to mediad's 8443; opened over https, go through the same-origin /media-ws (nginx forwards to local 8443),
+// because connecting to plaintext ws:// from an https page gets blocked by the browser as mixed content.
+// An SSH tunnel forwarding only 8000 can't see the video: that's mediad's existing design, not a problem here.
 import { html, useState, useEffect, useRef, useCallback } from '../vendor/preact-htm.module.js';
 import { CameraLink } from '../camera-link.js';
 import { api } from './link.js';
@@ -28,7 +28,7 @@ export function CameraPage({ live, say }) {
     try { cfg = await api('/api/camera', undefined, 6000); }
     catch (e) { setState({ state: 'error', error: `读不到摄像头配置：${e.message}` }); setStarting(false); return; }
     if (cfg.status === 401) { setState({ state: 'error', error: '登录过期了，回上一页重新登录。' }); setStarting(false); return; }
-    // 后端的只读接口都包了一层 {ok, data}，别把 data 里的字段当顶层字段用
+    // the backend's read-only endpoints are all wrapped in {ok, data}; don't use fields inside data as top-level fields
     const d = cfg.data || cfg;
     setInfo(d);
     const port = d.signaling_port;
@@ -37,7 +37,7 @@ export function CameraPage({ live, say }) {
     camRef.current?.stop();
     const cam = new CameraLink({ video: videoRef.current, onState: (s) => setState(s) });
     camRef.current = cam;
-    // https 下直连明文 8443 会被当混合内容挡掉，改走同域的 /media-ws 反代
+    // under https, connecting directly to plaintext 8443 gets blocked as mixed content; use the same-origin /media-ws reverse proxy instead
     cam.start(port, location.protocol === 'https:' ? '/media-ws' : null);
     setStarting(false);
   }, [starting]);
@@ -45,7 +45,7 @@ export function CameraPage({ live, say }) {
   useEffect(() => {
     start();
     return () => { camRef.current?.stop(); camRef.current = null; };
-    // 只在进页面时连一次：重连交给按钮，别跟着状态帧反复重连
+    // connect only once when entering the page: reconnecting is left to the button, don't reconnect repeatedly on every state frame
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

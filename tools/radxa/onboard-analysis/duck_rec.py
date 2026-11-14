@@ -1,6 +1,6 @@
-"""后台录 robotd 50 Hz 状态（关节、目标、速度指令、IMU、安全、策略状态），只读订阅，不发任何控制。
-每秒 fsync 一次：拔电最多丢最后 1 秒。robotd 断开时记一行 rec_error 并重连。追加写，不覆盖旧文件。
-用法：python3 duck_rec.py 秒数 输出文件"""
+"""Records robotd's 50 Hz state in the background (joints, targets, velocity commands, IMU, safety, policy state); read-only subscription, sends no control.
+fsync once per second: pulling power loses at most the last 1 second. When robotd disconnects, logs a rec_error line and reconnects. Appends, never overwrites old files.
+Usage: python3 duck_rec.py seconds output_file"""
 import json, os, socket, sys, time
 secs = float(sys.argv[1]); out = sys.argv[2]
 keep = ('t', 'policy', 'move', 'joints', 'targets', 'velocities', 'imu', 'safety', 'loop')

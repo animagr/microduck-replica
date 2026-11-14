@@ -1,7 +1,7 @@
-/* Microduck 手机中控（m.html）的样式。
-   跟桌面版 styles.css 是两套：这里不加载桌面样式，避免 .stage/.shell 之类的规则互相打架，
-   只把同一套设计变量抄过来，保证颜色、字体、圆角跟 Studio 一致。
-   断点只有一条思路：底栏 + 单列。宽过 560 时内容居中，两边留白。 */
+/* Styles for the Microduck phone web console (m.html).
+   Separate from the desktop styles.css: desktop styles aren't loaded here, to avoid rules like .stage/.shell clashing,
+   only the same set of design variables is copied over, so colors, fonts and corner radii match Studio.
+   There's only one idea for breakpoints: bottom bar + single column. Wider than 560, content is centered with margins on both sides. */
 
 :root {
   --page: #F2F2F7;
@@ -31,7 +31,7 @@
 html, body { margin: 0; padding: 0; }
 body.m-body {
   background: var(--page); color: var(--text); font-family: var(--font); font-size: 16px; line-height: 1.5;
-  overscroll-behavior-y: contain;                 /* 长按说话时别触发下拉刷新 */
+  overscroll-behavior-y: contain;                 /* don't trigger pull-to-refresh during press-to-talk */
   -webkit-text-size-adjust: 100%;
 }
 button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
@@ -40,17 +40,17 @@ a { color: var(--link); text-decoration: none; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .num { font-variant-numeric: tabular-nums; }
 
-/* ---------------- 外壳 ---------------- */
+/* ---------------- Shell ---------------- */
 
-/* 整页是一列：顶栏 / 可滚动内容 / 底栏。内容自己在 .m-main 里滚，底栏就不再 position:fixed。
-   iOS Safari 上「fixed 底栏 + backdrop-filter」有两类老毛病：滚动/回弹之后点击判定区跟视觉位置错位，
-   以及毛玻璃层把触摸事件吞掉。底栏改成普通 flex 子项、内容内部滚动，这两类问题都不会出现。 */
+/* The whole page is one column: top bar / scrollable content / bottom bar. Content scrolls itself inside .m-main, so the bottom bar is no longer position:fixed.
+   iOS Safari has two classic problems with "fixed bottom bar + backdrop-filter": after scrolling/bounce the tap hit area is misaligned with the visual position,
+   and the frosted-glass layer swallows touch events. With the bottom bar as an ordinary flex child and content scrolling internally, neither problem occurs. */
 .m-app { height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
 .m-main {
   flex: 1; min-height: 0; width: 100%; max-width: 560px; margin: 0 auto;
   padding: 4px 16px 16px;
   overflow-y: auto; -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;                /* 长按说话时别触发下拉刷新 */
+  overscroll-behavior-y: contain;                /* don't trigger pull-to-refresh during press-to-talk */
 }
 
 .m-head {
@@ -68,7 +68,7 @@ a { color: var(--link); text-decoration: none; }
 .m-duck-name { font-size: 17px; font-weight: 600; letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-head-gap { flex: 1; }
 
-/* 卸力：跟桌面同一个命令（relax），单点就发，不弹二次确认——急停多一次点击就是少一条命 */
+/* Torque release: same command as desktop (relax), sent on a single tap with no second confirmation: one extra tap on an e-stop could cost a life */
 .m-estop {
   height: 38px; padding: 0 18px; border-radius: 19px; background: var(--danger-bg); color: #fff;
   font-size: 16px; font-weight: 600; letter-spacing: 1px;
@@ -77,7 +77,7 @@ a { color: var(--link); text-decoration: none; }
 }
 .m-estop:active { transform: scale(.95); box-shadow: 0 2px 6px rgba(232, 17, 45, .3); }
 
-/* ---------------- 底栏 ---------------- */
+/* ---------------- Bottom bar ---------------- */
 
 .m-tabs {
   position: relative; flex: none; z-index: 30;
@@ -96,7 +96,7 @@ a { color: var(--link); text-decoration: none; }
   content: ""; position: absolute; top: 5px; width: 20px; height: 3px; border-radius: 2px; background: var(--brand);
 }
 
-/* ---------------- 通用卡片 ---------------- */
+/* ---------------- Generic cards ---------------- */
 
 .m-card { background: var(--board); border-radius: var(--radius-board); box-shadow: 0 0 0 1px var(--board-edge); }
 .m-card + .m-card { margin-top: 12px; }
@@ -123,7 +123,7 @@ a { color: var(--link); text-decoration: none; }
 .m-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .m-btns.three { grid-template-columns: 1fr 1fr 1fr; }
 
-/* ---------------- 总览 ---------------- */
+/* ---------------- Overview ---------------- */
 
 .m-stage { position: relative; height: 42vh; min-height: 240px; max-height: 360px; border-radius: var(--radius-board); overflow: hidden;
   background: radial-gradient(circle farthest-corner at 50% 42%, #FFFFFF 0%, #EDEDF1 52%, #DCDCE2 100%);
@@ -158,7 +158,7 @@ a { color: var(--link); text-decoration: none; }
 .m-bar > i.warn { background: var(--brand); }
 .m-bar > i.bad { background: var(--danger); }
 
-/* ---------------- 语音 ---------------- */
+/* ---------------- Voice ---------------- */
 
 .m-voice-hero { text-align: center; padding: 10px 0 0; }
 .m-voice-title { font-size: 27px; font-weight: 700; letter-spacing: -.4px; margin: 8px 0 8px; }
@@ -190,15 +190,15 @@ a { color: var(--link); text-decoration: none; }
 .m-mic svg { width: 34px; height: 34px; stroke: #1D1D1F; fill: none; stroke-width: 2.1; stroke-linecap: round; }
 .m-mic .t1 { font-size: 16.5px; font-weight: 700; letter-spacing: .4px; }
 .m-mic .t2 { font-size: 11px; color: rgba(29, 29, 31, .62); letter-spacing: .8px; }
-/* 「手机说话」的圆按钮：只在最上面留一行小字，其余文字不显示。
-   板载麦克风沿用上面的居中大按钮，不受这条影响。 */
+/* The round "phone talk" (「手机说话」) button: only one line of small text at the top, the rest of the text is hidden.
+   The onboard microphone keeps the centered big button above and isn't affected by this. */
 .m-mic-talk .t1 {
   position: absolute; top: 20px; left: 0; right: 0;
   text-align: center; font-size: 12px; font-weight: 600; letter-spacing: .4px;
 }
 
-/* 语音页：策略开关（开始走 / 停止策略）。跟手柄页那个黄色主按钮是同一套 op，只是小一号、
-   两列并排；「停止策略」= robot.stop + enable off，停下并关掉走路策略（再推摇杆就不动了）。 */
+/* Voice page: policy switch (start walking / stop policy). Same op as the yellow main button on the gamepad page, just smaller,
+   two columns side by side; "stop policy" (「停止策略」) = robot.stop + enable off, stops and turns off the walk policy (pushing the stick does nothing after that). */
 .m-policy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .m-policy-row .m-key { height: 50px; border-radius: 13px; font-size: 15px; }
 .m-key.pol-start {
@@ -244,7 +244,7 @@ a { color: var(--link); text-decoration: none; }
 .m-log .when { margin-left: auto; font-size: 12px; color: var(--text-3); flex: none; }
 .m-log .bad .who { color: var(--danger); }
 
-/* ---------------- 手柄 ---------------- */
+/* ---------------- Gamepad ---------------- */
 
 .m-sticks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
 .m-stick-box { text-align: center; }
@@ -283,11 +283,11 @@ a { color: var(--link); text-decoration: none; }
 .m-key:active { background: #F2F2F7; }
 .m-key.on { background: var(--text); color: #fff; box-shadow: none; }
 .m-key.on small { color: rgba(255, 255, 255, .6); }
-/* 手柄页：按当前站姿推荐的那一个键（比如站着但策略没跑 → 「开始走」），描一圈绿边 */
+/* Gamepad page: the one button recommended for the current posture (e.g. standing but policy not running → "start walking"), with a green outline */
 .m-key.hot { background: #E9F6ED; color: var(--ok); font-weight: 600; box-shadow: 0 0 0 2px var(--ok); }
 
-/* 手柄页：把「开始走（start 策略）」从动作格里拎出来，单独整行放在摇杆下面，贴品牌黄底。
-   它是「推摇杆没反应」的唯一解法，普通白底按钮太容易和别的键混过去。 */
+/* Gamepad page: pull "start walking (start policy)" out of the action grid into its own full row below the sticks, with the brand-yellow background.
+   It's the only fix for "pushing the stick does nothing"; an ordinary white button is too easy to confuse with the other keys. */
 .m-start-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
 .m-key.start {
   height: 58px; border-radius: 15px; font-size: 17px; font-weight: 600; letter-spacing: .2px;
@@ -296,12 +296,12 @@ a { color: var(--link); text-decoration: none; }
 }
 .m-key.start small { font-size: 11.5px; color: rgba(29, 29, 31, .62); font-weight: 500; letter-spacing: .4px; }
 .m-key.start:active { background: var(--brand-lo); }
-/* 轮到这个键时仍给绿描边（上面 .hot 的浅绿底会盖掉黄底，所以这里单独写） */
+/* Still give the green outline when it's this button's turn (the light-green background of .hot above would cover the yellow, so it's written separately here) */
 .m-key.start.hot { background: linear-gradient(180deg, var(--brand-hi), var(--brand)); color: #1D1D1F;
   box-shadow: 0 0 0 2.5px var(--ok), 0 1px 2px rgba(160, 110, 0, .28); }
 .m-key.start.on { background: var(--text); color: #fff; box-shadow: none; }
 .m-key.start.on small { color: rgba(255, 255, 255, .6); }
-/* 「停止策略」跟「开始走」并排，用白底描边跟黄底那个区分开（和语音页的 pol-stop 一个风格） */
+/* "Stop policy" sits next to "start walking", distinguished from the yellow one by a white background with an outline (same style as pol-stop on the voice page) */
 .m-key.start.stop { background: var(--board); color: var(--text);
   box-shadow: 0 0 0 1px var(--board-edge), inset 0 1px 0 rgba(255, 255, 255, .6); }
 .m-key.start.stop small { color: var(--text-3); }
@@ -313,7 +313,7 @@ a { color: var(--link); text-decoration: none; }
 .m-seg button { flex: 1; height: 34px; border-radius: 9px; font-size: 13.5px; color: var(--text-2); }
 .m-seg button[aria-pressed="true"] { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .1); }
 
-/* ---------------- 摄像头 ---------------- */
+/* ---------------- Camera ---------------- */
 
 .m-video-wrap { position: relative; border-radius: var(--radius-board); overflow: hidden; background: #0B0B0C; aspect-ratio: 4 / 3; margin-top: 4px; }
 .m-video-wrap video { display: block; width: 100%; height: 100%; object-fit: contain; background: #0B0B0C; }
@@ -324,7 +324,7 @@ a { color: var(--link); text-decoration: none; }
 .m-video-tag i { width: 7px; height: 7px; border-radius: 50%; background: #4ADE80; }
 .m-video-tag.bad i { background: #F87171; }
 
-/* ---------------- 更多 ---------------- */
+/* ---------------- More ---------------- */
 
 .m-list { list-style: none; margin: 0; padding: 0; }
 .m-list li { border-top: 1px solid var(--line); }
@@ -338,14 +338,14 @@ a { color: var(--link); text-decoration: none; }
 .m-kv .k { color: var(--text-2); }
 .m-kv .v { color: var(--text); font-variant-numeric: tabular-nums; max-width: 60%; text-align: right; word-break: break-all; }
 
-/* ---------------- 顶部横幅 / 吐司 ---------------- */
+/* ---------------- Top banner / toast ---------------- */
 
 .m-banner {
   display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px;
   background: #FFF6E0; color: #8A5A00; font-size: 13.5px; margin: 8px 0 0; line-height: 1.5;
 }
 .m-banner.bad { background: #FDECEE; color: var(--danger); }
-/* 手柄页顶上的站姿提示：ok = 能走、warn = 差一步、bad = 动不了 */
+/* Posture hint at the top of the gamepad page: ok = can walk, warn = one step missing, bad = can't move */
 .m-banner.ok { background: #E9F6ED; color: var(--ok); }
 .m-banner + .m-banner { margin-top: 8px; }
 .m-banner .act { margin-left: auto; color: inherit; text-decoration: underline; flex: none; font-size: 13px; }
@@ -360,18 +360,18 @@ a { color: var(--link); text-decoration: none; }
 .m-toast.bad { background: rgba(180, 12, 28, .95); }
 @keyframes m-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* 登录（设了密码才会有） */
+/* Login (only present when a password is set) */
 .m-login { max-width: 380px; margin: 12vh auto 0; padding: 0 24px; }
 .m-login h1 { font-size: 24px; margin: 0 0 6px; }
 .m-login p { color: var(--text-2); font-size: 14px; margin: 0 0 22px; }
 .m-login input { width: 100%; height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid rgba(0, 0, 0, .12); font: inherit; font-size: 16px; background: #fff; }
 .m-login .m-btn { width: 100%; margin-top: 12px; height: 48px; }
 
-/* ---------------- 内嵌的桌面页（模型） ---------------- */
+/* ---------------- Embedded desktop page (models) ---------------- */
 
-/* 模型页直接复用桌面版的 ModelsPage，排版由它自己的 models.css 负责。
-   手机壳这里只补两件事：把它的面板接成跟 .m-card 一样的白底卡片（桌面版靠 .board），
-   以及给两段式确认框补上手机字号——这两条样式桌面版在 styles.css 里，m.html 没加载。 */
+/* The models page reuses the desktop ModelsPage directly; its layout is handled by its own models.css.
+   The phone shell only adds two things here: making its panels white cards like .m-card (desktop relies on .board),
+   and giving the two-step confirm box phone font sizes; desktop has these two styles in styles.css, which m.html doesn't load. */
 .m-main .models-page { margin-top: 4px; }
 .m-main .models-page > .board {
   background: var(--board); border-radius: var(--radius-board);

@@ -1,5 +1,5 @@
-"""撑地腿把机身撑多高：撑地时「躯干原点到撑地脚最低点」的竖直距离（IMU 转正），实际 vs 目标，左右分开。
-撑得越矮（比目标塌得越多），对侧迈步脚就越早落地、越抬不起来。"""
+"""How high the stance leg holds the body: vertical distance from the torso origin to the stance foot's lowest point during stance (IMU-leveled), actual vs target, left and right separately.
+The lower it holds (the more it sags below target), the earlier the opposite swing foot lands and the less it can lift."""
 import os
 import sys
 import numpy as np

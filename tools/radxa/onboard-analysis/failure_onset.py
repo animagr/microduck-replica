@@ -1,5 +1,5 @@
-"""找模型接管后「从平稳到失控」的转折点：腿部目标首次偏离 HOME 超过 15° 的时刻，前后逐帧打印倾斜、重力、角速度和偏离最大的关节。
-用法：python3 failure_onset.py run-xxxx.jsonl（取第一段 policy=walk）"""
+"""Find the turning point "from stable to out of control" after the model takes over: the moment a leg target first deviates from HOME by more than 15°, printing tilt, gravity, angular velocity and the most-deviated joint frame by frame around it.
+Usage: python3 failure_onset.py run-xxxx.jsonl (takes the first policy=walk segment)"""
 import json, sys, math
 def _load(f):
     out=[]

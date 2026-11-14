@@ -1,4 +1,4 @@
-# 本机状态，不进仓库
+# Local machine state, not committed to the repo
 calib/
 logs/
 poses/.trash/

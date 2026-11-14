@@ -1,5 +1,5 @@
-"""走路时横滚和俯仰是否「绑在一起」：陀螺 x（横滚角速度）对 y（俯仰角速度）的回归斜率，分频段算。
-若 IMU 绕竖直轴装偏 θ，各频段斜率都 ≈ tanθ（符号一致）；真实的身体前后摇摆只出现在步频附近。"""
+"""Whether roll and pitch are "coupled" while walking: regression slope of gyro x (roll rate) against y (pitch rate), computed per frequency band.
+If the IMU is mounted rotated by θ about the vertical axis, the slope in every band is ≈ tanθ (same sign); real fore-aft body rocking only appears near the step frequency."""
 import json, math, sys
 import numpy as np
 from scipy.signal import butter, sosfiltfilt

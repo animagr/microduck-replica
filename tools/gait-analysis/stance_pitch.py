@@ -1,5 +1,5 @@
-"""撑地时机身前后倾从哪来：撑地脚踩平时，机身俯仰 ≈ 撑地腿各关节让脚掌相对躯干转的角度。
-按关节拆：贡献 = 脚掌俯仰(HOME 只把该关节换成撑地时中位值) − 脚掌俯仰(HOME)；+ = 让机身往前栽。"""
+"""Where the body's fore-aft tilt during stance comes from: with the stance foot flat on the ground, body pitch ≈ the angle by which the stance leg's joints rotate the sole relative to the torso.
+Broken down by joint: contribution = sole pitch (HOME with only that joint switched to its median stance value) − sole pitch (HOME); + = pitches the body forward."""
 import math, os, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

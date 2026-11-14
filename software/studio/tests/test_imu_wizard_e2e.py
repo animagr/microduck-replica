@@ -1,8 +1,8 @@
-"""IMU 页：前端采集（web/imu.js 的真代码，用 Node 跑）→ 后端 imu_calib.solve 的端到端。
+"""IMU page: end-to-end from frontend sampling (the real code of web/imu.js, run with Node) → backend imu_calib.solve.
 
-tests/imu_wizard_e2e.mjs 喂模拟读数给页面的采集逻辑，打印每个场景记下了哪几步、走到哪、采到了什么
-（就是页面会发给 imu.op solve 的那个列表）；这里把它交给 Python 算，核对「前端放行的，后端一定收，而且算得对」。
-电脑上要装 Node（≥ 20.6）；没有 Node（比如鸭子上）就跳过。单独跑：
+tests/imu_wizard_e2e.mjs feeds simulated readings to the page's sampling logic and prints, for each scenario, which steps it recorded, how far it got and what it sampled
+(i.e. the list the page would send to imu.op solve); here it is handed to Python to compute, verifying that "whatever the frontend lets through, the backend accepts, and computes correctly".
+Requires Node (≥ 20.6) on the computer; skipped without Node (e.g. on the duck). To run on its own:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_imu_wizard_e2e'])"
 """
 import json
@@ -30,7 +30,7 @@ class CollectToSolve(unittest.TestCase):
         if r.returncode != 0:
             raise AssertionError(f"Node 脚本出错：{r.stderr[-2000:]}")
         cls.out = json.loads(r.stdout)
-        # 模拟的旧方向错了 ERR（读数 = ERR · 真重力）：正确的修正 = ERR⁻¹
+        # The simulated old orientation is wrong by ERR (reading = ERR · true gravity): the correct correction = ERR⁻¹
         err = tuple(tuple(row) for row in cls.out["err"])
         cls.want = ic.q_from_mat(ic.mat_t(err))
 
@@ -47,7 +47,7 @@ class CollectToSolve(unittest.TestCase):
         self.assertLess(err, 0.5)
         self.assertAlmostEqual(res["parts"]["pitch_deg"], 3.0, delta=0.3)
         self.assertAlmostEqual(res["parts"]["yaw_deg"], 4.0, delta=0.5)
-        # 每帧推了两次（同一个 state_t_ns）：只算一次；做够一步记一个事件（页面拿去响一声），最后一个是 all
+        # Each frame pushed twice (same state_t_ns): counted only once; one event per completed step (the page uses it to beep), the last one is all
         self.assertEqual(sum(sc["counts"].values()) + sc["seg"], sc["pushed"])
         self.assertEqual(sc["events"], ["still", "fwd", "back", "left", "all"])
 
@@ -58,7 +58,7 @@ class CollectToSolve(unittest.TestCase):
         self.assertEqual(sum(sc["counts"].values()) + sc["seg"], sc["pushed"])
 
     def test_any_order(self):
-        """顺序随便：右、后、左、前。"""
+        """Any order: right, back, left, forward."""
         sc = self.out["any_order"]
         _, err = self.solve(sc, "any_order")
         self.assertLess(err, 0.5)
@@ -73,7 +73,7 @@ class CollectToSolve(unittest.TestCase):
         self.assertLess(err, 0.5)
 
     def test_still_spike_not_reset(self):
-        """静止时乱跳两帧：前端不重新数（还是 3 秒左右就过），后端也收。"""
+        """Two glitchy frames at rest: the frontend doesn't restart counting (still passes in about 3 seconds), and the backend accepts it too."""
         _, err = self.solve(self.out["still_spike"], "still_spike")
         self.assertLess(err, 0.5)
         self.assertLessEqual(self.out["still_spike"]["counts"]["still"], 32)
@@ -95,7 +95,7 @@ class CollectToSolve(unittest.TestCase):
         self.assertIn("读数断了", sc["paused"])
 
     def test_wrong_direction_then_fix(self):
-        """后倾那步又往前倾：不算（前倾已经记下）；点结束说缺后倾；接着采补一个后倾就齐了、能算。"""
+        """The backward tilt step tilts forward again: doesn't count (forward tilt already recorded); clicking finish says backward tilt is missing; sampling another backward tilt completes it and it can be computed."""
         sc = self.out["back_wrong"]
         self.assertEqual(sc["before"]["phase"], "collect")
         self.assertFalse(sc["before"]["done"]["back"])
@@ -110,7 +110,7 @@ class CollectToSolve(unittest.TestCase):
         self.assertEqual(sc["missing"], ["back", "left", "right"])
 
     def test_redo_one_step(self):
-        """只补做左倾：别的几步原样留着，补完自动齐了。"""
+        """Only redo left tilt: the other steps stay as they were, and it's complete again automatically after redoing."""
         sc = self.out["redo"]
         self.assertEqual(sc["mid"]["phase"], "collect")
         self.assertEqual(sc["mid"]["done"], dict(ALL, left=False))

@@ -1,16 +1,16 @@
 #!/bin/bash
-# 给 Radxa Zero 3W（V1.12，AIC8800 WiFi）做一张能直接开机、自动连 WiFi、ssh 能进的 Armbian 卡。
+# Builds an Armbian card for the Radxa Zero 3W (V1.12, AIC8800 WiFi) that boots directly, connects to WiFi automatically and allows ssh.
 #   sudo bash build-armbian-card.sh <Armbian_26.2.1_Radxa-zero3_trixie_vendor_6.1.115_minimal.img.xz> [card.conf]
-# 做的事（每一条都是踩过坑的）：
-#   1. 换引导程序：此前本机 V1.12 测试中 Armbian 自带的主线 U-Boot 未能完成系统启动，
-#      换成瑞莎 u-boot-rk2410 包里的 idbloader.img + u-boot.itb（扇区 64 / 16384）
-#   2. 瑞莎 U-Boot 走 extlinux：写 /boot/extlinux/extlinux.conf，挂 uart2-m0（舵机串口 /dev/ttyS2）
-#      和 dwc3-peripheral（OTG 口插电脑就是串口）两个 overlay，内核控制台放 tty1，不占舵机串口
-#   3. 首次登录后预设：用户名密码、locale、时区；先用底包 root / 1234 登录，
-#      完成 Armbian 向导后才创建普通用户。wpa_supplicant 负责 WiFi 认证，
-#      systemd-networkd 的 wlan0 配置负责 DHCP 获取 IPv4 地址
-#   4. USB 串口控制台：g_serial + serial-getty@ttyGS0，板子插电脑多出一个 COM 口，救命用
-#   5. 把登录控制台从舵机串口上拿掉：mask serial-getty@ttyS2 / ttyFIQ0
+# What it does (every item is a pitfall we've hit):
+#   1. Replace the bootloader: in earlier tests on our V1.12 board, Armbian's bundled mainline U-Boot failed to finish booting the system,
+#      so switch to idbloader.img + u-boot.itb from Radxa's u-boot-rk2410 package (sectors 64 / 16384)
+#   2. Radxa U-Boot uses extlinux: write /boot/extlinux/extlinux.conf, with two overlays, uart2-m0 (servo serial /dev/ttyS2)
+#      and dwc3-peripheral (the OTG port is a serial port when plugged into a computer); the kernel console goes to tty1, not the servo serial port
+#   3. Presets applied after the first login: username/password, locale, time zone; first log in with the base image's root / 1234,
+#      and the regular user is created only after completing the Armbian wizard. wpa_supplicant handles WiFi authentication,
+#      and systemd-networkd's wlan0 config handles getting an IPv4 address via DHCP
+#   4. USB serial console: g_serial + serial-getty@ttyGS0, the board shows up as an extra COM port when plugged into a computer, a lifesaver
+#   5. Take the login console off the servo serial port: mask serial-getty@ttyS2 / ttyFIQ0
 set -euo pipefail
 export LC_ALL=C.UTF-8
 XZ="${1:?用法: sudo bash $0 <Armbian_xxx.img.xz> [card.conf]}"
@@ -21,7 +21,7 @@ CONF="${2:-$HERE/card.conf}"
 [ -f "$CONF" ] || { echo "找不到 $CONF"; exit 1; }
 # shellcheck disable=SC1090
 . <(tr -d '\r' < "$CONF")
-# WIFI_SSID 留空 = 公开镜像模式：不写 WiFi 认证信息，保留 wlan0 的 DHCP 配置
+# WIFI_SSID empty = public image mode: no WiFi credentials written, wlan0's DHCP config kept
 PUBLIC=0
 if [ -z "${WIFI_SSID:-}" ]; then
   PUBLIC=1
@@ -79,13 +79,13 @@ label armbian
   fdtoverlays /boot/dtb/rockchip/overlay/rk3568-uart2-m0.dtbo /boot/dtb/rockchip/overlay/rk3568-dwc3-peripheral.dtbo
   append root=UUID=$UUID rootwait rw console=tty1 consoleblank=0 cma=256M
 CONF
-# armbianEnv 也同步改一下，官方 setup-board.sh 看它；实际生效的是上面 extlinux
+# Update armbianEnv too, since the official setup-board.sh reads it; what actually takes effect is extlinux above
 sed -i 's/^overlay_prefix=.*/overlay_prefix=rk3568/; s/^console=.*/console=display/' "$R/boot/armbianEnv.txt"
 grep -q '^overlays=' "$R/boot/armbianEnv.txt" && sed -i 's/^overlays=.*/overlays=uart2-m0 dwc3-peripheral/' "$R/boot/armbianEnv.txt" || echo 'overlays=uart2-m0 dwc3-peripheral' >> "$R/boot/armbianEnv.txt"
 
 echo "[5/6] 首次登录后预设 + WiFi"
-# 这里只写 Armbian 首登向导的输入，不修改 /etc/shadow，也不预先创建 duck。
-# 已核实指定 26.2.1 底包：第一次 root / 1234；向导结束后才使用下面的密码。
+# This only writes the inputs for Armbian's first-login wizard; it doesn't modify /etc/shadow or pre-create duck.
+# Verified for the specified 26.2.1 base image: first login root / 1234; the passwords below are used only after the wizard finishes.
 cat > "$R/root/.not_logged_in_yet" <<PRESET
 PRESET_NET_CHANGE_DEFAULTS=0
 PRESET_CONNECT_WIRELESS=n
@@ -97,13 +97,13 @@ PRESET_LOCALE='en_US.UTF-8'
 PRESET_TIMEZONE='Asia/Shanghai'
 PRESET
 chmod 600 "$R/root/.not_logged_in_yet"
-# 官方底包携带预生成 SSH 主机密钥。每张卡须在首次启动独立生成，不能共享。
-# 本底包 machine-id 为空，已启用的 sshd-keygen.service 在首启执行 ssh-keygen -A。
+# The official base image ships pre-generated SSH host keys. Each card must generate its own on first boot; they must not be shared.
+# This base image has an empty machine-id, and the enabled sshd-keygen.service runs ssh-keygen -A on first boot.
 [ ! -s "$R/etc/machine-id" ] || { echo "底包已有 machine-id；请使用未启动过的官方底包"; exit 1; }
 [ -L "$R/etc/systemd/system/ssh.service.wants/sshd-keygen.service" ] || { echo "底包缺少 SSH 首启密钥生成服务"; exit 1; }
 rm -f "$R/etc/ssh/ssh_host_"*
-# 默认 10-dhcp-all-interfaces.yaml 只匹配有线网卡，不包含 wlan0。
-# 公开版也预置 DHCP，用户随后填写 WiFi 认证信息即可获取地址。
+# The default 10-dhcp-all-interfaces.yaml only matches wired NICs, not wlan0.
+# The public version also presets DHCP, so users only need to fill in WiFi credentials afterward to get an address.
 mkdir -p "$R/etc/systemd/network"
 cat > "$R/etc/systemd/network/25-wlan0.network" <<'NETWORK'
 [Match]
@@ -159,9 +159,9 @@ card.conf 填上 WiFi 名和密码，自己生成一张带网的卡。
 NOTE
 chmod 644 "$R/root/先连WiFi.txt"
 else
-# WiFi 用 wpa_supplicant（V1.12 + AIC8800 实测能连的那套；netplan 的写法没在这块板上验证过）。
-# 沿用此前调试的 WPA2-PSK/CCMP 配置；不适用于 WPA3-only 或强制 PMF 的网络。
-# DHCP 由上面写入的 /etc/systemd/network/25-wlan0.network 提供。
+# WiFi uses wpa_supplicant (the setup proven to connect on V1.12 + AIC8800; the netplan approach hasn't been verified on this board).
+# Reuses the WPA2-PSK/CCMP config from earlier debugging; not suitable for WPA3-only networks or networks that enforce PMF.
+# DHCP is provided by /etc/systemd/network/25-wlan0.network written above.
 mkdir -p "$R/etc/wpa_supplicant"
 cat > "$R/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" <<CONF
 ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev

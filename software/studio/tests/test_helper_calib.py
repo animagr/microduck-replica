@@ -1,8 +1,8 @@
-"""calib-read / calib-commit：写进主程序（deploy/microduck-helper）的 fork 真实形状测试。
+"""calib-read / calib-commit: tests of the fork's real shape for commit to main program (deploy/microduck-helper).
 
-电脑上跑，不碰真系统：沿用 test_helper_bus 的假 systemctl / 假 robotd / 临时根目录。
-重点：先拿锁再查旗、标定模式 -> 删 drop-in -> motion+control+读回一致、两类 waiting_for_bus、
-读回不一致、saved 写失败、回滚后 robotd 不回来、策略在跑拒绝、外来 --commissioning 拒绝、备份按序号留 10 组。
+Runs on a computer without touching the real system: reuses test_helper_bus's fake systemctl / fake robotd / temp root directory.
+Focus: take the lock before checking the flag, calibration mode -> delete drop-in -> motion+control+readback match, two kinds of waiting_for_bus,
+readback mismatch, saved write failure, robotd not coming back after rollback, refuse while the policy runs, refuse a foreign --commissioning, keep 10 backup sets by sequence number.
 
     py -3.13 -I -c "import sys;sys.path[:0]=['.','deps','dev'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_helper_calib'])"
 """
@@ -43,14 +43,14 @@ BUS_ERROR = "torque readback at register 40: Feetech Sync Read timeout; missing 
 
 
 class CalibRobot(Robot):
-    """标定写完之后按 World.restart_bus / calib_available 回话。"""
+    """After calibration is written, respond per World.restart_bus / calib_available."""
 
     def rpc(self, method, params=None):
         w = self.w
         if w.restarted and w.restart_bus is not None and method == "robot.busStatus":
             if self.w.robotd != "active":
                 raise H.RpcError(f"{method}：连不上")
-            # restart_bus 可以是函数：参数是重启以后过了几秒，用来模拟「刚启动那一下总线没打开」
+            # restart_bus may be a function: its argument is seconds since restart, used to simulate "the bus isn't open right after startup"
             bus = w.restart_bus(w.clock.t - w.restart_t) if callable(w.restart_bus) else w.restart_bus
             return copy.deepcopy(bus)
         if method == "robot.busCommand" and (params or {}).get("action") == "calibration-status":
@@ -279,7 +279,7 @@ class CommitTest(Base):
         self.assertEqual((groups[0] / "hd1910-calibration.toml").read_bytes(), self.old)
 
     def test_motion_waiting_for_bus_can_be_rewritten(self):
-        """运动模式卡在等总线（没有策略）：允许写标定把它救回来。"""
+        """Motion mode stuck waiting for the bus (no policy): allow writing calibration to rescue it."""
         self.commissioning(False)
         self.w.robot.mode, self.w.robot.phase = "motion", "waiting_for_bus"
         self.w.robot.error = STUCK_CALIB
@@ -319,7 +319,7 @@ class CommitTest(Base):
         self.assertTrue(last["detail"]["files_restored"])
 
     def test_bus_error_right_after_restart_then_control_commits(self):
-        """刚重启那一下总线没打开（主程序每秒重试），之后进了控制阶段：照样算写成功，不回滚。"""
+        """Right after restart the bus isn't open (the main program retries every second), then it enters the control phase: still counts as a successful write, no rollback."""
         self.limp_motion()
         self.w.restart_bus = lambda t: ({"mode": "motion", "phase": "waiting_for_bus", "error": BUS_ERROR}
                                         if t < 3.0 else {"mode": "motion", "phase": "control"})

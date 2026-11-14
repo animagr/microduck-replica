@@ -1,13 +1,13 @@
-"""root 小助手 deploy/microduck-helper 的七个动词：总线三个（bus-take / bus-give-back / bus-abort）、手柄两个（pad-pair / pad-forget）、
-热点两个（wifi-hotspot-down / wifi-hotspot-up）。
+"""The seven verbs of the root helper deploy/microduck-helper: three for the bus (bus-take / bus-give-back / bus-abort), two for the gamepad (pad-pair / pad-forget),
+two for the hotspot (wifi-hotspot-down / wifi-hotspot-up).
 
-在电脑上跑，不碰真系统：假 systemctl（robotd 的状态机：stop 卡住、KILL、Restart=always、Condition 旗、
-start-limit 计数、reset-failed）、假 robotd（busStatus / safeToRestart / policies / startupSubscribe 按剧本变，
-启动时读走交接标记）、假 robotctl（脚本结果按顺序给）、临时根目录、假时钟（sleep 只是把时间往前拨）。
+Runs on a computer without touching the real system: fake systemctl (robotd's state machine: stop hangs, KILL, Restart=always, Condition flag,
+start-limit counting, reset-failed), fake robotd (busStatus / safeToRestart / policies / startupSubscribe change per script,
+reads and consumes the hand-over marker at startup), fake robotctl (script results given in order), temp root directory, fake clock (sleep just advances time).
 
-    py -3.12 -m pytest tests/test_helper_bus.py -q      （或 py -3.12 -m unittest tests.test_helper_bus）
+    py -3.12 -m pytest tests/test_helper_bus.py -q      (or py -3.12 -m unittest tests.test_helper_bus)
 
-方案：scratchpad console/handover-plan.md v2 §2.2、§4.2、§5；规矩：studio-ops-plan.md §7。
+Plan: scratchpad console/handover-plan.md v2 §2.2, §4.2, §5; rules: studio-ops-plan.md §7.
 """
 import importlib.machinery
 import importlib.util
@@ -43,7 +43,7 @@ class Clock:
 
 
 class Out:
-    """假 stdout：break_after 次写以后像管道被关了一样抛 BrokenPipeError（SIGPIPE 已被忽略时拿到的就是它）。"""
+    """Fake stdout: after break_after writes it raises BrokenPipeError as if the pipe were closed (what you get when SIGPIPE is ignored)."""
 
     def __init__(self, break_after=None):
         self.buf, self.writes, self.break_after = io.BytesIO(), 0, break_after
@@ -62,7 +62,7 @@ class Out:
 
 
 class Robot:
-    """假 robotd：开机以后按 behaviour 走启动；运行中按字段回 busStatus。"""
+    """Fake robotd: after boot it goes through startup per behaviour; while running it replies busStatus per its fields."""
 
     def __init__(self, world):
         self.w = world
@@ -76,11 +76,11 @@ class Robot:
         self.joints = {i: 0.1 for i in IDS}
         self.handover = None
         self.step4 = "success"
-        # 开机剧本
+        # Boot scripts
         self.boot_at = None
-        # adopt / decline / ignore / never_read / stuck_imu / never_ready；
-        # 标定模式（mode="commissioning"）：commissioning = 修好的 fork（第一次读成功以后换成实时快照）、
-        # commissioning_stuck = 旧 fork（启动报告永远不清，一直 configuring_bus）
+        # adopt / decline / ignore / never_read / stuck_imu / never_ready;
+        # Calibration mode (mode="commissioning"): commissioning = the fixed fork (switches to live snapshots after the first successful read),
+        # commissioning_stuck = old fork (the startup report never clears, always configuring_bus)
         self.behaviour = "adopt"
         self.consume_delay, self.control_delay = 1.0, 5.0
         self.consumed = False
@@ -98,8 +98,8 @@ class Robot:
             return
         dt = t - self.boot_at
         if self.mode == "commissioning":
-            # 照 fork feetech_commissioning.rs：不认交接标记，开总线时先全部卸力，第一个周期第 4 步就成功；
-            # 修好的 fork 第一次读成功以后 busStatus 换成实时快照（舵机读不到是 read_error），旧 fork 永远停在启动报告
+            # Per fork feetech_commissioning.rs: doesn't honor the hand-over marker, relaxes everything first when opening the bus, step 4 succeeds in the first cycle;
+            # the fixed fork switches busStatus to live snapshots after the first successful read (unreadable servos are read_error); the old fork stays at the startup report forever
             if dt >= self.consume_delay and not self.consumed:
                 self.consumed, self.torque, self.step4 = True, False, "success"
             if dt >= self.control_delay and self.consumed and self.behaviour != "commissioning_stuck":
@@ -166,7 +166,7 @@ class Robot:
         raise H.RpcError(f"{method}：不认识")
 
     def commissioning_status(self):
-        """标定模式的 busStatus：启动报告（只有四个键，fork main.rs:1310-1315），或者实时快照（feetech_commissioning.rs 的 Status）。"""
+        """busStatus in calibration mode: a startup report (only four keys, fork main.rs:1310-1315), or a live snapshot (Status from feetech_commissioning.rs)."""
         if self.phase in H.STARTING_PHASES:
             return {"build": "fake", "mode": "commissioning", "phase": self.phase, "port": "/dev/ttyS2"}
         servos = [{"id": i, "joint": f"j{i}", "position_raw": 2048, "position_wire_raw": 2048, "position_signed_raw": 0,
@@ -182,7 +182,7 @@ class Robot:
 
 
 class World:
-    """假 systemd + fuser + 文件系统根 + 锁。"""
+    """Fake systemd + fuser + filesystem root + locks."""
 
     def __init__(self, root):
         self.root, self.clock = root, Clock()
@@ -205,10 +205,10 @@ class World:
         self.robot = Robot(self)
         self.on_tick = None
         self.relays = []
-        self.robotctl_replies = []      # [(rc, stdout, stderr)]；按调用顺序弹
+        self.robotctl_replies = []      # [(rc, stdout, stderr)]; popped in call order
         self.robotctl_timeouts = []
         self.robotctl_timeout = False
-        self.nmcli_active = None        # "wlan0" = 热点开着
+        self.nmcli_active = None        # "wlan0" = hotspot on
         self.nmcli_down_rc, self.nmcli_up_rc = 0, 0
         self.nmcli_down_hang = self.nmcli_up_hang = False
         self.nmcli_calls = []
@@ -216,7 +216,7 @@ class World:
         Path(root, "etc/systemd/system/robotd.service.d").mkdir(parents=True)
         Path(root, H.DROPIN.lstrip("/")).write_text("[Unit]\n", encoding="utf-8")
 
-    # 文件
+    # Files
     def path(self, p):
         return Path(self.root, p.lstrip("/"))
 
@@ -224,7 +224,7 @@ class World:
         return self.path(H.FLAG).exists()
 
     def open_session(self):
-        """会话已经开着：旗在、管理锁在、robotd 停着（Studio 拿着总线）。"""
+        """Session already open: flag present, management lock held, robotd stopped (Studio holds the bus)."""
         self.path(H.HELPER_DIR).mkdir(parents=True, exist_ok=True)
         self.path(H.FLAG).write_text("{}", encoding="utf-8")
         self.units[H.HOLD_UNIT] = "active"
@@ -242,7 +242,7 @@ class World:
         return {"calibration": cal, "imu_source": "bus", "uncalibrated_joints": [],
                 "imu_mount": {"quat": cal.get("imu_mount_quat"), "verified": cal.get("imu_mount_verified")}}
 
-    # 时间
+    # Time
     def tick(self):
         t = self.clock.t
         if self.robotd == "deactivating" and self.stop_at is not None and t >= self.stop_at:
@@ -352,7 +352,7 @@ class World:
             self.events.append(("kill_robotd", t, self.flag()))
             if self.robotd in ("active", "deactivating"):
                 self.robotd, self.result, self.stop_at = "inactive", "signal", None
-                self.restart_at = t + 2.0          # Restart=always，RestartSec=2s
+                self.restart_at = t + 2.0          # Restart=always, RestartSec=2s
                 return 0, "", ""
             return 1, "", "robotd.service is not loaded/running"
         raise AssertionError(argv)
@@ -570,7 +570,7 @@ class TakeTest(Base):
         self.assertGreaterEqual(kills[0][1] - t0, 10.0)
         self.assertTrue(kills[0][2], "KILL 之前旗必须已经立好")
         Clock_before = self.w.clock.t
-        FakeCtx(self.w, b"").sleep(3.0)           # Restart=always 2 秒后去拉 robotd：被旗挡住
+        FakeCtx(self.w, b"").sleep(3.0)           # Restart=always tries to start robotd 2 seconds later: blocked by the flag
         self.assertGreater(self.w.clock.t, Clock_before)
         self.assertEqual(self.w.robotd, "inactive")
         self.assertEqual(self.w.condition, "no")
@@ -638,7 +638,7 @@ class TakeTest(Base):
 
 
 class PadTest(Base):
-    """pad-pair / pad-forget：只跑官方 robotctl，不碰总线、hold 单元、robotd 或服务管理锁。"""
+    """pad-pair / pad-forget: only runs the official robotctl; doesn't touch the bus, the hold unit, robotd or the service management lock."""
 
     PRO = "AA:BB:CC:DD:EE:11"
 
@@ -758,7 +758,7 @@ class PadTest(Base):
 
 
 class WifiTest(Base):
-    """wifi-hotspot-down / wifi-hotspot-up：只碰 nmcli，不碰总线旗子、hold 单元、robotd 或 helper.lock。"""
+    """wifi-hotspot-down / wifi-hotspot-up: only touches nmcli; doesn't touch the bus flag, the hold unit, robotd or helper.lock."""
 
     def nmcli(self, verb="show"):
         return [c for c in self.w.nmcli_calls if c[:1] == [verb] or (verb == "show" and c[:1] == ["-t"])]
@@ -854,7 +854,7 @@ class WifiTest(Base):
         self.assertEqual(self.last()["result"], "busy")
         self.assertEqual(self.w.nmcli_calls, [])
         self.w.locks.discard(H.WIFI_LOCK)
-        self.w.locks.add(H.LOCK)                     # 总线锁不算：热点操作照常
+        self.w.locks.add(H.LOCK)                     # the bus lock doesn't matter: hotspot operations proceed as usual
         code, ctx = self.call("wifi-hotspot-down", {"by": "电脑"})
         self.assertEqual(code, H.EXIT_OK, ctx.stdout.lines())
 
@@ -1020,8 +1020,8 @@ class MarkerTest(Base):
         self.assertEqual(self.w.units[H.HOLD_UNIT], "inactive")
 
     def test_commissioning_snapshot_is_limp_not_retake(self):
-        """任务 16：标定模式不认交接标记（开总线先全部卸力）。快照来了就算起来了：照「没接手、全卸了」结束，
-        不等 15 秒再把总线拿回来、停主程序。"""
+        """Task 16: calibration mode doesn't honor the hand-over marker (relaxes everything when opening the bus). Once a snapshot arrives it counts as up: finish as "not taken over, all relaxed",
+        without waiting 15 seconds to take the bus back and stop the main program."""
         self.w.robot.mode, self.w.robot.behaviour = "commissioning", "commissioning"
         t0 = self.w.clock.t
         code, _ = self.give({"by": "x", "marker": marker()})
@@ -1095,7 +1095,7 @@ class AbortTest(Base):
         self.assertEqual(code, H.EXIT_OK)
 
     def test_abort_without_any_session_refuses_and_touches_nothing(self):
-        """F4：旗、管理锁、交接标记都不在：没有会话，不许立旗 / 写 abort / KILL 主程序。"""
+        """F4: flag, management lock and hand-over marker all absent: no session, so no setting the flag / writing abort / KILLing the main program."""
         self.w.path(H.FLAG).unlink()
         self.w.units[H.HOLD_UNIT] = "inactive"
         self.w.robotd = "active"
@@ -1171,7 +1171,7 @@ class SoftTest(Base):
         self.assertTrue(self.w.flag())
 
     def test_soft_commissioning_snapshot_counts_as_up(self):
-        """任务 16：标定模式的实时快照（ready）算主程序起来了：不能等满 30 秒判「起不来」（10-20 真机每次交还都这样）。"""
+        """Task 16: a live snapshot (ready) in calibration mode counts as the main program being up: must not wait the full 30 seconds to judge "起不来" (won't start) (on Oct 20 real hardware this happened on every hand-back)."""
         self.w.robot.mode, self.w.robot.behaviour = "commissioning", "commissioning"
         t0 = self.w.clock.t
         code, _ = self.give({"by": "x", "soft": True})
@@ -1185,7 +1185,7 @@ class SoftTest(Base):
         self.assertEqual(self.w.units[H.HOLD_UNIT], "inactive")
 
     def test_soft_commissioning_read_error_is_up_with_the_error(self):
-        """read_error：主程序起来了，只是读舵机出错——交还算成，把主程序的原话带上。"""
+        """read_error: the main program is up, only reading servos fails -- the hand-back counts as successful, with the main program's original message included."""
         self.w.robot.mode, self.w.robot.behaviour = "commissioning", "commissioning"
         self.w.robot.error = "Feetech Sync Read timeout; missing IDs [21]"
         code, _ = self.give({"by": "x", "soft": True})
@@ -1193,7 +1193,7 @@ class SoftTest(Base):
         self.assertIn("读舵机出错：Feetech Sync Read timeout; missing IDs [21]", self.last()["reason"])
 
     def test_soft_old_fork_stuck_status_still_fails_but_says_why(self):
-        """旧 fork：启动报告永远不清（一直 configuring_bus）。照旧判没起来，话照实说（跟总览「一直报启动中」一个口气）。"""
+        """Old fork: the startup report never clears (always configuring_bus). Still judged as not up, and the message says so plainly (same tone as the overview's "一直报启动中" (keeps reporting starting))."""
         self.w.robot.mode, self.w.robot.behaviour = "commissioning", "commissioning_stuck"
         t0 = self.w.clock.t
         code, _ = self.give({"by": "x", "soft": True})
@@ -1204,10 +1204,10 @@ class SoftTest(Base):
         self.assertIn("旧版主程序的毛病", last["reason"])
         self.assertIn("去日志页", last["reason"])
         self.assertTrue(last["detail"]["still_starting"])
-        self.assertEqual(last["detail"]["msg"], last["reason"])          # Studio 只读 done 那一行的 detail
+        self.assertEqual(last["detail"]["msg"], last["reason"])          # Studio only reads the detail of the done line
         self.assertGreaterEqual(self.w.clock.t - t0, 30.0)
         self.assertEqual(self.w.units[H.HOLD_UNIT], "inactive")
-        self.assertFalse(self.w.flag())                                  # 软交还没拿回总线：主程序照样在跑
+        self.assertFalse(self.w.flag())                                  # a soft hand-back doesn't take back the bus: the main program keeps running
 
 
 class PlumbingTest(Base):
@@ -1256,7 +1256,7 @@ class PlumbingTest(Base):
         self.assertEqual(self.w.robotd, "active", "参数错什么都不动")
 
     def test_bad_verb_does_not_overwrite_last_result_or_oplog(self):
-        """F11：Studio 探测小助手用的坏动词照样回 done，但不覆盖上次结果、不追加 oplog。"""
+        """F11: the bogus verb Studio uses to probe the helper still returns done, but doesn't overwrite the previous result or append to the oplog."""
         code, _ = self.call("bus-take", {"by": "x"})
         self.assertEqual(code, H.EXIT_OK)
         last_before = self.w.path(H.LAST).read_text(encoding="utf-8")

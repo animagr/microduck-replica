@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""飞特 STS/SMS 总线的最小实现：包格式、读写、同步读写、重启。
+"""Minimal implementation of the Feetech STS/SMS bus: packet format, read/write, sync read/write, reboot.
 
-对照 docs/飞特资料/SCS通信协议-v1.0-2026-06-09.md 和 磁编码STS内存表手册-v1.1-2026-08-27.md 写的，
-不依赖飞特 SDK。字节序按磁编码系列：小端。
+Written against docs/飞特资料/SCS通信协议-v1.0-2026-06-09.md and 磁编码STS内存表手册-v1.1-2026-08-27.md,
+without depending on the Feetech SDK. Byte order follows the magnetic-encoder series: little-endian.
 """
 import struct
 import threading
@@ -18,7 +18,7 @@ INSTR_NAMES = {0x01: "PING", 0x02: "READ", 0x03: "WRITE", 0x04: "REG_WRITE", 0x0
                0x82: "SYNC_READ", 0x83: "SYNC_WRITE"}
 BROADCAST = 0xFE
 
-# 内存表：地址 -> (名字, 字节数, 区)。给寄存器导出用。
+# Memory table: address -> (name, byte count, area). Used for register export.
 REGISTERS = {
     0: ("固件主版本", 1, "只读"), 1: ("固件次版本", 1, "只读"), 2: ("END 字节序(0=小端)", 1, "只读"),
     3: ("舵机主版本", 1, "只读"), 4: ("舵机次版本", 1, "只读"),
@@ -44,16 +44,16 @@ REGISTERS = {
     86: ("加速度倍数", 1, "出厂"),
 }
 STATUS_BITS = {0: "电压", 1: "磁编码", 2: "温度", 3: "电流", 5: "负载"}
-DUMP_END = max(REGISTERS) + 1   # 87：寄存器表最后一个地址 86
+DUMP_END = max(REGISTERS) + 1   # 87: the last address in the register table is 86
 
 
 def sign15(v):
-    """BIT15 是方向位的 16 位量（位置、速度、电流）。"""
+    """16-bit quantities where BIT15 is the direction bit (position, speed, current)."""
     return -(v & 0x7FFF) if v & 0x8000 else v
 
 
 def sign10(v):
-    """BIT10 是方向位（负载）。"""
+    """BIT10 is the direction bit (load)."""
     return -(v & 0x3FF) if v & 0x400 else v
 
 
@@ -62,7 +62,7 @@ class BusError(Exception):
 
 
 class BusTimeout(BusError):
-    """没应答或应答不完整。应答级别 0 时写指令本来就不回包，调用方自己决定算不算错。"""
+    """No reply or incomplete reply. With reply level 0, write instructions don't return a packet at all; the caller decides whether that counts as an error."""
 
 
 def hexs(b):
@@ -71,12 +71,12 @@ def hexs(b):
 
 class FeetechBus:
     def __init__(self, port, baud=1_000_000, timeout=0.02, ser=None):
-        # ser 给模拟器用（sim_bus.SimSerial），真机走串口
+        # ser is for the simulator (sim_bus.SimSerial); the real robot uses the serial port
         self.ser = ser if ser is not None else serial.Serial(port, baud, timeout=timeout, write_timeout=0.1)
-        # 串口互斥锁。别叫 self.lock：会盖住下面的 lock(sid)「加 EEPROM 锁」方法（2026-09-20 真机踩到）
+        # Serial port mutex. Don't call it self.lock: it would shadow the lock(sid) "set EEPROM lock" method below (hit on real hardware on 2026-09-20)
         self._io = threading.Lock()
-        # 原始收发记录：设一个 trace(文本) 回调就开始记。飞特不支持的操作照样回"成功"，
-        # 只有对着十六进制才分得清「真做了」和「装作做了」。10 Hz 的状态轮询不记，不然日志全是它
+        # Raw TX/RX record: set a trace(text) callback to start recording. Feetech replies "success" even for unsupported operations,
+        # and only the hex lets you tell "really did it" from "pretended to do it". The 10 Hz status polling isn't recorded, otherwise the log would be nothing but that
         self.trace = None
         self.trace_skip = {SYNC_READ, SYNC_WRITE}
         self._last = (None, None)
@@ -85,7 +85,7 @@ class FeetechBus:
     def close(self):
         self.ser.close()
 
-    # ---- 包 ----
+    # ---- Packets ----
     @staticmethod
     def _packet(sid, instr, params=b""):
         length = len(params) + 2
@@ -107,8 +107,8 @@ class FeetechBus:
             self.trace(f"→ #{sid} {INSTR_NAMES.get(instr, hex(instr))} {hexs(pkt)}{note}")
 
     def _read_status(self, expect_id=None):
-        """读一个应答帧，返回 (id, error, params)。"""
-        # 找 FF FF
+        """Read one reply frame, return (id, error, params)."""
+        # Find FF FF
         hdr = b""
         deadline = time.monotonic() + self.ser.timeout * 3
         while time.monotonic() < deadline:
@@ -145,7 +145,7 @@ class FeetechBus:
             self.trace(f"← #{sid} 状态0x{err:02X} {frame_hex}" + data_suffix)
         return sid, err, bytes(params)
 
-    # ---- 指令 ----
+    # ---- Instructions ----
     def ping(self, sid):
         with self._io:
             self._send(sid, PING)
@@ -172,7 +172,7 @@ class FeetechBus:
                 _, err, _ = self._read_status(sid)
                 return err
             except BusTimeout:
-                # 应答级别 0 时写指令不回包，不算错；调用方拿到 None 自己判断
+                # With reply level 0, write instructions don't return a packet, not an error; the caller gets None and decides for itself
                 return None
 
     def write_u8(self, sid, addr, v):
@@ -188,7 +188,7 @@ class FeetechBus:
         return struct.unpack("<H", self.read(sid, addr, 2)[1])[0]
 
     def sync_write(self, addr, length, id_values):
-        """id_values: [(id, bytes), ...]，每个 bytes 长度 = length。"""
+        """id_values: [(id, bytes), ...], each bytes of length = length."""
         params = bytes([addr, length])
         for sid, data in id_values:
             assert len(data) == length
@@ -197,7 +197,7 @@ class FeetechBus:
             self._send(BROADCAST, SYNC_WRITE, params)
 
     def sync_read(self, ids, addr, n):
-        """返回 {id: (err, params) 或 None}；按应答里的 ID 归档，缺包不连带丢后续包。"""
+        """Returns {id: (err, params) or None}; filed by the ID in the reply, so a missing packet doesn't take the following packets down with it."""
         out = dict.fromkeys(ids)
         with self._io:
             self._send(BROADCAST, SYNC_READ, bytes([addr, n]) + bytes(ids))
@@ -215,14 +215,14 @@ class FeetechBus:
         return out
 
     def reboot(self, sid):
-        """0x08，无应答，约 800 ms 后回来。"""
+        """0x08, no reply, comes back after about 800 ms."""
         with self._io:
             self._send(sid, REBOOT)
 
     def calibrate_to(self, sid, value=None):
-        """0x0B 位置校准：把舵机「现在这个位置」的读数改成 value（不给就是中位 2048），偏移舵机自己算、自己存。
-        协议手册 4.9：STS ≥3.10、HLS ≥3.43 支持带参数。HD-1910（固件 3.46）不认扭矩开关写 128，只能走这个。
-        返回应答里的状态字节；没应答返回 None。"""
+        """0x0B position calibration: change the servo's reading at "its current position" to value (center 2048 if not given); the servo computes and stores the offset itself.
+        Protocol manual 4.9: STS ≥3.10 and HLS ≥3.43 support the parameter. HD-1910 (firmware 3.46) doesn't accept writing 128 to the torque switch, so this is the only way.
+        Returns the status byte from the reply; None if no reply."""
         params = b"" if value is None else struct.pack("<H", value & 0xFFFF)
         with self._io:
             self._send(sid, CALIBRATE, params)
@@ -237,9 +237,9 @@ class FeetechBus:
     def lock(self, sid):
         return self.write_u8(sid, 55, 1)
 
-    # ---- 组合动作 ----
+    # ---- Composite actions ----
     def state(self, sid):
-        """56..70：位置 速度 负载 电压 温度 异步写 状态 移动 目标 电流 = 15 字节。"""
+        """56..70: position speed load voltage temperature async-write status moving target current = 15 bytes."""
         err, p = self.read(sid, 56, 15)
         return self._decode_state(err, p)
 
@@ -255,14 +255,14 @@ class FeetechBus:
         }
 
     def states(self, ids):
-        """一次 sync_read 拿全部，失败的 ID 值为 None。"""
+        """Get everything in one sync_read; IDs that fail have value None."""
         raw = self.sync_read(ids, 56, 15)
         return {sid: (self._decode_state(*v) if v else None) for sid, v in raw.items()}
 
     def dump(self, sid):
-        """0–86 全读，按 REGISTERS 解码。"""
+        """Read all of 0–86 and decode per REGISTERS."""
         raw = b""
-        for start in range(0, DUMP_END, 10):          # HD-1910 的表到 86 为止，读过头舵机只回剩下的字节
+        for start in range(0, DUMP_END, 10):          # HD-1910's table ends at 86; reading past the end, the servo only returns the remaining bytes
             n = min(10, DUMP_END - start)
             for attempt in range(4):
                 try:
@@ -281,7 +281,7 @@ class FeetechBus:
 
     def set_id(self, old, new):
         self.unlock(old)
-        # 改 ID 这一包的应答可能用新 ID 回，也可能用旧 ID 回，不等它；下一包发之前会清接收缓冲
+        # The reply to the change-ID packet may come back under the new ID or the old ID, so don't wait for it; the receive buffer is cleared before the next packet is sent
         self.write(old, 5, [new & 0xFF], wait=False)
         time.sleep(0.02)
         self.lock(new)

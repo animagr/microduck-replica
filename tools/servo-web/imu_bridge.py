@@ -42,7 +42,7 @@ TICK_ADDRESS = 0x20000A34
 SNAPSHOT_SIZE = 60
 SENSOR_STALE_MS = 100
 HOST_STALE_MS = 350
-SWD_FREQUENCY_HZ = 100_000  # 与 J-Link 路径相同：首板 4 MHz 下载出过传输失败
+SWD_FREQUENCY_HZ = 100_000  # same as the J-Link path: downloads to the first board at 4 MHz had transfer failures
 
 
 class BridgeError(RuntimeError):
@@ -379,7 +379,7 @@ class JLinkReader:
 
 
 def bracketed_snapshot(read, layout: FirmwareLayout, voltage_mv: int | None) -> dict[str, Any]:
-    """与 JLinkReader.snapshot 同一套读法：快照前后各读一次采样计数，相等才算没撕裂。"""
+    """Same read method as JLinkReader.snapshot: read the sample counter once before and after the snapshot; only if equal is it considered untorn."""
     address = layout.sample_address
     for attempt in range(2):
         before = struct.unpack("<I", read(address + 24, 4))[0]
@@ -396,19 +396,19 @@ def bracketed_snapshot(read, layout: FirmwareLayout, voltage_mv: int | None) -> 
 
 
 class SwdReader:
-    """pyOCD 观察：ST-Link / CMSIS-DAP(DAPLink)。J-Link 不走这里，用 --imu-jlink。
+    """pyOCD observation: ST-Link / CMSIS-DAP (DAPLink). J-Link doesn't go through here; use --imu-jlink.
 
-    不烧写、不写 RAM、不复位、不暂停：connect_mode=attach，resume_on_disconnect=False
-    （断开时不隐式 Go），no_config=True（不加载当前目录的 pyocd.yaml / 用户脚本）。
-    target_override=cortex_m：按通用 Cortex-M 连，只读内存，不需要芯片包和 Flash 算法。
-    跟 JLinkReader 一样先逐字节比对板上 Flash 与 HEX，不一致就不读 RAM。
+    No flashing, no RAM writes, no reset, no halt: connect_mode=attach, resume_on_disconnect=False
+    (no implicit Go on disconnect), no_config=True (doesn't load pyocd.yaml / user scripts from the current directory).
+    target_override=cortex_m: connect as a generic Cortex-M, read memory only, no pack or Flash algorithm needed.
+    Like JLinkReader, first compare the board's Flash with the HEX byte by byte; if they differ, don't read RAM.
 
-    这不等于对目标零影响：attach 仍会写调试寄存器（DHCSR.C_DEBUGEN、DEMCR.TRCENA、
-    FPB/DWT 使能），断开后 C_DEBUGEN 保持置位 —— 这期间固件里的 BKPT 会停住 CPU 而不是进 HardFault。
-    实测（ST-LINK/V2，100 kHz）连续连接不会让板子重启。
+    This doesn't mean zero impact on the target: attach still writes debug registers (DHCSR.C_DEBUGEN, DEMCR.TRCENA,
+    FPB/DWT enable), and C_DEBUGEN stays set after disconnecting; during that time a BKPT in the firmware halts the CPU instead of going into HardFault.
+    Measured (ST-LINK/V2, 100 kHz): repeated connections don't make the board reboot.
 
-    J-Link 经 pyOCD 会默认从 19 脚供 5 V（jlink.power）、可能静默升级探针固件、
-    关闭时不保证不 Go，绕开了 JLinkReader 的保护，所以这里直接拒绝。
+    J-Link via pyOCD by default supplies 5 V from pin 19 (jlink.power), may silently upgrade the probe firmware,
+    and doesn't guarantee no Go on close, bypassing JLinkReader's safeguards, so it is refused outright here.
     """
 
     def __init__(self, layout: FirmwareLayout, probe_id: str | None = None, resume: bool = False) -> None:
@@ -459,7 +459,7 @@ class SwdReader:
         self.probe_name, self.probe_uid = chosen.description, chosen.unique_id
         LOGGER.info("SWD 探针：%s %s（%s）", self.probe_name, self.probe_uid, type(chosen).__name__)
 
-        # 第 1 步：只打开调试器、不碰芯片，先看目标电压（JLinkReader 也是连芯片前查电压）。
+        # Step 1: only open the debugger without touching the chip, and check the target voltage first (JLinkReader also checks voltage before connecting to the chip).
         probe_only = Session(chosen, options=self.options())
         try:
             probe_only.open(init_board=False)
@@ -472,7 +472,7 @@ class SwdReader:
         finally:
             self.close_session(probe_only)
 
-        # 第 2 步：attach 到芯片。
+        # Step 2: attach to the chip.
         self.session = Session(chosen, options=self.options())
         try:
             self.session.open()
@@ -480,7 +480,7 @@ class SwdReader:
             raise BridgeError(f"SWD 连接芯片失败（{type(exc).__name__}: {exc}）："
                               "检查 SWDIO、SWCLK、GND、VTref 接线和板子供电。") from exc
         self.target = self.session.target
-        # 第 3 步：只读板上 Flash 做比对，从不烧写。
+        # Step 3: only read the board's Flash for comparison, never flash it.
         actual = self.read(0x08000000, len(self.layout.image))
         if actual != self.layout.image:
             raise BridgeError("板上固件与已验证文件不一致，拒绝继续读取 RAM 或恢复执行。")
@@ -495,8 +495,8 @@ class SwdReader:
                 raise BridgeError("恢复运行失败；检查 Keil 残留断点。")
 
     def check_voltage(self, probe: Any) -> int | None:
-        # pyOCD 里只有 ST-Link 能测目标电压（私有接口 _link）。没有这个接口（DAPLink）就不显示、不拦；
-        # 有接口但读失败或读不到，按连接异常处理，不悄悄放过。
+        # In pyOCD only ST-Link can measure target voltage (private interface _link). Without that interface (DAPLink), don't show it or block;
+        # with the interface but a failed or empty read, treat it as a connection error rather than quietly letting it pass.
         link = getattr(probe, "_link", None)
         getter = getattr(link, "get_target_voltage", None)
         if getter is None:
@@ -530,7 +530,7 @@ class SwdReader:
         if address < 0 or size <= 0 or address + size > 0x100000000:
             raise BridgeError("读取地址或长度超出有效范围。")
         try:
-            # 对齐时按 32 位字读，免得正在更新的计数被拆成 4 次字节读拼出来。
+            # When aligned, read as 32-bit words, so a counter being updated isn't assembled from 4 separate byte reads.
             if address % 4 == 0 and size % 4 == 0:
                 words = self.target.read_memory_block32(address, size // 4)
                 data = struct.pack(f"<{len(words)}I", *words)
@@ -554,7 +554,7 @@ class SwdReader:
             session.close()
         except Exception as exc:
             LOGGER.warning("关闭调试器连接出错：%s: %s", type(exc).__name__, exc)
-        # 打开到一半失败时 session.close() 可能认为探针没开，USB 却已被占住，这里再兜底关一次。
+        # If opening fails halfway, session.close() may think the probe isn't open while USB is already claimed, so close once more here as a fallback.
         probe = getattr(session, "probe", None)
         if probe is not None and getattr(probe, "is_open", False):
             try:
@@ -591,7 +591,7 @@ class BridgeService:
 
     def publish(self, frame: dict[str, Any]) -> None:
         frame["timestamp_ms"] = int(time.time() * 1000)
-        frame.setdefault("backend", self.backend)  # 连接中的帧也带上，网页标签不会先显示成 J-Link
+        frame.setdefault("backend", self.backend)  # frames during connection carry it too, so the web label doesn't first show J-Link
         with self.lock:
             self.frame = frame
             self.last_publish = time.monotonic()

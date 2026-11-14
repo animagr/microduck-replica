@@ -1,4 +1,4 @@
-"""auth / log 的测试。只用标准库：python -m unittest discover -s tests（在 software/studio 下跑）。"""
+"""Tests for auth / log. Standard library only: python -m unittest discover -s tests (run under software/studio)."""
 import json
 import os
 import sys
@@ -183,10 +183,10 @@ class LogTest(unittest.TestCase):
         self.log.info("今天")
         left = sorted(p.name for p in d.glob("studio-*.log"))
         self.assertEqual(len(left), 14)
-        self.assertIn("studio-" + time.strftime("%Y-%m-%d") + ".log", left)   # 不看排第几：钟可能停在 1970
+        self.assertIn("studio-" + time.strftime("%Y-%m-%d") + ".log", left)   # don't check its position: the clock may be stuck at 1970
 
     def test_prune_by_size_when_today_sorts_first(self):
-        # 钟停在 1970 时，今天的文件名排在最前；以前总量检查碰到它就停了，一个都不删
+        # When the clock is stuck at 1970, today's file name sorts first; the total-size check used to stop when it hit it and delete nothing
         from studio import log as log_mod
         d = Path(self.tmp.name)
         for i in range(3):
@@ -220,7 +220,7 @@ class LogTest(unittest.TestCase):
         self.assertIn("[已隐藏]", text)
 
     def test_secret_keys_are_redacted_even_without_hide(self):
-        """按键名打码：psk、password 这些键的值不进日志（家里的 WiFi 密码走这条）。"""
+        """Masking by key name: values of keys like psk and password don't go into the log (the home WiFi password goes through this)."""
         with log_cmd(self.log, "连 WiFi", "configd net.connect",
                      args={"ssid": "Home", "psk": "Unique-PSK-2026-xyz"}) as t:
             t.ok({"outcome": "connected", "ssid": "Home"})

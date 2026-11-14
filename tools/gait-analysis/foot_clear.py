@@ -1,8 +1,8 @@
-"""迈步脚离地间隙（只读分析）：用 IMU 重力把机身转正，算「迈步脚最低点 − 撑地脚最低点」。
-每帧：两只脚碰撞盒 8 个角做正运动学（躯干坐标）→ 按 safety.gravity 转到水平坐标 → 较低的脚算撑地，另一只算迈步。
-同时用 targets（模型给舵机的目标）替换「迈步腿 / 撑地腿」，拆出间隙损失来自哪里：
-  实际/实际：真实间隙；目标/实际：迈步腿完全跟上目标时的间隙；实际/目标：撑地腿一点不塌时的间隙；目标/目标：模型本意。
-用法：python foot_clear.py MJCF.xml 名称=录像.jsonl[@起始wall[@结束wall]] ...
+"""Swing-foot ground clearance (read-only analysis): level the body using IMU gravity, compute "lowest point of swing foot − lowest point of stance foot".
+Per frame: forward kinematics of the 8 corners of both feet's collision boxes (torso frame) → rotate to a level frame using safety.gravity → the lower foot is stance, the other is swing.
+Also substitute targets (the model's servo targets) for the "swing leg / stance leg" to break down where the clearance loss comes from:
+  actual/actual: real clearance; target/actual: clearance if the swing leg fully followed its targets; actual/target: clearance if the stance leg didn't sag at all; target/target: what the model intended.
+Usage: python foot_clear.py MJCF.xml name=recording.jsonl[@start_wall[@end_wall]] ...
 """
 import json
 import math
@@ -47,7 +47,7 @@ def load(spec):
 
 
 def level(g):
-    """把躯干坐标转到水平坐标的旋转（只转横滚/俯仰，把重力方向转成 -z）。"""
+    """Rotation from the torso frame to the level frame (only roll/pitch, turning the gravity direction into -z)."""
     v = g / np.linalg.norm(g); t = np.array([0.0, 0.0, -1.0])
     ax = np.cross(v, t); s = np.linalg.norm(ax); c = float(np.dot(v, t))
     if s < 1e-9:
@@ -71,11 +71,11 @@ def main():
         for s in SIDES:
             g = gid[s]; c = d.geom_xpos[g]; R = d.geom_xmat[g].reshape(3, 3); sz = m.geom_size[g]
             pts = np.array([c + R @ (np.array([a, b, e]) * sz) for a in (-1, 1) for b in (-1, 1) for e in (-1, 1)])
-            out[s] = (pts - pb) @ Rb                                     # 躯干坐标：x 前 y 左 z 上
+            out[s] = (pts - pb) @ Rb                                     # torso frame: x forward, y left, z up
         return out
 
     def label(p, side):
-        """最低角在脚掌哪个位置：前/后 + 内/外。"""
+        """Where on the sole the lowest corner is: front/back + inner/outer."""
         fb = '脚尖' if p[0] > 0 else '脚跟'
         inner = (p[1] < 0) if side == 'left' else (p[1] > 0)
         return fb + ('内侧' if inner else '外侧')
@@ -102,7 +102,7 @@ def main():
         roll = np.degrees([math.asin(-g[1] / np.linalg.norm(g)) for _, _, g in walk])
         for s in SIDES:
             o = 'right' if s == 'left' else 'left'
-            sw = stance == o                                              # 这只脚在迈步的帧
+            sw = stance == o                                              # frames where this foot is swinging
             idx = np.flatnonzero(sw)
             if len(idx) < 10:
                 continue
@@ -119,7 +119,7 @@ def main():
                   f'最高时最低点多在 {top}（{low.count(top)}/{len(low)}）')
             print(f'        拆分：模型本意 {np.median(tt):4.1f}  ｜ 迈步腿完全跟上 {np.median(ta):4.1f}  ｜ 撑地腿不塌 {np.median(at):4.1f}  ｜ 实际 {np.median(aa):4.1f} mm'
                   f'   迈步时机身横滚均值 {roll[sw].mean():+.1f}°')
-        # 跟随：每条腿每个关节 实际 vs 目标 的摆幅比和平均偏差（撑地 / 迈步分开）
+        # Tracking: per leg, per joint, actual vs target swing ratio and mean deviation (stance / swing separately)
         Q = np.array([q for q, _, _ in walk]); Tg = np.array([t for _, t, _ in walk])
         for s in SIDES:
             o = 'right' if s == 'left' else 'left'

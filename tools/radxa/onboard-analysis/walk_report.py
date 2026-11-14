@@ -1,4 +1,4 @@
-"""最近 N 分钟：每次推摇杆的一段（指令、持续、是否交替迈步、前进距离 odom、倾斜、有没有倒），以及 IMU 断线。"""
+"""Last N minutes: each joystick push segment (command, duration, whether it stepped alternately, forward distance from odom, tilt, whether it fell), plus IMU dropouts."""
 import json, glob, math, sys, subprocess
 mins = float(sys.argv[1]) if len(sys.argv) > 1 else 8
 R = []
@@ -12,7 +12,7 @@ def tilt(g):
 pol = {}
 for r in R: pol[r['policy']] = pol.get(r['policy'], 0) + 1
 print('最近 %.0f 分钟：%d 帧，状态分布 %s' % (mins, len(R), {k: round(v / 50, 1) for k, v in pol.items()}), '（秒）')
-# 分段：连续有摇杆指令的区间
+# Segmenting: intervals with continuous joystick commands
 segs = []; cur = None
 for i, r in enumerate(R):
     on = r['policy'] == 'walk' and any(abs(x) > 0.02 for x in r['move']['requested'])
@@ -28,7 +28,7 @@ for a, b in segs:
     vx = max(req, key=lambda v: abs(v[0]))[0]; vy = max(req, key=lambda v: abs(v[1]))[1]; wz = max(req, key=lambda v: abs(v[2]))[2]
     o0 = S[0].get('odom', {}).get('position', [0, 0, 0]); o1 = S[-1].get('odom', {}).get('position', [0, 0, 0])
     dist = math.hypot(o1[0] - o0[0], o1[1] - o0[1])
-    # 交替迈步：左右膝角(右侧取反)之差的过零次数
+    # Alternate stepping: number of zero crossings of the left-right knee angle difference (right side negated)
     d = [math.degrees(r['joints'][3] + r['joints'][13]) for r in S]; m = sum(d) / len(d)
     zc = sum(1 for x, y in zip(d, d[1:]) if (x - m) * (y - m) < 0)
     lift = (max(d) - min(d))

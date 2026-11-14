@@ -1,7 +1,7 @@
-// 手机中控的外壳：会话 → 连接 → 顶栏（鸭名 + 卸力）→ 页面 → 底栏。
+// Shell of the phone web console: session → connection → top bar (duck name + torque release) → page → bottom bar.
 //
-// 跟桌面版的关系：同一个 Studio 进程、同一个 /ws、同一套 pad.op 命令，只是换了一副为竖屏手机做的壳。
-// 这一层只负责三件事：把状态分发给各页、管住「卸力」这条永远能按的路、以及底栏路由。
+// Relation to the desktop version: same Studio process, same /ws, same set of pad.op commands, just a different shell made for portrait phones.
+// This layer is responsible for only three things: dispatching state to the pages, guarding the always-pressable "torque release" (「卸力」) path, and bottom-bar routing.
 import { html, render, useState, useEffect, useRef, useCallback } from '../vendor/preact-htm.module.js';
 import { link, session, login, api, csrfToken } from './link.js';
 import { Overview } from './overview.js';
@@ -9,11 +9,11 @@ import { VoicePage } from './voice.js';
 import { GamepadPage } from './gamepad.js';
 import { CameraPage } from './camera.js';
 import { MorePage } from './more.js';
-// 模型页不另写一套：直接内嵌桌面版的 ModelsPage，只把外壳换成手机底栏。
+// The models page isn't written again: it embeds the desktop ModelsPage directly and only swaps the shell for the phone bottom bar.
 import { ModelsPage } from '../models.js';
 
-const STALE_MS = 1500;      // 超过 1.5 秒没有状态帧：算「读不到」了
-const GREY_MS = 1000;       // 超过 1 秒：数值变灰
+const STALE_MS = 1500;      // no state frame for more than 1.5 s: counts as "unreadable"
+const GREY_MS = 1000;       // more than 1 s: values turn gray
 
 const ICONS = {
   '/': html`<svg viewBox="0 0 24 24"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>`,
@@ -23,8 +23,8 @@ const ICONS = {
   '/more': html`<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>`,
 };
 
-// camera 现在挂在「更多」下面（#/more/camera）；「模型」也是手机壳内部的整页，内嵌桌面版组件。
-// 五个 tab 全部是内部路由，底栏始终留在原位。
+// camera now lives under "More" (#/more/camera); "Models" is also a full page inside the phone shell, embedding the desktop component.
+// All five tabs are internal routes; the bottom bar always stays in place.
 const TABS = [
   { href: '/', label: '总览' },
   { href: '/voice', label: '语音' },
@@ -39,9 +39,9 @@ const routeOf = () => {
   return KNOWN.has(r) ? r : '/';
 };
 
-// ---------------- 昵称 ----------------
-// 默认拿鸭子报上来的 label（镜像里是主机名，比如 duck-a1b2，电脑台架上是 DESKTOP-XXXX）。
-// 主机名当昵称不好看，所以长得像主机名的一律显示「鸭鸭」；用户自己起的名字存在这台手机上。
+// ---------------- Nickname ----------------
+// By default use the label the duck reports (the hostname on the system image, e.g. duck-a1b2; DESKTOP-XXXX on a computer bench).
+// A hostname doesn't look nice as a nickname, so anything that looks like a hostname is shown as "鸭鸭" (Ducky); names the user picks are stored on this phone.
 const NICK_KEY = 'duck.nickname';
 const hostish = (s) => /^duck-[0-9a-z]{4,}$/i.test(s) || /^[A-Z0-9][A-Z0-9-]{2,}$/.test(s);
 
@@ -49,7 +49,7 @@ function nickStored() {
   try { return localStorage.getItem(NICK_KEY) || ''; } catch { return ''; }
 }
 
-// ---------------- 顶栏 ----------------
+// ---------------- Top bar ----------------
 
 function Head({ name, dot, onEstop, busy }) {
   return html`<header class="m-head">
@@ -65,7 +65,7 @@ function Head({ name, dot, onEstop, busy }) {
   </header>`;
 }
 
-// ---------------- 登录（只有设了网页密码的鸭子才出现） ----------------
+// ---------------- Login (only appears for ducks with a web password set) ----------------
 
 function Login({ onDone }) {
   const [pw, setPw] = useState('');
@@ -89,7 +89,7 @@ function Login({ onDone }) {
   </form>`;
 }
 
-// ---------------- 外壳 ----------------
+// ---------------- Shell ----------------
 
 function App() {
   const [phase, setPhase] = useState('boot');       // boot / login / ready
@@ -110,7 +110,7 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(null), bad ? 3600 : 2200);
   }, []);
 
-  // 会话：200 直接进；401 先登录
+  // session: 200 goes straight in; 401 logs in first
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -118,12 +118,12 @@ function App() {
         const r = await session();
         if (dead) return;
         setPhase(r.status === 200 ? 'ready' : r.status === 401 ? 'login' : 'ready');
-      } catch { if (!dead) setPhase('ready'); }        // Studio 抽风：先按开放模式进，页面自己会显示连不上
+      } catch { if (!dead) setPhase('ready'); }        // Studio misbehaving: go in as open mode for now; the page itself will show it can't connect
     })();
     return () => { dead = true; };
   }, []);
 
-  // 连接 + 消息分发
+  // connection + message dispatch
   useEffect(() => {
     if (phase !== 'ready') return;
     const off = link.on((m) => {
@@ -137,15 +137,15 @@ function App() {
     return () => { off(); clearInterval(tick); };
   }, [phase]);
 
-  // 路由
+  // routing
   useEffect(() => {
     const onHash = () => setRoute(routeOf());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // 告诉后端「我在哪一页」：手柄 / 语音页要看手柄快照（语音开关走 pad.op 的 audio 分支，
-  // 后端要求这条连接没被标记成「离开了」），所以这两页要把 pad_visible 打开
+  // tell the backend "which page I'm on": the gamepad / voice pages need the gamepad snapshot (the voice switch goes through pad.op's audio branch,
+  // and the backend requires that this connection not be marked as "left"), so these two pages turn pad_visible on
   useEffect(() => {
     link.setRoute(route);
     link.setPadVisible(route === '/pad' || route === '/voice');
@@ -159,7 +159,7 @@ function App() {
   const rename = useCallback((v) => {
     const clean = String(v || '').trim().slice(0, 12);
     setNick(clean);
-    try { clean ? localStorage.setItem(NICK_KEY, clean) : localStorage.removeItem(NICK_KEY); } catch { /* 隐私模式 */ }
+    try { clean ? localStorage.setItem(NICK_KEY, clean) : localStorage.removeItem(NICK_KEY); } catch { /* private mode */ }
   }, []);
   const posture = st?.posture;
 
@@ -221,5 +221,5 @@ function App() {
 
 render(html`<${App} />`, document.getElementById('app'));
 
-// 手机上按返回键是改 hash，不刷新页面，这里不用再管
+// pressing back on a phone changes the hash without reloading the page; nothing more to handle here
 window.addEventListener('unhandledrejection', (e) => { console.warn('未处理的异步错误', e.reason); });

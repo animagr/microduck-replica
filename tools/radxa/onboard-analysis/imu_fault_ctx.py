@@ -1,4 +1,4 @@
-"""IMU 断线时间点 vs 当时机器人在干什么：状态、关节最大转速、机身角速度、舵机电压。"""
+"""IMU dropout times vs what the robot was doing then: state, max joint speed, body angular velocity, servo voltage."""
 import json, glob, subprocess, datetime, math, bisect
 out = subprocess.run(['journalctl','-u','robotd','-b','--no-pager','-o','short-unix'], capture_output=True, text=True).stdout
 faults=[]; idents=[]; events=[]
@@ -9,7 +9,7 @@ for l in out.splitlines():
     elif 'BNO08x identified' in l: idents.append((ts, l.split('reset_cause=')[-1].strip()))
     elif any(k in l for k in ('robot.init: torque on','robot.relax: torque off','fall verdict changed','policy outcome')): events.append((ts, l.split('robotd: ')[-1][:60] if 'robotd: ' in l else l[-60:]))
 print('本次开机：IMU 断线 %d 次，重新认到 %d 次；reset_cause 取值 %s' % (len(faults), len(idents), sorted(set(c for _,c in idents))))
-# 录像（50 Hz）按墙钟时间索引
+# Recording (50 Hz) indexed by wall-clock time
 R=[]
 for f in sorted(glob.glob('/home/duck/r17/rec/run-*.jsonl'))[-4:]:
     for l in open(f, errors='replace'):

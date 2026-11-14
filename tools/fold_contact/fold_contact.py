@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-"""腿关节「转到零件碰上」的角度 + 官方姿势会不会让零件顶在一起。
+"""Angles at which leg joints "rotate until parts collide" + whether the official poses press parts against each other.
 
-为零位标定找机械参考点用：鸭子缩着的时候哪个关节是被什么顶住的、在多少度。
-MuJoCo 只负责正运动学（每个零件在哪），碰没碰上用 fcl 按原始三角网格精确求交 ——
-MuJoCo 自己的碰撞把网格当凸包，比实物"胖"，算出来的接触角会偏小。
+Used to find mechanical reference points for zero-position calibration: when the duck is folded, which joint is stopped by what, and at how many degrees.
+MuJoCo only does forward kinematics (where each part is); whether parts touch is computed by fcl as exact intersection on the raw triangle meshes;
+MuJoCo's own collision treats meshes as convex hulls, "fatter" than the real parts, so the computed contact angles come out too small.
 
   python fold_contact.py --mjcf <microduck_rl>/src/mjlab_microduck/robot/microduck/robot_walk.xml
   python fold_contact.py --mjcf ... --json out.json
 
-依赖：mujoco、python-fcl、numpy（pip install mujoco python-fcl numpy）。
-零位（腿伸直）时就互相穿插的几何体对当作装配关系（舵机装在支架里、轴承装在座里），扫描时排除。
-官方模型是 XL330 原版的几何；飞特版改过 8 个配合件，数值要拿飞特版的模型再算一遍。
+Dependencies: mujoco, python-fcl, numpy (pip install mujoco python-fcl numpy).
+Geometry pairs that already interpenetrate at the zero position (legs straight) are treated as assembly relationships (servo mounted in a bracket, bearing in a seat) and excluded from the scan.
+The official model is the original XL330 geometry; the Feetech version changed 8 mating parts, so the numbers need to be recomputed with the Feetech model.
 """
 import argparse
 import json
@@ -22,7 +22,7 @@ import fcl
 import mujoco
 import numpy as np
 
-# microduck_rl scene.xml 的 keyframe（d424a0c），14 个关节按 MJCF 顺序
+# keyframe from microduck_rl scene.xml (d424a0c), 14 joints in MJCF order
 JOINTS = ["left_hip_yaw", "left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
           "neck_pitch", "head_pitch", "head_yaw", "head_roll",
           "right_hip_yaw", "right_hip_roll", "right_hip_pitch", "right_knee", "right_ankle"]
@@ -40,7 +40,7 @@ class Model:
         self.m = mujoco.MjModel.from_xml_path(path)
         self.d = mujoco.MjData(self.m)
         m = self.m
-        # 只用可视网格（group 2）：跟实物外形一致；group 3 是训练用的简化碰撞体
+        # Use only the visual meshes (group 2): they match the real parts' shapes; group 3 is the simplified collision geometry used for training
         self.geoms = [g for g in range(m.ngeom) if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH
                       and m.geom_group[g] == 2 and m.geom_dataid[g] >= 0]
         self.bvh = {}
@@ -80,7 +80,7 @@ class Model:
                 for g in self.geoms}
 
     def pairs(self, q, set_a, set_b, skip=()):
-        """q 姿势下 set_a × set_b 里跨零件（不同 body）穿插的几何体对。"""
+        """Geometry pairs from set_a × set_b that interpenetrate across parts (different bodies) at pose q."""
         objs = self.objects(q)
         out = set()
         for a in set_a:
@@ -106,7 +106,7 @@ class Model:
         return {g for g in self.geoms if m.geom_bodyid[g] in bodies}
 
     def sweep(self, joint, sign, base, max_deg=180.0, step=0.25, tol=0.05):
-        """从 base 起把 joint 往 sign 方向转，返回 (第一次碰上的角度°, 碰上的零件)；转满 max_deg 没碰上返回 None。"""
+        """Rotate joint from base in the sign direction; return (angle in ° at first contact, the part contacted); None if no contact after max_deg."""
         distal = self.subtree_geoms(joint)
         proximal = set(self.geoms) - distal
         adr = self.qadr(joint)
@@ -149,7 +149,7 @@ def main():
         out["sweeps"][key] = {"deg": None if ang is None else round(ang, 2), "contact": who[:3]}
         print(f"  {key}：" + ("转满 180° 没碰上" if ang is None else f"{ang:+.2f}°  碰上 {who[:2]}"))
 
-    for side, s in (("left", +1), ("right", -1)):   # s = 官方 FOLD 的折叠方向
+    for side, s in (("left", +1), ("right", -1)):   # s = fold direction of the official FOLD
         print(f"== {side} 腿（折叠方向 {s:+d}）")
         knee = mdl.sweep(f"{side}_knee", s, mdl.q0)
         record(f"{side}.膝折叠（髋、踝 0°）", knee)
@@ -165,7 +165,7 @@ def main():
                 record(f"{side}.踝 +（膝、髋都折到底）", mdl.sweep(f"{side}_ankle", +1, qh))
                 record(f"{side}.踝 −（膝、髋都折到底）", mdl.sweep(f"{side}_ankle", -1, qh))
 
-    # 颈：官方 FOLD 的颈 / 头 pitch 都是 1 rad（57°）。看它是不是接触点：从腿折叠、头颈 0° 起把颈往 FOLD 的方向（+）转
+    # Neck: the official FOLD has neck / head pitch both at 1 rad (57°). Check whether that's a contact point: starting from legs folded and head/neck at 0°, rotate the neck toward FOLD's direction (+)
     print("== 颈（腿按官方 FOLD 折好）")
     fold = mdl.with_joints(dict(zip(JOINTS, KEYFRAMES["FOLD"])))
     for head, rad in (("0°", 0.0), ("57°，官方 FOLD 的头", 1.0)):

@@ -1,15 +1,15 @@
-"""出厂场景「写进主程序」（任务 13）的端到端：假 robotd（--mode commissioning --calib factory）+ 真 Studio + 无头 Edge。
+"""End-to-end test for the factory scenario "写进主程序" (commit to main program) (task 13): fake robotd (--mode commissioning --calib factory) + real Studio + headless Edge.
 
-流程：tests/commit_e2e.mjs 先在出厂状态看第 3 步的灰按钮和预览；然后 IMU 页粗校（假主程序模拟托起、低头、
-verify-imu 成功）、舵机页一键中位（--servo-sim）、第 3 步写入。假小助手让假主程序切到 motion + control，
-清单第 3 步变成完成、顶栏显示运动模式。最后再跑一次「标定被拒」：页面要看到原因，断线期间进度卡也不能丢。
-IMU 页的「站姿使能 / 失能」（任务 17）：标定模式下灰着、能去第 3 步；运动模式下发的命令跟遥控卡「站起来」、顶上「卸力」一样。
+Flow: tests/commit_e2e.mjs first checks step 3's grayed-out button and preview in factory state; then coarse IMU calibration on the IMU page (the fake main program simulates lifting, tilting the head down,
+and verify-imu succeeding), one-click centering on the servo page (--servo-sim), and step 3 writing. The fake helper switches the fake main program to motion + control,
+checklist step 3 becomes done, and the top bar shows motion mode. Finally it runs "calibration rejected" once more: the page must show the reason, and the progress card must not be lost during the disconnect.
+The IMU page's "站姿使能 / 失能" (enable / disable standing pose) (task 17): grayed out in calibration mode with a way to step 3; in motion mode they send the same commands as the remote card's "站起来" (stand up) and the top "卸力" (relax).
 
-电脑上没有 root 小助手：用临时启动脚本把 studio.helper.calib_commit 换成假实现（只在这一段里）。
-要电脑上有 Node（≥ 22）和 Edge；没有（比如鸭子上）就跳过。设 STUDIO_E2E=0 也跳过。
-端口默认 Studio 18091、假 robotd 17031 / configd 17032、Edge 调试口 9344，被占了就换空闲的。
-COMMIT_E2E_DIR=目录：日志、Edge 的 profile 放这里（默认临时目录，跑完删）；COMMIT_SHOTS=目录：顺手截图。
-单独跑：
+There's no root helper on a computer: a temporary startup script replaces studio.helper.calib_commit with a fake implementation (only in this test).
+Requires Node (≥ 22) and Edge on the computer; skipped if missing (e.g. on the duck). Also skipped with STUDIO_E2E=0.
+Default ports: Studio 18091, fake robotd 17031 / configd 17032, Edge debug port 9344; if taken, free ones are used instead.
+COMMIT_E2E_DIR=dir: logs and Edge profile go here (default is a temp directory, deleted after the run); COMMIT_SHOTS=dir: take screenshots along the way.
+To run on its own:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.','dev'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_commit_e2e'])"
 """
 import json
@@ -194,8 +194,8 @@ class CommitE2E(unittest.TestCase):
                 cwd=ROOT, env=env, stdout=out("studio.out"), stderr=subprocess.STDOUT)
             _wait_http(f"http://127.0.0.1:{p_web}/healthz", "Studio")
             edge_dir = cls.dir / "edge"
-            shutil.rmtree(edge_dir, ignore_errors=True)      # 上一次没清理的 profile 会让 Edge 起得极慢
-            edge_dir.mkdir(parents=True, exist_ok=True)         # Edge 自己建不出来（沙箱里会报 Lock file 不能创建）
+            shutil.rmtree(edge_dir, ignore_errors=True)      # a profile left uncleaned from last time makes Edge start extremely slowly
+            edge_dir.mkdir(parents=True, exist_ok=True)         # Edge can't create it itself (in a sandbox it reports the Lock file can't be created)
             cls.procs["edge"] = subprocess.Popen(
                 [EDGE, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox",
                  "--enable-unsafe-swiftshader", f"--remote-debugging-port={p_cdp}",
@@ -251,19 +251,19 @@ class CommitE2E(unittest.TestCase):
         self.assertIn("motion_enabled = true", first["preview"]["toml"])
 
     def test_01b_mark_servo_step_done(self):
-        """任务 16：出厂场景第 1 步点「已完成」（主程序说没标：两步，第二下写后果）→ ✓，第 3 步准备情况「舵机零位」变绿。"""
+        """Task 16: in the factory scenario, click "已完成" (done) in step 1 (main program says not calibrated: two steps, the second shows the consequence) → ✓, and step 3's readiness "舵机零位" (servo zero position) turns green."""
         m = self.node("mark")
         self.assertEqual(m["before"]["check"], "bad", m)
         self.assertEqual(m["ask"], "确定标成已完成？主程序说标定没做完：标成已完成鸭子也站不起来", m)
-        self.assertNotEqual(m["afterOne"], "完成", m)                          # 点一下不算
+        self.assertNotEqual(m["afterOne"], "完成", m)                          # a single click doesn't count
         self.assertEqual(m["after"]["row"], "完成", m)
         self.assertIn("你标了已完成", m["after"]["text"])
         self.assertIn("你标了第 1 步已完成：15 颗按 2048 写零位（零位要是用 Studio 的舵机页校过的才对）", m["after"]["check"])
         self.assertEqual(m["errors"], [])
 
     def test_01d_ssh_card_on_the_more_page(self):
-        """10-21「出了问题自己 SSH 修，不用重烧卡」：「更多」页有 SSH 卡片，写清出厂只认钥匙、没有默认密码；
-        假小助手回「只认钥匙、0 把钥匙」（跟公开镜像出厂一样）。这只测试鸭子没设网页登录密码：提示先设，按钮灰着，没有密码框。"""
+        """Oct 21 "if something goes wrong, SSH in and fix it yourself, without reflashing the card": the "更多" (More) page has an SSH card stating factory images only accept keys and have no default password;
+        the fake helper replies "key-only, 0 keys" (same as the public image out of the box). This test duck has no web login password set: it prompts to set one first, the button is grayed out, and there's no password field."""
         r = self.node("ssh")
         s = r["ssh"]
         self.assertIn("SSH 远程登录", s["text"])
@@ -275,8 +275,8 @@ class CommitE2E(unittest.TestCase):
         self.assertEqual(r["errors"], [])
 
     def test_01c_stance_buttons_in_commissioning(self):
-        """用户 10-21「咱标定也能站姿不就好了吗」：标定模式下「站姿使能」能点，确认以后发 imu.op hold，
-        主程序（fork hold-home）回站住，站姿卡写「标定模式（站着）」；「失能（卸力）」走 relax，卸完回软着。"""
+        """User Oct 21 "why can't we just have a standing pose in calibration mode too": in calibration mode "站姿使能" (enable standing pose) is clickable; after confirming it sends imu.op hold,
+        the main program (fork hold-home) stands back up, and the stance card shows "标定模式（站着）" (calibration mode (standing)); "失能（卸力）" (disable (relax)) goes through relax and returns to limp afterwards."""
         s = self.node("stance0")
         st = s["stance"]
         self.assertEqual(st["stand"], {"text": "站姿使能", "disabled": False}, st)
@@ -320,10 +320,10 @@ class CommitE2E(unittest.TestCase):
         from studio import commit as C
         servo = self.node("servo")
         self.assertEqual(servo["planRows"], 15, servo)
-        # --servo-sim 是演示舵机，后端不会把它记进 servo-centered.json（真机上真校才记）。
-        # 这里补记 15 颗，模拟「在这只鸭子上用舵机页一键中位过」；真正的记录路径在 test_servo_* 里测。
+        # --servo-sim is demo servos; the backend doesn't record it in servo-centered.json (only a real calibration on real hardware is recorded).
+        # Here we record all 15 to simulate "one-click centering was done on this duck on the servo page"; the real recording path is tested in test_servo_*.
         C.record_centered(str(self.state), list(C.JOINT_IDS.values()), "e2e 演示中位")
-        time.sleep(1.6)                       # CommitService 最多 1 秒重读一次 state 文件
+        time.sleep(1.6)                       # CommitService re-reads the state file at most once per second
 
         second = self.node("commit")
         self.assertEqual(second["ready"]["bad"], 0, second["ready"])
@@ -334,8 +334,8 @@ class CommitE2E(unittest.TestCase):
         self.assertEqual(second["errors"], [])
 
     def test_03b_stance_buttons_in_motion(self):
-        """任务 17：运动模式软着时「站姿使能」能点，发出的命令跟遥控卡「站起来」一样（pad.op stand → robot.init）；
-        「失能（卸力）」跟顶上「卸力」一样（relax）。"""
+        """Task 17: in motion mode while limp, "站姿使能" (enable standing pose) is clickable and sends the same command as the remote card's "站起来" (stand up) (pad.op stand → robot.init);
+        "失能（卸力）" (disable (relax)) is the same as the top "卸力" (relax) (relax)."""
         s = self.node("stance")
         self.assertEqual(s["before"]["stand"], {"text": "站姿使能", "disabled": False}, s["before"])
         self.assertFalse(s["before"]["relax"]["disabled"], s["before"])
@@ -346,13 +346,13 @@ class CommitE2E(unittest.TestCase):
         self.assertEqual(s["relaxSent"], [{"name": "relax", "args": {}}])
         recv = [json.loads(x) for x in (self.dir / "robotd-recv.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
         methods = [r.get("method") for r in recv]
-        self.assertGreaterEqual(methods.count("robot.init"), 2, methods[-40:])      # IMU 页一次、遥控卡一次
+        self.assertGreaterEqual(methods.count("robot.init"), 2, methods[-40:])      # once from the IMU page, once from the remote card
         self.assertIn("robot.relax", methods)
         self.assertEqual(s["errors"], [])
 
     def test_04_failure_rollback_is_visible(self):
         self.outcome_file.write_text(json.dumps({"outcome": "reject"}), encoding="utf-8")
-        self.fake_set({"mode": "commissioning"})          # 回到标定模式再写一次
+        self.fake_set({"mode": "commissioning"})          # back to calibration mode and write once more
         time.sleep(1.6)
         failed = self.node("fail")
         self.assertTrue(failed["offline"], failed.get("offline"))
@@ -363,7 +363,7 @@ class CommitE2E(unittest.TestCase):
         self.outcome_file.write_text(json.dumps({"outcome": "ok"}), encoding="utf-8")
 
     def test_03c_verified_imu_can_be_recalibrated(self):
-        """保存过方向后仍可重新粗校；进入前需第二次确认，取消能恢复原运动模式。"""
+        """Coarse calibration can still be redone after the orientation is saved; entering it requires a second confirmation, and cancelling restores the previous motion mode."""
         self.fake_set({"mode": "motion", "calib": "seed", "posture": "limp", "imu_pose": "upright"})
         result = self.node("imu-redo")
         self.assertTrue(result["entryVisible"], result)

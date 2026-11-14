@@ -1,7 +1,7 @@
-"""studio/net.py：读 net.json、configd net.status/scan/connect/forget、小助手关/开热点的顺序和密码不外泄。
+"""studio/net.py: reading net.json, configd net.status/scan/connect/forget, the order of the helper turning the hotspot off/on, and passwords not leaking.
 
-全部在本机跑：假 configd 就是替换 net.call_once，假小助手就是替换 helper.wifi_hotspot_*；
-不连鸭子、不碰 192.168.0.x，也不碰任何真 socket。
+Everything runs locally: the fake configd just replaces net.call_once, the fake helper just replaces helper.wifi_hotspot_*;
+no connection to the duck, nothing touches 192.168.0.x, and no real sockets are used.
 """
 import asyncio
 import io
@@ -37,7 +37,7 @@ def state_json(mode="hotspot", **over):
 
 
 class FakeRpc:
-    """替身 call_once：记下 (method, params, timeout)，按 handler 回话（可以抛异常）。"""
+    """Stand-in call_once: records (method, params, timeout) and replies via handler (may raise)."""
 
     def __init__(self, handler, events=None):
         self.handler, self.calls, self.events = handler, [], events
@@ -134,7 +134,7 @@ class StateFileTest(Base):
         self.assertEqual(self.net.view()["url_local"], "http://duck-c51b.local:8123/")
 
     def test_addresses_takes_the_scheme(self):
-        """开了 HTTPS 以后，给用户的地址也得是 https，不然手机麦克风那条路还是用不了。"""
+        """With HTTPS on, the address given to the user must also be https, otherwise the phone microphone path still won't work."""
         self.assertEqual([u["url"] for u in N.addresses("duck-x", "1.2.3.4", 9000, "https")],
                          ["https://duck-x:9000/", "https://duck-x.local:9000/"])
         self.assertEqual([u["url"] for u in N.addresses("duck-x", None, scheme="https")],
@@ -183,8 +183,8 @@ class StateFileTest(Base):
         self.assertIsNone(v["busy"])
 
     def test_addresses_hotspot_and_wifi(self):
-        """任务 16：「这只鸭子的地址」——IP（热点模式是 10.42.0.1，否则 net.status 的 ip4）、duck-xxxx、duck-xxxx.local，
-        按设备写该用哪个（开着 Clash 系统代理的 Windows 打不开 .local，不带点的能开）。"""
+        """Task 16: "这只鸭子的地址" (this duck's address) -- IP (10.42.0.1 in hotspot mode, otherwise net.status's ip4), duck-xxxx, duck-xxxx.local,
+        stating which one to use per device (Windows with Clash's system proxy on can't open .local, but the dotless one works)."""
         self.write_state(mode="hotspot")
         self.net._read_once()
         v = self.net.view()
@@ -196,7 +196,7 @@ class StateFileTest(Base):
         self.assertIn("苹果", v["urls"][2]["note"])
         self.write_state(mode="wifi")
         self.net._read_once()
-        self.assertEqual([u["kind"] for u in self.net.view()["urls"]], ["host", "local"])     # 没连上：不知道 IP 就不列
+        self.assertEqual([u["kind"] for u in self.net.view()["urls"]], ["host", "local"])     # not connected: IP unknown, so not listed
         self.net.status = {"state": "connected", "ssid": "Home", "signal": 72, "ip4": "192.168.0.102"}
         self.net.status_at = time.monotonic()
         v = self.net.view()
@@ -239,8 +239,8 @@ class ScanTest(Base):
         self.assertEqual(data["networks"][0]["ssid"], "Cached")
 
     async def test_own_hotspot_is_filtered(self):
-        """任务 16：真机扫描结果里有鸭子自己的热点（Microduck-0de6，显示「已保存」），点了会让人往里填家里密码：滤掉。
-        按 net.json 的 hotspot_ssid 认；没有 hotspot_ssid 时认「Microduck- 开头、而且是已保存」的。"""
+        """Task 16: real-hardware scan results include the duck's own hotspot (Microduck-0de6, shown as "已保存" (saved)); clicking it would have the user enter the home password into it: filter it out.
+        Identified by net.json's hotspot_ssid; without hotspot_ssid, identified as "starts with Microduck- and is saved"."""
         nets = [{"ssid": "Microduck-c51b", "signal": 90, "security": "wpa_psk", "saved": True},
                 {"ssid": "Home", "signal": 70, "security": "wpa_psk", "saved": False},
                 {"ssid": "Microduck-0de6", "signal": 40, "security": "wpa_psk", "saved": False}]
@@ -248,13 +248,13 @@ class ScanTest(Base):
         self.net._read_once()
         with mock.patch.object(N, "call_once", FakeRpc(lambda m, p: {"networks": [dict(n) for n in nets]})):
             data = await self.net.scan()
-        self.assertEqual([n["ssid"] for n in data["networks"]], ["Home", "Microduck-0de6"])   # 别的鸭子的热点不滤
+        self.assertEqual([n["ssid"] for n in data["networks"]], ["Home", "Microduck-0de6"])   # other ducks' hotspots aren't filtered
         self.write_state(mode="wifi", hotspot_ssid=None)
         self.net._read_once()
         nets.append({"ssid": "Microduck-0de6", "signal": 40, "security": "wpa_psk", "saved": True})
         with mock.patch.object(N, "call_once", FakeRpc(lambda m, p: {"networks": [dict(n) for n in nets]})):
             data = await self.net.scan()
-        self.assertEqual([n["ssid"] for n in data["networks"]], ["Home", "Microduck-0de6"])   # 已保存的 Microduck-* 滤掉
+        self.assertEqual([n["ssid"] for n in data["networks"]], ["Home", "Microduck-0de6"])   # saved Microduck-* are filtered out
         self.assertTrue(all(not (n["ssid"].startswith("Microduck-") and n["saved"]) for n in data["networks"]))
         self.write_state(mode="hotspot", scan=[{"ssid": "Microduck-c51b", "signal": 99, "security": "wpa_psk"},
                                                {"ssid": "Cached", "signal": 61, "security": "wpa_psk"}])
@@ -262,7 +262,7 @@ class ScanTest(Base):
         with mock.patch.object(N, "call_once", FakeRpc(lambda m, p: {"networks": []})):
             data = await self.net.scan()
         self.assertTrue(data["cached"])
-        self.assertEqual([n["ssid"] for n in data["networks"]], ["Cached"])              # 开热点前的缓存也滤
+        self.assertEqual([n["ssid"] for n in data["networks"]], ["Cached"])              # the cache from before the hotspot was turned on is filtered too
 
     async def test_wifi_mode_error_is_not_hidden_by_cache(self):
         self.write_state(mode="wifi")
@@ -427,7 +427,7 @@ class ConnectTest(Base):
 
 
 class HotspotOpTest(Base):
-    """户外模式：手机点「开/关热点」→ net.op → hotspot_up/down。这里只验证顺序、busy 和报错文案。"""
+    """Outdoor mode: the phone clicks "开/关热点" (turn hotspot on/off) → net.op → hotspot_up/down. Here we only verify the order, busy and the error wording."""
 
     def setUp(self):
         super().setUp()
@@ -437,10 +437,10 @@ class HotspotOpTest(Base):
     def test_begin_hotspot_locks_and_resets(self):
         self.assertTrue(self.net.begin_hotspot())
         self.assertEqual(self.net.view()["busy"], "hotspot")
-        self.assertFalse(self.net.begin_hotspot())          # 第二次不给进
-        self.assertFalse(self.net.begin_connect())          # 连 WiFi 也不插队
+        self.assertFalse(self.net.begin_hotspot())          # a second one isn't let in
+        self.assertFalse(self.net.begin_connect())          # connecting to WiFi doesn't cut in either
         self.net.busy = None
-        self.assertTrue(self.net.begin_connect())           # 清掉后别人能用
+        self.assertTrue(self.net.begin_connect())           # after clearing, others can use it
 
     def test_begin_hotspot_unknown_state_is_refused(self):
         net = N.Net("tcp:127.0.0.1:1", self.dir / "missing.json", self.dir / "state", self.log,

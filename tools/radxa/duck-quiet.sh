@@ -1,18 +1,18 @@
 #!/bin/bash
-# 主板降温：看是谁在发热、记录温度曲线、关掉走路用不到的服务（可一键恢复）。
-#   sudo bash duck-quiet.sh status                 # 现在的温度、频率、最吃 CPU 的进程、相关服务状态
-#   sudo bash duck-quiet.sh measure 120 空闲        # 每 5 秒记一次，记 120 秒，标签「空闲」
-#   sudo bash duck-quiet.sh quiet                  # 关掉下面 QUIET 列表里正在开机自启的服务，并记下原状态
-#   sudo bash duck-quiet.sh restore                # 按记录把关掉的服务原样恢复
+# Cool down the board: see who is generating heat, record temperature curves, turn off services not needed for walking (one-click restore).
+#   sudo bash duck-quiet.sh status                 # current temperature, frequency, top CPU processes, status of related services
+#   sudo bash duck-quiet.sh measure 120 idle       # record every 5 s for 120 s, with label "idle"
+#   sudo bash duck-quiet.sh quiet                  # turn off the services in the QUIET list below that are enabled at boot, and record their original state
+#   sudo bash duck-quiet.sh restore                # restore the turned-off services exactly as recorded
 #
-# 为什么要这个：2026-10-12 第一台装好 kissqy 整套后，主板 85–92°C、CPU 一直锁在最低档 408 MHz，
-# 网页摇杆因此来不及响应。没接摄像头时 mediad 不停崩溃重启，GStreamer 扫描占满一个核。
-# 走路只要 robotd（控制）、padd 和网页手柄（摇杆）、SSH、网络。
-# 日志：/var/log/duck-quiet/<日期>.log（分类、分级），温度曲线：/var/log/duck-quiet/thermal-<时间>-<标签>.csv
+# Why this exists: on 2026-10-12, after installing the full kissqy stack on the first unit, the board ran at 85–92°C with the CPU stuck at the lowest step, 408 MHz,
+# so the web joystick couldn't respond in time. With no camera attached, mediad kept crashing and restarting, and GStreamer scanning maxed out a core.
+# Walking only needs robotd (control), padd and the web gamepad (joystick), SSH, and networking.
+# Logs: /var/log/duck-quiet/<date>.log (by category and level); temperature curves: /var/log/duck-quiet/thermal-<time>-<label>.csv
 set -euo pipefail
 export LC_ALL=C.UTF-8
 
-# 走路用不到的。蓝牙（bluetooth.service）不在默认列表里：以后接蓝牙手柄要用它。
+# Not needed for walking. Bluetooth (bluetooth.service) isn't in the default list: it'll be needed for a Bluetooth gamepad later.
 QUIET=(mediad tofd btd configd gamesir-xboxd updaterd robot-boot-check.timer)
 STATE=/var/lib/duck-quiet/disabled.txt
 LOGDIR=/var/log/duck-quiet
@@ -28,11 +28,11 @@ unit_name(){ case "$1" in *.*) echo "$1" ;; *) echo "$1.service" ;; esac; }
 status(){
   log 温度 INFO "CPU $(temp_c)°C，频率 $(freq_mhz) MHz（408 = 最低档，在降频）"
   log 负载 INFO "1/5/15 分钟负载 $(cut -d' ' -f1-3 /proc/loadavg)"
-  # 采两次取第二次，第一次的 CPU 占用是开机以来的平均
+  # Sample twice and take the second; the first CPU usage reading is the average since boot
   top -b -n 2 -d 2 -o %CPU | awk '/^top/{n++} n==2' | sed -n '7,14p' | while read -r line; do log 进程 INFO "$line"; done
   for u in robotd padd microduck-webpad.socket "${QUIET[@]}" bluetooth; do
     n=$(unit_name "$u")
-    # is-enabled 对 disabled 也返回非 0，不能用 || 兜底，否则「disabled」后面会多出一个「无」
+    # is-enabled also returns non-zero for disabled, so || can't be used as a fallback, otherwise an extra 「无」 (none) would follow 「disabled」
     en=$(systemctl is-enabled "$n" 2>/dev/null || true); [ -n "$en" ] || en=无
     log 服务 INFO "$(printf '%-24s 开机自启=%-8s 现在=%s' "$n" "$en" "$(systemctl is-active "$n" 2>/dev/null || true)")"
   done

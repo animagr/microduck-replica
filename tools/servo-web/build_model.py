@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""把 microduck_rl 的 MuJoCo 模型（robot_allcollisions.xml + assets/*.stl）转成网页用的紧凑格式。
+"""Convert microduck_rl's MuJoCo model (robot_allcollisions.xml + assets/*.stl) into a compact format for the web page.
 
   python build_model.py --src <microduck_rl>/src/mjlab_microduck/robot/microduck
 
-输出 model/model.json（运动学树、几何体、颜色、顶点在 bin 里的偏移）和 model/meshes.bin
-（每个网格：int16 量化的顶点 xyz + uint16/uint32 三角形索引）。只依赖 numpy。
+Outputs model/model.json (kinematic tree, geometries, colors, vertex offsets within the bin) and model/meshes.bin
+(per mesh: int16-quantized vertex xyz + uint16/uint32 triangle indices). Depends only on numpy.
 
-来源：https://github.com/apirrone/microduck_rl（Apache-2.0）。里面的网格是 Pollen 官方 CAD 导出的。
+Source: https://github.com/apirrone/microduck_rl (Apache-2.0). The meshes in it are exported from Pollen's official CAD.
 """
 import argparse
 import json
@@ -42,7 +42,7 @@ def bind_head_servos(bodies):
         matches[0]["servo_joint"] = joint
 
 
-# 壳子里看不见的东西，不进网页
+# Things invisible inside the shell, not included in the web page
 SKIP_DEFAULT = "pcb__raspberry_pi_zero_2_w,elec_rpi_robot_hat_pcb,seeed_bearing__configuration__22x16x4,seeed_bearing__configuration_default,speaker,m12_lens_holder,banana_pcb_locker,upper_leg_rigidity_plate,motor_support,power_support"
 
 
@@ -60,7 +60,7 @@ def load_stl(path):
         n = struct.unpack("<I", data[80:84])[0]
         rec = np.frombuffer(data[84:84 + 50 * n], dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))
         v = rec["v"].reshape(-1, 3).astype(np.float32)
-    # 合并重复顶点
+    # Merge duplicate vertices
     uniq, inv = np.unique(v, axis=0, return_inverse=True)
     idx = inv.reshape(-1, 3).astype(np.uint32)
     return uniq, idx
@@ -115,8 +115,8 @@ def main():
     for top in root.find("worldbody").findall("body"):
         walk(top, -1)
 
-    # 嘴：MJCF 里没有这个关节，下颌焊在头壳上。把 jaw / jaw_soft 两块几何拆出来挂到一个补的铰链上，
-    # 轴 = 头壳系的 y（左右），铰点取嘴舵机（xl330 几何）的原点，正角度 = 张嘴。位置是估的，只为显示。
+    # Mouth: the MJCF has no such joint; the jaw is welded to the head shell. Split out the two geometries jaw / jaw_soft and hang them on an added hinge,
+    # axis = y of the head shell frame (left-right), pivot at the origin of the mouth servo (xl330 geometry), positive angle = mouth open. The position is estimated, for display only.
     notes = []
     pivot = [float(x) for x in a.mouth_pivot.split()]
     for b in bodies:
@@ -134,7 +134,7 @@ def main():
 
     bind_head_servos(bodies)
 
-    # 质量和质心：从官方 robot_walk.xml 的 inertial 取，按关节名对应（两份模型 body 名字不一样）
+    # Mass and center of mass: taken from the inertial of the official robot_walk.xml, matched by joint name (the two models use different body names)
     if a.official and os.path.exists(a.official):
         off = ET.parse(a.official).getroot()
         by_joint = {}
@@ -153,7 +153,7 @@ def main():
         total = sum(b["mass"] for b in bodies)
         notes.append(f"质量 {total*1000:.0f} g 来自官方 robot_walk.xml，重心按它算")
         print(f"质量：{total*1000:.0f} g，{sum(1 for b in bodies if b['mass'])} 个 body 有质量")
-    # 脚底支撑区：sole 网格在踝体系里的包围盒，页面投影到地面画矩形
+    # Sole support area: bounding box of the sole mesh in the ankle frame; the page projects it onto the ground as a rectangle
     for b in bodies:
         for g in b["geoms"]:
             if g["mesh"] in ("sole_left", "sole_right"):

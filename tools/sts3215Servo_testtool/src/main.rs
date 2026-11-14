@@ -1,15 +1,15 @@
-//! sts3215Servo_testtool — STS3215 舵机测试工具
+//! sts3215Servo_testtool: STS3215 servo test tool
 //!
-//! 用法：
-//!   sts3215Servo_testtool scan [--from 0 --to 253]     扫描总线上的舵机（带进度条）
-//!   sts3215Servo_testtool info <id>                    读取舵机状态（位置/电压/温度/电流/负载）
-//!   sts3215Servo_testtool read <id> <addr> <len>       读取任意寄存器（十六进制输出）
-//!   sts3215Servo_testtool set-id <旧id> <新id>         修改舵机 ID（总线上只能接一个！）
-//!   sts3215Servo_testtool move <id> <pos> [--speed N] [--time ms]   转到指定位置(0~4095)
-//!   sts3215Servo_testtool test <id>                    对单个舵机做完整测试
-//!   sts3215Servo_testtool test-all                     扫描并批量测试所有舵机
-//!   sts3215Servo_testtool raw [id]                     底层诊断：打印原始收发字节
-//!   全局选项: --port <路径>（默认 /dev/ttyUSB0）  --baud <波特率>（默认 1000000）
+//! Usage:
+//!   sts3215Servo_testtool scan [--from 0 --to 253]     scan the bus for servos (with a progress bar)
+//!   sts3215Servo_testtool info <id>                    read servo status (position/voltage/temperature/current/load)
+//!   sts3215Servo_testtool read <id> <addr> <len>       read any register (hex output)
+//!   sts3215Servo_testtool set-id <old_id> <new_id>     change servo ID (only one servo on the bus!)
+//!   sts3215Servo_testtool move <id> <pos> [--speed N] [--time ms]   move to the given position (0~4095)
+//!   sts3215Servo_testtool test <id>                    run a full test on a single servo
+//!   sts3215Servo_testtool test-all                     scan and batch-test all servos
+//!   sts3215Servo_testtool raw [id]                     low-level diagnostics: print raw sent/received bytes
+//!   Global options: --port <path> (default /dev/ttyUSB0)  --baud <baud rate> (default 1000000)
 
 mod sts;
 
@@ -18,8 +18,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use sts::{reg, StsBus};
 
-const TEST_POSITIONS: [u16; 4] = [2048, 1024, 3072, 2048]; // 中位 -> 低 -> 高 -> 回中
-const POS_TOLERANCE: u16 = 20; // 位置容差（步）
+const TEST_POSITIONS: [u16; 4] = [2048, 1024, 3072, 2048]; // center -> low -> high -> back to center
+const POS_TOLERANCE: u16 = 20; // position tolerance (steps)
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,7 +41,7 @@ fn main() {
         }
     };
 
-    // 部分转接板用 RTS/DTR 控制收发方向或使能，可按需调整
+    // Some adapter boards use RTS/DTR to control transmit direction or enable; adjust as needed
     if let Some(on) = cfg.rts {
         let _ = bus.set_rts(on);
     }
@@ -149,11 +149,11 @@ fn print_usage() {
     eprintln!("{}", doc.join("\n"));
 }
 
-/// 诊断：向舵机发 ping，把收到的原始字节以十六进制打印出来。
-///   无任何字节     -> 舵机没应答（供电/接线/模式问题）
-///   与发送内容一致 -> 转接板有回显，但舵机没应答
-///   一堆乱码       -> 波特率不匹配
-///   FF FF id 02 00 CS -> 舵机正常应答！
+/// Diagnostics: send a ping to the servo and print the raw bytes received in hex.
+///   no bytes at all         -> servo didn't reply (power/wiring/mode problem)
+///   same as what was sent   -> the adapter board echoes, but the servo didn't reply
+///   a bunch of garbage      -> baud rate mismatch
+///   FF FF id 02 00 CS       -> the servo replied normally!
 fn cmd_raw(bus: &mut StsBus, id: u8) -> i32 {
     let show = |label: &str, r: io::Result<(Vec<u8>, Vec<u8>)>| match r {
         Ok((sent, recv)) => {
@@ -175,7 +175,7 @@ fn cmd_raw(bus: &mut StsBus, id: u8) -> i32 {
     code
 }
 
-/// 通用寄存器读取：read <id> <addr> <len>，以十六进制打印。
+/// Generic register read: read <id> <addr> <len>, printed in hex.
 fn cmd_read(bus: &mut StsBus, id: u8, addr: u8, len: u8) -> i32 {
     match bus.read(id, addr, len) {
         Ok(data) => {
@@ -190,7 +190,7 @@ fn cmd_read(bus: &mut StsBus, id: u8, addr: u8, len: u8) -> i32 {
     }
 }
 
-/// 带进度条的扫描。
+/// Scan with a progress bar.
 fn scan_with_progress(bus: &mut StsBus, from: u8, to: u8) -> Vec<u8> {
     use std::io::Write as _;
     let total = (to - from + 1) as usize;
@@ -210,11 +210,11 @@ fn scan_with_progress(bus: &mut StsBus, from: u8, to: u8) -> Vec<u8> {
             found.push(id);
         }
     }
-    eprintln!(); // 进度条换行
+    eprintln!(); // newline after the progress bar
     found
 }
 
-/// 扫描总线，打印发现的舵机及其型号。
+/// Scan the bus and print the servos found and their models.
 fn cmd_scan(bus: &mut StsBus, from: u8, to: u8) -> i32 {
     let ids = scan_with_progress(bus, from, to);
     if ids.is_empty() {
@@ -233,7 +233,7 @@ fn cmd_scan(bus: &mut StsBus, from: u8, to: u8) -> i32 {
     0
 }
 
-/// 打印单个舵机的完整状态。
+/// Print the full status of a single servo.
 fn cmd_info(bus: &mut StsBus, id: u8) -> i32 {
     match bus.read_status(id) {
         Ok(s) => {
@@ -257,8 +257,8 @@ fn cmd_info(bus: &mut StsBus, id: u8) -> i32 {
     }
 }
 
-/// 修改舵机 ID：写 EEPROM，流程为 解锁(LOCK=0) -> 写 ID -> 锁定(LOCK=1)。
-/// ⚠ 总线上必须只接要修改的那一个舵机！否则所有同 ID 舵机会被一起改掉。
+/// Change servo ID: writes EEPROM, flow is unlock (LOCK=0) -> write ID -> lock (LOCK=1).
+/// ⚠ Only the servo being changed may be on the bus! Otherwise all servos with the same ID get changed together.
 fn cmd_set_id(bus: &mut StsBus, old_id: u8, new_id: u8) -> i32 {
     if new_id > 253 {
         eprintln!("新 ID 必须在 0~253 之间（254 是广播地址）");
@@ -275,22 +275,22 @@ fn cmd_set_id(bus: &mut StsBus, old_id: u8, new_id: u8) -> i32 {
             return 1;
         }
     }
-    // 最后那步「重新锁定」要发给**新 ID**：写完 ID 那一刻舵机就只认新 ID 了，
-    // 还发给旧 ID 的话这条命令没人收，舵机被留在 EEPROM 解锁状态（55=0），
-    // 之后任何一次误写 EEPROM 寄存器都会永久生效。飞特官方 SDK 也是 LockEprom(新ID)。
+    // The final "lock again" step must be sent to the **new ID**: the moment the ID is written, the servo only answers to the new ID;
+    // if it were still sent to the old ID, nobody would receive the command, the servo would be left with EEPROM unlocked (55=0),
+    // and any later accidental write to an EEPROM register would take permanent effect. Feetech's official SDK also does LockEprom(new ID).
     let steps = [
-        (old_id, reg::LOCK, 0u8),  // 解锁 EEPROM
-        (old_id, reg::ID, new_id), // 写入新 ID —— 生效后这颗舵机改名了
-        (new_id, reg::LOCK, 1),    // 重新锁定，发给新 ID
+        (old_id, reg::LOCK, 0u8),  // unlock EEPROM
+        (old_id, reg::ID, new_id), // write the new ID; once it takes effect this servo has been renamed
+        (new_id, reg::LOCK, 1),    // lock again, sent to the new ID
     ];
     for (id, addr, val) in steps {
         if let Err(e) = bus.write_u8(id, addr, val) {
             eprintln!("写寄存器 {addr} 失败: {e}");
             return 1;
         }
-        thread::sleep(Duration::from_millis(50)); // 等 EEPROM 写入完成
+        thread::sleep(Duration::from_millis(50)); // wait for the EEPROM write to finish
     }
-    // 用新 ID 验证，并回读锁标志确认真的锁上了
+    // Verify with the new ID, and read back the lock flag to confirm it's really locked
     match bus.ping(new_id) {
         Ok(true) => {
             let locked = bus.read_u8(new_id, reg::LOCK).unwrap_or(0);
@@ -308,7 +308,7 @@ fn cmd_set_id(bus: &mut StsBus, old_id: u8, new_id: u8) -> i32 {
     }
 }
 
-/// 控制舵机转到指定位置，然后回读确认。
+/// Move the servo to the given position, then read back to confirm.
 fn cmd_move(bus: &mut StsBus, id: u8, pos: u16, speed: u16, time_ms: u16) -> i32 {
     if pos > 4095 {
         eprintln!("pos 超出范围 0~4095");
@@ -331,10 +331,10 @@ fn cmd_move(bus: &mut StsBus, id: u8, pos: u16, speed: u16, time_ms: u16) -> i32
     }
 }
 
-/// 轮询直到舵机到达目标位置（或超时），返回最终位置与耗时。
+/// Poll until the servo reaches the target position (or times out); returns the final position and elapsed time.
 fn wait_until_arrived(bus: &mut StsBus, id: u8, target: u16, timeout: Duration) -> io::Result<(u16, Duration)> {
     let start = Instant::now();
-    thread::sleep(Duration::from_millis(50)); // 等舵机启动
+    thread::sleep(Duration::from_millis(50)); // wait for the servo to start
     loop {
         let s = bus.read_status(id)?;
         let err = s.position.abs_diff(target);
@@ -351,7 +351,7 @@ fn wait_until_arrived(bus: &mut StsBus, id: u8, target: u16, timeout: Duration) 
     }
 }
 
-/// 单个舵机的完整测试报告。
+/// Full test report for a single servo.
 struct TestReport {
     id: u8,
     model: u16,
@@ -364,7 +364,7 @@ struct TestReport {
     notes: Vec<String>,
 }
 
-/// 对单个舵机执行完整测试：基线读数 -> 位置扫描 -> 采样电流/负载 -> 回中。
+/// Run a full test on a single servo: baseline readings -> position sweep -> sample current/load -> back to center.
 fn cmd_test(bus: &mut StsBus, id: u8) -> i32 {
     match test_one(bus, id) {
         Ok(r) => {
@@ -390,7 +390,7 @@ fn test_one(bus: &mut StsBus, id: u8) -> io::Result<TestReport> {
     let model = bus.read_u16(id, reg::MODEL_NUMBER)?;
     let mut notes = Vec::new();
 
-    // 基线状态
+    // Baseline state
     let base = bus.read_status(id)?;
     println!("  型号={model}  电压={:.1}V  温度={}°C  位置={}", base.voltage, base.temperature, base.position);
     if base.voltage < 6.0 {
@@ -400,7 +400,7 @@ fn test_one(bus: &mut StsBus, id: u8) -> io::Result<TestReport> {
         notes.push(format!("存在报警状态 0x{:02X}", base.servo_status));
     }
 
-    // 位置扫描 + 运动中采样
+    // Position sweep + sampling during motion
     let mut max_current = 0f32;
     let mut max_load = 0f32;
     let mut max_pos_err = 0u16;
@@ -424,7 +424,7 @@ fn test_one(bus: &mut StsBus, id: u8) -> io::Result<TestReport> {
         println!("  目标 {target:>4} -> 实际 {:>4}  偏差 {err:>3}  {}", s.position, if arrived { "OK" } else { "超时" });
     }
 
-    // 结束读数
+    // Final readings
     let end = bus.read_status(id)?;
     if end.temperature > base.temperature + 15 {
         notes.push(format!("温升过大: {}°C -> {}°C", base.temperature, end.temperature));
@@ -454,7 +454,7 @@ fn print_report(r: &TestReport) {
     println!("  结果: {}", if r.pass { "✅ PASS" } else { "❌ FAIL" });
 }
 
-/// 扫描所有舵机并逐一测试，最后输出汇总。
+/// Scan all servos and test them one by one, then print a summary.
 fn cmd_test_all(bus: &mut StsBus, from: u8, to: u8) -> i32 {
     let ids = scan_with_progress(bus, from, to);
     if ids.is_empty() {
@@ -482,7 +482,7 @@ fn cmd_test_all(bus: &mut StsBus, from: u8, to: u8) -> i32 {
         println!();
     }
 
-    // 汇总表
+    // Summary table
     println!("==== 批量测试汇总 ====");
     println!("{:<4} {:<8} {:<8} {:<6} {:<10} {:<10} {:<8} 结果", "ID", "型号", "电压V", "温度°C", "峰值电流mA", "峰值负载%", "位置偏差");
     for r in &reports {

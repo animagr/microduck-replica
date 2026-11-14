@@ -1,10 +1,10 @@
-"""从走路录像里估计「关节目标 → 实际角度」的频率响应（只读）。
-模型每拍给的目标就是现成的激励信号，用 Welch 互谱算 H(f)=S_ty/S_tt：
-  幅值比 |H|：实际摆幅 / 目标摆幅（>1 说明舵机冲过头，<1 说明跟不上）
-  滞后 ms：相位换算成时间
-  相干 γ²：这个频率上的估计可不可信（>0.6 才看）
-只用 policy=walk 的连续片段（站着保持和走路都算），每段至少 3 s。
-用法：python walk_transfer.py 名称=录像.jsonl [名称=录像.jsonl ...]
+"""Estimate the frequency response "joint target → actual angle" from walking recordings (read-only).
+The targets the model issues each tick are a ready-made excitation signal; compute H(f)=S_ty/S_tt with Welch cross-spectra:
+  amplitude ratio |H|: actual swing / target swing (>1 means the servo overshoots, <1 means it can't keep up)
+  lag ms: phase converted to time
+  coherence γ²: whether the estimate at this frequency is trustworthy (only look when >0.6)
+Uses only continuous segments with policy=walk (both standing hold and walking count), each at least 3 s.
+Usage: python walk_transfer.py name=recording.jsonl [name=recording.jsonl ...]
 """
 import json
 import math
@@ -16,7 +16,7 @@ from scipy.signal import csd, welch
 LEG = {'hip_roll': (1, 11), 'hip_pitch': (2, 12), 'knee': (3, 13), 'ankle': (4, 14)}
 FREQS = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0)
 FS = 50.0
-NPER = 64            # 1.28 s 窗，频率分辨率 0.78 Hz
+NPER = 64            # 1.28 s window, frequency resolution 0.78 Hz
 
 
 def segments(path, min_len=150):
@@ -28,7 +28,7 @@ def segments(path, min_len=150):
             continue
         if 't' not in r or not r.get('targets') or not r.get('joints'):
             continue
-        if r.get('policy') == 'walk' and not (cur and r['t'] < cur[-1]['t']):   # t 回退 = robotd 重启，断段
+        if r.get('policy') == 'walk' and not (cur and r['t'] < cur[-1]['t']):   # t going backward = robotd restart, break the segment
             cur.append(r)
         elif r.get('policy') == 'walk':
             if len(cur) >= min_len: segs.append(cur)

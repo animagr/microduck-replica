@@ -1,7 +1,7 @@
-"""--imu-bus：从舵机总线读 IMU 小板 ID 200。
+"""--imu-bus: read IMU board ID 200 from the servo bus.
 
-两层：BusImuService 的判据（跟主控 / imu200.py 同一套），以及 server 的状态轮询
-走真的 feetech.py + 协议级模拟器 sim_bus + 假小板 imu200.SimImu200。不接硬件。
+Two layers: BusImuService's criteria (the same set as the controller / imu200.py), and the server's status polling
+going through the real feetech.py + protocol-level simulator sim_bus + fake board imu200.SimImu200. No hardware attached.
 Run: python -m pytest -q test_imu_bus.py
 """
 import contextlib
@@ -44,7 +44,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(f["sample_count"], 7)
 
     def test_spec_vector_blocks(self):
-        # 总线协议.md §10 的两个应答数据段
+        # The two reply data segments from 总线协议.md §10
         ready = bytes.fromhex("6400ceff03000000000020360700 00".replace(" ", ""))
         self.assertTrue(self.svc.feed(ready, now=1.0)["live"])
         not_ready = bytes(12) + bytes([0, 0x01, 0])
@@ -68,23 +68,23 @@ class DecisionTests(unittest.TestCase):
         f = self.svc.feed(block(bits=imu_bus.BIT_READER_TOO_SLOW), now=1.0)
         self.assertTrue(f["live"])
         self.assertIn("BIT3", f["message"])
-        # 调试台自己 10 Hz 读：BIT3 每帧都亮是正常的，不能提示"读得太慢"（审查第 2 条）
+        # The debug console reads at its own 10 Hz: BIT3 lighting up every frame is normal and must not warn "reading too slowly" (review item 2)
         slow_console = imu_bus.BusImuService(poll_hz=10)
         f = slow_console.feed(block(bits=imu_bus.BIT_READER_TOO_SLOW), now=1.0)
         self.assertTrue(f["live"])
         self.assertNotIn("BIT3", f["message"])
-        self.assertEqual(f["status_bits"], imu_bus.BIT_READER_TOO_SLOW)   # 原始状态位照样给
+        self.assertEqual(f["status_bits"], imu_bus.BIT_READER_TOO_SLOW)   # raw status bits still passed through
         self.assertIn("BIT3", imu_bus.BusImuService(poll_hz=50).feed(
             block(bits=imu_bus.BIT_READER_TOO_SLOW), now=1.0)["message"])
 
     def test_frozen_window_like_master(self):
         for k in range(imu_bus.FROZEN_FRAMES - 1):
-            f = self.svc.feed(block(counter=k), now=1 + k * 0.02)   # 计数在变也没用：它在 12 字节窗口外
+            f = self.svc.feed(block(counter=k), now=1 + k * 0.02)   # the counter changing doesn't help: it's outside the 12-byte window
             self.assertTrue(f["live"], k)
         f = self.svc.feed(block(counter=99), now=2.0)
         self.assertEqual(f["status"], "stale")
         self.assertIn("frozen", f["message"])
-        f = self.svc.feed(block(gyro=(101, -50, 3)), now=2.02)     # 低位一跳就恢复
+        f = self.svc.feed(block(gyro=(101, -50, 3)), now=2.02)     # recovers as soon as a low bit flips
         self.assertTrue(f["live"])
 
     def test_misses_take_200_out_and_ping_brings_it_back(self):
@@ -139,7 +139,7 @@ class ServerPollingTests(unittest.TestCase):
             port.clock = 150.0
             st = server.read_states_with_imu(JOINTS, self.svc)
         ids, addr, n = calls[-1]
-        self.assertEqual((ids[0], addr, n), (200, 56, 15))            # 200 排第一，地址 56，长度 15
+        self.assertEqual((ids[0], addr, n), (200, 56, 15))            # 200 first, address 56, length 15
         self.assertEqual(ids[1:], JOINTS)
         self.assertTrue(all(st[i] is not None and "pos" in st[i] for i in JOINTS))
         status = self.svc.get_status()
@@ -152,10 +152,10 @@ class ServerPollingTests(unittest.TestCase):
             for k in range(imu_bus.MISS_DEGRADE + 2):
                 port.clock += 20
                 st = server.read_states_with_imu(JOINTS, self.svc)
-            self.assertNotIn(200, calls[-1][0])                        # 出列后舵机单独读
+            self.assertNotIn(200, calls[-1][0])                        # after removal the servos are read separately
             self.assertTrue(all(st[i] is not None for i in JOINTS))
             self.assertEqual(self.svc.get_status()["status"], "disconnected")
-            # 板子恢复应答：下一次 PING 把它放回同一条 sync_read
+            # The board replies again: the next PING puts it back into the same sync_read
             port.servos[imu_bus.IMU_ID].answer = True
             self.svc.last_probe = None
             server.read_states_with_imu(JOINTS, self.svc)
@@ -166,16 +166,16 @@ class ServerPollingTests(unittest.TestCase):
 
 
     def test_polls_without_servos_and_never_sends_an_empty_list(self):
-        # 审查第 1 条：台架上只接小板，扫描没扫到舵机（PRESENT 空）也要轮询
+        # Review item 1: on the bench only the board is connected, and the scan found no servos (PRESENT empty), but polling must still happen
         with patch.object(server, "CLIENTS", {object()}), patch.object(server, "PRESENT", []), \
                 patch.object(server, "IMU_SERVICE", self.svc):
             self.assertTrue(server.stream_should_poll())
         with patch.object(server, "CLIENTS", {object()}), patch.object(server, "PRESENT", []), \
                 patch.object(server, "IMU_SERVICE", None):
-            self.assertFalse(server.stream_should_poll())                 # 不开 IMU 时照旧
+            self.assertFalse(server.stream_should_poll())                 # unchanged when IMU isn't enabled
         with patch.object(server, "CLIENTS", set()), patch.object(server, "IMU_SERVICE", self.svc):
-            self.assertFalse(server.stream_should_poll())                 # 没网页连着不读
-        # 只有小板、而且它出列了：不发空 ID 表的 sync_read，只按时 PING
+            self.assertFalse(server.stream_should_poll())                 # don't read when no web page is connected
+        # Only the board, and it's removed: don't send a sync_read with an empty ID list, just PING on schedule
         port, bus, calls = self.sim_bus(answer=False)
         with patch.object(server, "BUS", bus):
             for _ in range(imu_bus.MISS_DEGRADE + 3):

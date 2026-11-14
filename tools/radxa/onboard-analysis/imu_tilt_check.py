@@ -1,5 +1,5 @@
-"""从录像最后 N 秒找出手动倾斜的各段：每 0.5 s 打印机身前后/左右倾角，并自动挑出偏离站姿最大的几段。
-约定（机体系 x 前、y 左、z 上；重力 g 在机体系）：前倾 → g_x 变正；往右倾 → g_y 变负。"""
+"""Find the manual tilt segments in the last N seconds of a recording: print the body's fore-aft/left-right tilt every 0.5 s, and automatically pick the segments that deviate most from the standing pose.
+Convention (body frame x forward, y left, z up; gravity g in the body frame): forward tilt → g_x becomes positive; tilting right → g_y becomes negative."""
 import json, sys, math, glob
 secs=float(sys.argv[1]) if len(sys.argv)>1 else 120
 f=sorted(glob.glob('/home/duck/r17/rec/run-*.jsonl'))[-1]
@@ -10,7 +10,7 @@ for l in open(f, errors='replace'):
 R=[r for r in R if r['t']>=R[-1]['t']-secs]
 def ang(g):
     n=math.sqrt(sum(x*x for x in g)) or 1
-    return math.degrees(math.asin(max(-1,min(1,g[0]/n)))), math.degrees(math.asin(max(-1,min(1,-g[1]/n))))  # (前倾+, 右倾+)
+    return math.degrees(math.asin(max(-1,min(1,g[0]/n)))), math.degrees(math.asin(max(-1,min(1,-g[1]/n))))  # (forward tilt +, right tilt +)
 base=[sum(r['safety']['gravity'][k] for r in R[:100])/100 for k in range(3)]
 b=ang(base); print(f"开头基准：前倾 {b[0]:+.1f}°  右倾 {b[1]:+.1f}°")
 print(" 时间    前倾(+)/后仰(-)   右倾(+)/左倾(-)   gyro(x,y,z)")
