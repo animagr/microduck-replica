@@ -24,7 +24,7 @@ This is a short window, so long-term temperature stability cannot be concluded f
 
 ## Past issues and what is different this time
 
-The [pitfall log](../踩坑记录.md) recorded two independent phenomena on 10-11/12: when the camera/ToF were missing, services restarted repeatedly and GStreamer scanning maxed out the CPU; after stopping the related services, the sealed body still got hot enough to throttle. The current window did not reproduce the former high load. The user then confirmed that no heatsink or fan is installed yet, so adding cooling is a prerequisite for this round of continuous camera testing; case ventilation and ambient temperature still need to be checked.
+The [pitfall log](../踩坑记录.md) recorded two independent phenomena on Oct 11/12: when the camera/ToF were missing, services restarted repeatedly and GStreamer scanning maxed out the CPU; after stopping the related services, the sealed body still got hot enough to throttle. The current window did not reproduce the former high load. The user then confirmed that no heatsink or fan is installed yet, so adding cooling is a prerequisite for this round of continuous camera testing; case ventilation and ambient temperature still need to be checked.
 
 ## Suggested order
 
