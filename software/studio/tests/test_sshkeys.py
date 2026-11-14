@@ -1,6 +1,6 @@
-"""「更多」页 SSH 卡片的钥匙（studio/sshkeys.py）：解析、指纹、登记、去重、删掉。
+"""Keys for the SSH card on the "More" (「更多」) page (studio/sshkeys.py): parsing, fingerprints, registering, deduplication, deletion.
 
-    py -3.13 -I -m unittest tests.test_sshkeys      （或用仓库的 run_tests.py）
+    py -3.13 -I -m unittest tests.test_sshkeys      (or use the repo's run_tests.py)
 """
 import base64
 import os
@@ -65,7 +65,7 @@ class FileTest(unittest.TestCase):
         b, fb = make_key(body=b"\x02" * 32, comment="desk")
         self.assertEqual(self.keys.list(), [])
         self.assertEqual(self.keys.add(a)[0], True)
-        self.assertEqual(self.keys.add(a)[0], False)             # 同一把不写第二遍
+        self.assertEqual(self.keys.add(a)[0], False)             # the same key is not written a second time
         self.assertEqual(self.keys.add(b)[0], True)
         self.assertEqual([k["fp"] for k in self.keys.list()], [fa, fb])
         self.assertEqual(self.keys.remove(fa), 1)
@@ -78,7 +78,7 @@ class FileTest(unittest.TestCase):
         a, fa = make_key(comment="old")
         os.makedirs(os.path.join(self.home, ".ssh"))
         with open(self.keys.path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("# 手写的注释\nfrom=\"10.0.0.1\" " + a)          # 最后一行没换行
+            f.write("# 手写的注释\nfrom=\"10.0.0.1\" " + a)          # last line has no trailing newline
         b, fb = make_key(body=b"\x03" * 32, comment="new")
         self.keys.add(b)
         text = open(self.keys.path, encoding="utf-8").read()

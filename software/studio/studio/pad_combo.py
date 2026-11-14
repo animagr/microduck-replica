@@ -1,32 +1,32 @@
-"""手柄页的「动作」和「组合动作」：数据、校验、存取、展开成时间表。这里全是纯函数，不碰 robotd。
+"""The gamepad page's "actions" and "combo actions": data, validation, storage, and expansion into a timeline. Everything here is a pure function and doesn't touch robotd.
 
-一个组合动作 = 名字 + 几步，一步接一步做（下一步等上一步做完）。每一步是下面几种之一，参数都夹到安全范围：
+A combo action = a name + several steps, done one after another (the next step waits for the previous to finish). Each step is one of the kinds below, with parameters clamped to safe ranges:
 
-| 步               | 发给 robotd 的                                    | 出处（官方仓库 microduck/） |
+| Step             | Sent to robotd                                     | Source (official repo microduck/) |
 |------------------|---------------------------------------------------|-----------------------------|
-| nod   点头       | robot.head 通知，head_pitch 来回，25 Hz            | duck-ipc-proto lib.rs:533、2058-2065；robotd main.rs:3637-3640 |
-| shake 摇头       | robot.head 通知，head_yaw 来回                      | 同上 |
-| tilt  歪头       | robot.head 通知，head_roll 停一会儿再回正           | 同上 |
-| mouth 张嘴       | robot.mouth 通知 {open}，停一会儿再合上             | lib.rs:589、2269-2275；main.rs:3648-3651 |
-| chatter 说话     | robot.mouth 一张一合                               | 同上 |
-| sound 叫一声     | robot.sound 请求 {tag}（有回话：没声音会拒绝）       | lib.rs:590-600、2094-2140；main.rs:4300-4319 |
-| skill 官方技能   | robot.do 请求 {skill}（有回话）                     | lib.rs:579-581、2212-2239；main.rs:4219-4255 |
-| wait  停一下     | 什么都不发                                         | — |
+| nod   nod        | robot.head notification, head_pitch back and forth, 25 Hz | duck-ipc-proto lib.rs:533, 2058-2065; robotd main.rs:3637-3640 |
+| shake shake head | robot.head notification, head_yaw back and forth   | same as above |
+| tilt  tilt head  | robot.head notification, head_roll, hold a moment, then re-center | same as above |
+| mouth open mouth | robot.mouth notification {open}, hold a moment, then close | lib.rs:589, 2269-2275; main.rs:3648-3651 |
+| chatter talk     | robot.mouth open and close repeatedly              | same as above |
+| sound quack      | robot.sound request {tag} (has a reply: rejected if there's no sound) | lib.rs:590-600, 2094-2140; main.rs:4300-4319 |
+| skill official skill | robot.do request {skill} (has a reply)         | lib.rs:579-581, 2212-2239; main.rs:4219-4255 |
+| wait  pause      | sends nothing                                      | — |
 
-不放「走路」：组合动作里不带 robot.move。「按住才走」只靠摇杆保证，组合动作再按住也只是原地动作。
-不放 sit_toggle：它会改变姿势（坐下 / 站起），用专门的「坐下」按钮。
+No "walk": combo actions don't include robot.move. "Walk only while held" is guaranteed by the sticks alone; holding a combo action only ever does in-place actions.
+No sit_toggle: it changes posture (sit down / stand up); use the dedicated "坐下" (Sit down) button.
 
-头和嘴的几个事实（决定了结束时一定要「回正、合嘴」）：
-- robot.head 的目标没有过期：最后一次发的值一直留着（robotd intents.rs:569-588 只给 twist 算年龄）；
-  默认是全 0（intents.rs:271-274），所以「回正」= 发一次全 0。
-- robot.mouth 不带时间戳：客户端死了嘴就一直张着（intents.rs:144-146 原话「a mouth left open by a dead client
-  is exactly what the prototype does」），所以中途打断也要发一次 open=0。
-- 头的指令进的是策略的观测，不直接写舵机（lib.rs:2053-2057；padd main.rs:170-174「the network itself decides how
-  far the head actually goes」），所以动头的步要求「策略在跑」。嘴在官方版只在策略在跑时才动（robotd main.rs:3093-3099），
-  我们鸭子上的 fork（R17）只要站好了（含保持、坐着）就动（fork robotd main.rs:3897-3909、4779-4787），实体手柄也是每拍都发嘴、
-  不看模式和策略（fork padd:1351-1363）。第三轮（pad-vpad-plan §8 V10）改成按 fork：只动嘴的步（张嘴、说话）不要求策略在跑，
-  软着时 robotd 自己不动嘴；结束照样合嘴。
-- 幅度、快慢是推测，没上机：点头 0.5 rad、摇头 0.6 rad、歪头 0.4 rad，要上鸭子看着调。
+A few facts about the head and mouth (which mean the end must always "re-center, close mouth"):
+- robot.head targets don't expire: the last value sent stays (robotd intents.rs:569-588 only ages twist);
+  the default is all zeros (intents.rs:271-274), so "re-center" = send all zeros once.
+- robot.mouth has no timestamp: if the client dies the mouth stays open (intents.rs:144-146 verbatim: "a mouth left open by a dead client
+  is exactly what the prototype does"), so an interruption midway must also send open=0.
+- Head commands go into the policy's observation and don't write servos directly (lib.rs:2053-2057; padd main.rs:170-174 "the network itself decides how
+  far the head actually goes"), so head-moving steps require "policy running". In the official version the mouth only moves while the policy is running (robotd main.rs:3093-3099);
+  the fork on our duck (R17) moves it as long as it's set up standing (including holding and sitting) (fork robotd main.rs:3897-3909, 4779-4787), and the physical gamepad also sends mouth every tick
+  regardless of mode and policy (fork padd:1351-1363). Round 3 (pad-vpad-plan §8 V10) switched to the fork's behavior: mouth-only steps (open mouth, talk) don't require the policy running;
+  when limp robotd doesn't move the mouth by itself; the end still closes the mouth.
+- Amplitudes and speeds are guesses, not tried on the robot: nod 0.5 rad, shake 0.6 rad, tilt 0.4 rad; to be tuned while watching the duck.
 """
 import json
 import math
@@ -34,8 +34,8 @@ import os
 import re
 import tempfile
 
-TICK_S = 0.04                 # 头、嘴的通知 25 Hz（padd 是 50 Hz：padd main.rs:150-151）
-NOD_AMP, SHAKE_AMP, TILT_AMP = 0.5, 0.6, 0.4     # rad，推测，要上机核
+TICK_S = 0.04                 # head and mouth notifications at 25 Hz (padd is 50 Hz: padd main.rs:150-151)
+NOD_AMP, SHAKE_AMP, TILT_AMP = 0.5, 0.6, 0.4     # rad, guesses, to be checked on the robot
 NOD_PERIOD_S, SHAKE_PERIOD_S = 0.7, 0.8
 CHATTER_PERIOD_S = 0.32
 MAX_STEPS = 12
@@ -44,7 +44,7 @@ MAX_USER_COMBOS = 20
 NAME_MAX = 16
 COMBO_FILE = "pad-combos.json"
 
-# robot.sound 的 tag（lib.rs:2094-2113）。wheee 要一直按着发（hold），不做成一次性的按钮
+# robot.sound tags (lib.rs:2094-2113). wheee has to be sent continuously while held (hold), so it isn't made into a one-shot button
 SOUNDS = {
     "chirp": "嘎（叫一声）",
     "greet": "打招呼",
@@ -54,8 +54,8 @@ SOUNDS = {
     "peck": "告别",
 }
 
-# robot.do 的技能名 → 中文。robotd 实际有哪些看 robot.policies 的 skills（lib.rs:2338-2346）；
-# ground_pick、sit_toggle 不在 skills 里，看 sitstand / ground_pick 两个槽装没装（robotd main.rs:4136-4156）
+# robot.do skill names → Chinese. Which ones robotd actually has: see skills in robot.policies (lib.rs:2338-2346);
+# ground_pick and sit_toggle aren't in skills; check whether the sitstand / ground_pick slots are installed (robotd main.rs:4136-4156)
 SKILL_CN = {
     "ground_pick": "低头捡",
     "roulade": "前滚翻",
@@ -64,8 +64,8 @@ SKILL_CN = {
     "roller_stand": "轮滑起身",
     "sit_toggle": "坐下 ↔ 站起",
 }
-# 技能做完要多久（组合动作里下一步等它）：robotd-params lib.rs:1311-1341 的默认 duration（踢 0.5 秒、滚 1 秒），
-# 低头捡是相位动作、窗口 2.8 秒（原版训练配方说明）；不知道的按 2 秒等
+# How long a skill takes (the next step in a combo waits for it): default duration in robotd-params lib.rs:1311-1341 (kick 0.5 s, roll 1 s),
+# pick-up-from-ground is a phase action with a 2.8 s window (from the original training recipe notes); unknown ones wait 2 seconds
 SKILL_HOLD_S = {"kick_left": 0.8, "kick_right": 0.8, "roulade": 1.3, "ground_pick": 3.0}
 SKILL_HOLD_DEFAULT_S = 2.0
 NO_COMBO_SKILLS = {"sit_toggle"}
@@ -74,24 +74,24 @@ ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 
 STEP_CN = {"nod": "点头", "shake": "摇头", "tilt": "歪头", "mouth": "张嘴", "chatter": "说话（嘴一张一合）",
            "sound": "叫一声", "skill": "技能", "wait": "停一下"}
-# 要「策略在跑」才有效的步（见文件头）。张嘴、说话（只动嘴）按 fork 的规矩不要（三 V10）
+# Steps that only work with "policy running" (see the file header). Open mouth and talk (mouth only) don't need it, per the fork's rules (round 3 V10)
 NEEDS_POLICY = {"nod", "shake", "tilt", "skill"}
 
 
 class Refused(Exception):
-    """这个操作现在不能做。原因直接给页面看（pad.py、pad_drive.py 共用这一个）。"""
+    """This operation can't be done right now. The reason goes straight to the page (shared by pad.py and pad_drive.py)."""
 
 
-# ---------------- 内置的 ----------------
+# ---------------- Built-in ----------------
 
-# 单个动作（页面上按住就做一遍，松开就停）
+# Single actions (on the page, done once while held, stops on release)
 ACTIONS = [
     {"id": "nod", "name": "点头", "steps": [{"do": "nod", "times": 2}]},
     {"id": "shake", "name": "摇头", "steps": [{"do": "shake", "times": 2}]},
     {"id": "tilt", "name": "歪头", "steps": [{"do": "tilt", "side": "right", "ms": 1200}]},
     {"id": "mouth", "name": "张嘴", "steps": [{"do": "mouth", "open": 0.9, "ms": 900}]},
 ]
-# 组合动作（先内置这几个；自己编的存 state 目录的 pad-combos.json，编辑界面下一轮做）
+# Combo actions (these built-in ones for now; user-made ones are stored in pad-combos.json in the state directory, the editing UI comes next round)
 BUILTIN_COMBOS = [
     {"id": "hello", "name": "打招呼", "steps": [{"do": "sound", "tag": "greet"}, {"do": "nod", "times": 2},
                                               {"do": "mouth", "open": 0.8, "ms": 500}]},
@@ -104,7 +104,7 @@ BUILTIN_COMBOS = [
 ]
 
 
-# ---------------- 校验 ----------------
+# ---------------- Validation ----------------
 
 def _num(v, lo, hi, default, what):
     if v is None:
@@ -115,7 +115,7 @@ def _num(v, lo, hi, default, what):
 
 
 def clean_step(raw):
-    """一步 → 干净的一步（不认识的字段丢掉、数夹到范围里）。不对就抛 Refused。"""
+    """One step → a clean step (unknown fields dropped, numbers clamped to range). Raises Refused if invalid."""
     if not isinstance(raw, dict):
         raise Refused("每一步要是 {\"do\": …} 这样的对象")
     do = raw.get("do")
@@ -149,7 +149,7 @@ def clean_step(raw):
 
 
 def clean_combo(raw, builtin_ids=()):
-    """页面要存的组合动作 → 干净的。名字、步数、总时长都有上限；id 不能跟内置的撞。"""
+    """A combo action the page wants to save → a clean one. Name, step count, and total duration are all capped; the id must not collide with a built-in one."""
     if not isinstance(raw, dict):
         raise Refused("组合动作要是对象")
     cid = raw.get("id")
@@ -173,7 +173,7 @@ def clean_combo(raw, builtin_ids=()):
     return {"id": cid, "name": name, "steps": clean}
 
 
-# ---------------- 展开成时间表 ----------------
+# ---------------- Expansion into a timeline ----------------
 
 def step_seconds(step):
     do = step["do"]
@@ -186,7 +186,7 @@ def step_seconds(step):
     if do == "chatter":
         return step["times"] * CHATTER_PERIOD_S
     if do == "sound":
-        return 0.25            # 声音自己播；稍停一下再做下一步，听起来像是先叫后动
+        return 0.25            # the sound plays by itself; pause briefly before the next step so it sounds like quack first, then move
     if do == "skill":
         return SKILL_HOLD_S.get(step["name"], SKILL_HOLD_DEFAULT_S)
     return 0.0
@@ -197,7 +197,7 @@ def duration(steps):
 
 
 def head_at(step, t):
-    """这一步在第 t 秒头应该在哪：(neck_pitch, head_pitch, head_yaw, head_roll)；不管头的步返回 None。"""
+    """Where the head should be at second t of this step: (neck_pitch, head_pitch, head_yaw, head_roll); returns None for steps that don't involve the head."""
     do = step["do"]
     if do == "nod":
         return (0.0, NOD_AMP * math.sin(2 * math.pi * t / NOD_PERIOD_S), 0.0, 0.0)
@@ -212,7 +212,7 @@ def head_at(step, t):
 
 
 def mouth_at(step, t):
-    """这一步在第 t 秒嘴张多大（0..1）；不管嘴的步返回 None。"""
+    """How wide the mouth is open at second t of this step (0..1); returns None for steps that don't involve the mouth."""
     do = step["do"]
     if do == "mouth":
         return step["open"] if t < step["ms"] / 1000 - TICK_S else 0.0
@@ -226,7 +226,7 @@ def needs_policy(steps):
 
 
 def describe(steps):
-    """给页面看的一句话：点头 2 次 → 张嘴 → 叫一声（打招呼）"""
+    """A sentence for the page, e.g.: 点头 2 次 → 张嘴 → 叫一声（打招呼） (nod 2 times → open mouth → quack (greeting))"""
     out = []
     for s in steps:
         do = s["do"]
@@ -245,10 +245,10 @@ def describe(steps):
     return " → ".join(out)
 
 
-# ---------------- 存取（state 目录的 pad-combos.json） ----------------
+# ---------------- Storage (pad-combos.json in the state directory) ----------------
 
 def load_user_combos(state_dir, log=None):
-    """读用户自己编的组合动作。文件坏了、某一条不对：跳过那条、记日志，不挡别的。"""
+    """Read the user's own combo actions. If the file is broken or an entry is invalid: skip that entry, log it, don't block the others."""
     if not state_dir:
         return []
     path = os.path.join(state_dir, COMBO_FILE)
@@ -274,7 +274,7 @@ def load_user_combos(state_dir, log=None):
 
 
 def save_user_combos(state_dir, combos):
-    """整份写回（先写临时文件再改名，写一半断电不会把旧的弄坏）。"""
+    """Write the whole thing back (write a temp file first, then rename, so a power loss halfway doesn't corrupt the old one)."""
     if not state_dir:
         raise Refused("这只鸭子没配 state 目录，存不了")
     os.makedirs(state_dir, exist_ok=True)

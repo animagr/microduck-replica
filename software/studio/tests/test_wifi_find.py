@@ -1,8 +1,8 @@
-"""连 WiFi 以后找鸭子的新地址（任务 17）：web/wifi.js 的探测逻辑，用 Node 跑真代码（不开浏览器）。
+"""Finding the duck's new address after joining WiFi (task 17): the probing logic of web/wifi.js, running the real code in Node (no browser).
 
-tests/wifi_find.mjs 用假时钟、假探测跑几幕（找到了、3 分钟找不到、热点回来了停下、一个地址挂着不回、probeImage 本身），
-把每一幕探了哪些地址、什么时候跳、什么时候放弃打成 JSON；这里核对。页面上的那张卡片和真跳转在 tests/wifi_e2e.mjs 里。
-电脑上要装 Node（≥ 20）；没有 Node（比如鸭子上）就跳过。单独跑：
+tests/wifi_find.mjs runs several scenes with a fake clock and fake probes (found it, not found within 3 minutes, hotspot came back so it stops, one address hangs without replying, probeImage itself),
+and prints as JSON which addresses each scene probed, when it redirected and when it gave up; this file checks that. The card on the page and the real redirect are in tests/wifi_e2e.mjs.
+Node (≥ 20) must be installed on the computer; without Node (e.g. on the duck) it is skipped. To run it alone:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_wifi_find'])"
 """
 import json
@@ -33,7 +33,7 @@ class FindDuckLogic(unittest.TestCase):
 
     def test_addresses_from_net_json_hostname(self):
         self.assertEqual(self.out["urls"], [HOST, LOCAL])
-        self.assertEqual(self.out["urlsPort"], ["http://duck-c51b:18080/", "http://duck-c51b.local:18080/"])  # 端口跟 --listen
+        self.assertEqual(self.out["urlsPort"], ["http://duck-c51b:18080/", "http://duck-c51b.local:18080/"])  # port follows --listen
         self.assertEqual(self.out["urlsBare"], ["http://duck-c51b:8000/", "http://duck-c51b.local:8000/"])
 
     def test_first_success_jumps_and_stops(self):
@@ -42,7 +42,7 @@ class FindDuckLogic(unittest.TestCase):
         self.assertEqual(s["gaveUp"], [])
         self.assertTrue(s["stopped"])
         self.assertEqual(s["pending"], 0)
-        self.assertEqual(sorted({c["t"] for c in s["calls"]}), [0, 2000, 4000, 6000])        # 每 2 秒一轮，找到就不再探
+        self.assertEqual(sorted({c["t"] for c in s["calls"]}), [0, 2000, 4000, 6000])        # one round every 2 s; stop probing once found
         self.assertTrue(all({c["url"] for c in s["calls"] if c["t"] == t} == {HOST, LOCAL} for t in (0, 2000, 4000, 6000)))
 
     def test_gives_up_after_three_minutes(self):
@@ -51,12 +51,12 @@ class FindDuckLogic(unittest.TestCase):
         self.assertEqual(s["found"], [])
         self.assertTrue(s["stopped"])
         self.assertEqual(s["pending"], 0)
-        self.assertEqual(len(s["calls"]), 2 * 90)                                       # 0、2、…、178 秒，两个地址
+        self.assertEqual(len(s["calls"]), 2 * 90)                                       # 0, 2, …, 178 s, two addresses
         self.assertEqual(max(c["t"] for c in s["calls"]), 178000)
 
     def test_stop_when_hotspot_comes_back(self):
         s = self.out["stop"]
-        self.assertEqual(s["found"], [])                     # 停之前发出去、停之后才回「通了」的也不跳
+        self.assertEqual(s["found"], [])                     # a probe sent before stopping that replies "reachable" only after stopping doesn't redirect either
         self.assertEqual(s["gaveUp"], [])
         self.assertTrue(s["stopped"])
         self.assertEqual(s["pending"], 0)

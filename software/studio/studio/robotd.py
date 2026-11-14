@@ -81,11 +81,11 @@ class Robotd:
         self.calib_valid_after = None
         self._last_phase = None
         # Since when (monotonic) busStatus has kept reporting a startup phase on this connection; None when not in a startup phase. After 30 seconds the page changes to
-        # "keeps reporting starting" (Oct 20 real hardware: the old fork's calibration mode always reports configuring_bus)
+        # "一直报启动中" (keeps reporting starting) (Oct 20 real hardware: the old fork's calibration mode always reports configuring_bus)
         self.starting_since = None
         self._wake_poll = asyncio.Event()   # on relax, wakes polling from its backoff sleep
         self._loop = None                   # event loop: used to wake polling when another thread calls set_paused (thread-safe)
-        self.paused = None                  # robotd is stopped on purpose while tuning servos: polling paused, don't report "main program missing"
+        self.paused = None                  # robotd is stopped on purpose while tuning servos: polling paused, don't report "主程序不在" (main program missing)
         self.startup = StartupTrack()       # the four startup steps (written by startup_loop in startup.py; read by the tuning card and to-do list)
 
     # ---- Lifecycle ----
@@ -291,7 +291,7 @@ class Robotd:
                     self.hello.set(r)
                     self.calib_valid_after = self.hello.at    # calibration status read before this is invalid (review O5)
                     self._last_phase = None
-                    self.starting_since = None                # "keeps reporting starting" is counted again from this connection
+                    self.starting_since = None                # "一直报启动中" (keeps reporting starting) is counted again from this connection
                     self._mark_present(True)
                     hello_done = True
                     hello_link = self.poll.reconnects

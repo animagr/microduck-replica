@@ -1,10 +1,10 @@
-"""「更多」页 SSH 卡片的钥匙：登记、列出、删掉 radxa 的 SSH 公钥。
+"""Keys for the SSH card on the "More" page: add, list and delete radxa's SSH public keys.
 
-用户 10-21：会用钥匙的人不用开密码登录，把自己电脑的公钥贴进来就能 SSH。
-Studio 本来就以 radxa 身份跑，~/.ssh/authorized_keys 是 radxa 自己的文件，所以不经过 root 小助手。
+User Oct 21: people who know how to use keys don't need password login enabled; they paste their computer's public key here and can SSH in.
+Studio already runs as radxa, and ~/.ssh/authorized_keys is radxa's own file, so this does not go through the root helper.
 
-只收一整行公钥（类型 + base64 + 可选注释），不收前面带 command= / from= 这类选项的行：网页上贴进来的，
-就照最普通的写法存。指纹跟 `ssh-keygen -l` 的 SHA256 一样，页面上靠它对上是哪一把、删哪一把。
+Only accepts a whole public key line (type + base64 + optional comment), not lines prefixed with options such as command= / from=: anything pasted on the web page
+is stored in the plainest form. The fingerprint is the same SHA256 as `ssh-keygen -l`; the page uses it to tell which key is which and which one to delete.
 """
 import base64
 import binascii
@@ -19,7 +19,7 @@ MAX_COMMENT = 200
 
 
 class BadKey(ValueError):
-    """贴进来的不是一把能用的公钥。消息直接给页面看。"""
+    """What was pasted is not a usable public key. The message is shown directly on the page."""
 
 
 def fingerprint(blob):
@@ -27,7 +27,7 @@ def fingerprint(blob):
 
 
 def parse(line):
-    """一行公钥 → {"type", "b64", "comment", "fp"}。不对就抛 BadKey（人话）。"""
+    """One public key line → {"type", "b64", "comment", "fp"}. Raises BadKey (in plain language) if invalid."""
     if not isinstance(line, str):
         raise BadKey("要贴一行公钥文字")
     text = line.strip()
@@ -60,7 +60,7 @@ def parse(line):
 
 
 def _key_in_line(line):
-    """authorized_keys 里的一行（可能带选项）→ 解析出的钥匙；注释行、看不懂的回 None。"""
+    """One line of authorized_keys (may have options) → the parsed key; comment lines and unrecognized lines return None."""
     text = line.strip()
     if not text or text.startswith("#"):
         return None
@@ -121,7 +121,7 @@ class SshKeys:
         os.replace(tmp, self.path)
 
     def add(self, line):
-        """回 (加上没有, 钥匙)。同一把已经在了就不重复写（回 False）。"""
+        """Returns (added or not, key). If the same key is already there it is not written again (returns False)."""
         k = parse(line)
         if any(x["fp"] == k["fp"] for x in self.list()):
             return False, k
@@ -133,7 +133,7 @@ class SshKeys:
         return True, k
 
     def remove(self, fp):
-        """按指纹删掉（同一把写了几行都删）。回删掉了几行。"""
+        """Delete by fingerprint (deletes every line holding the same key). Returns how many lines were deleted."""
         if not isinstance(fp, str) or not fp.startswith("SHA256:"):
             raise BadKey("指纹不对")
         kept, gone = [], 0

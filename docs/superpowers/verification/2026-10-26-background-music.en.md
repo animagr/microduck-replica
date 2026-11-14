@@ -1,0 +1,38 @@
+# Web background music motion: implementation, deployment and verification
+
+**English** · [简体中文](2026-10-26-background-music.md)
+
+Date: 2026-10-26 (JST). The user explicitly asked for it to "keep working in the background too." The software and browser checks passed, and it has been deployed via SSH; the latest 45-second real-music observation still showed no actual head movement, the full physical chain has not yet passed acceptance, and software output cannot be treated as a physical motion acceptance check.
+
+## Deployed version and behavior
+
+- Runtime code: Studio `29b940013e3542f9e87944db65e913d1a658f313`, core implementation `ad6651218cb7f138fb07069fcf3445586193a764`; the later commit only syncs two pieces of explanatory text. The voice service is still `2f24a6a`; this round did not change the DSP, model, amplitude, network or servo parameters.
+- Only standalone moving-to-the-music is managed continuously by the server. It continues through web focus loss, background, scrolling out of the remote area and in-site navigation within the same WebSocket; actual disconnect/close, explicit stop, audio source off or state invalidation, physical gamepad takeover, manual input/takeover by another page, and e-stop/policy/model changes stop it, and old sessions are not restored automatically. Ordinary Lively, recording (including recording music), playback, and joystick/buttons still follow the original foreground rules.
+- With no web viewer, the real robot telemetry subscription is kept; state times and application heartbeats are not faked. The new `studio.ws_protocol` keeps the pinned Uvicorn event handling and adds native Ping/Pong matched by a random nonce with a 5-second wait limit, so standalone music can continue while JavaScript heartbeats are paused for more than 30 seconds, and an unconfirmed connection is closed. Vendored dependencies were not edited.
+- The real safety state is rechecked before sending each frame; if, after sending the head first, telemetry is stale or listening is off, queued body frames are no longer sent. The music session is cleaned up only once; the extra move0 of the existing takeover `_halt` is kept.
+
+## Verification evidence
+
+- TDD reproduction: the original version stopped after leaving the foreground/500ms motion heartbeat/no viewer; after the change the background session continues. Also reproduced and fixed a race where the next frame was still sent while telemetry went stale or the audio source was turned off during queued output, and a race between an explicit stop and the start hash computation.
+- The related broad-coverage 308 Python items passed (before the final pre-send race fix); the final focused 103 items passed in 12.283 seconds; an additional standalone 93 Python items and 20 Node items passed. Some old HTTP tests on Windows have pre-existing AF_UNIX/resource warnings, and do not represent the physical effect on Linux.
+- The independent spec review passed 99 Python items, 16 Node items and 4 HTTP/telemetry integration items; the independent quality review passed 4 protocol items and 16 Node items. The core and the final text each passed review, with no significant unresolved review items.
+- The full local real Edge flow passed in 103.358 seconds with no console errors: sit/stand recording/triple playback/abort and narrow screen are kept; with music but no beat it waits; 14 frames of head output after blur; after real in-site navigation unmounted the component and JS application heartbeats were filtered for 31.5 seconds, there were still 20 frames of head output, with no motion heartbeat; returning correctly shows the running state; turning off listening and a real WebSocket close/reconnect both stop it without revival. These are fake robot outputs and do not represent actual body motion.
+- The first browser round passed the background motion assertions, then timed out waiting for the 390px screenshot; after adding foreground/paint waits and size stabilization before screenshots, the final flow above completed. The last two text changes only got a JS syntax check, the 20 Node items and a diff review, without repeating the full motion flow.
+
+## On the robot
+
+- The user confirmed it was stopped and standing still; the actual readback was motion/control, homed=true, policy_enabled=false, all joint feedback fresh with zero velocity; physical gamepad disconnected. No HOME/enable or stop commands were re-sent.
+- 9 runtime files were updated, backup `/home/radxa/.microduck-backups/web-background-music-20261026-be22c51564`. The hashes of the user's 12 original state files were unchanged, and all installed file hashes match the frozen version.
+- Studio PID 11672 active; robotd 1097, padd 1135, duck-echo 6325 and their start times were exactly the same before and after the web update. Voice was only restarted during an earlier standalone capture diagnosis; this deployment did not restart the voice/motion core.
+- 8 HTTP/health/static file checks returned 200, with served JS/CSS byte hashes matching and no-cache. The real WebSocket snapshot still requires login; authentication was not bypassed.
+- After the user refreshed and replied "已开启" (Turned on), 45 seconds were observed: all 450 feedback items were fresh, the motion policy was on throughout, and there were no control-cycle errors; 136 beat items were valid (about 30%, BPM 66.7/136.4/142.9/200), the position range of all head axes was 0, and the body barely moved either (only one encoder count change on two joints). So the real motion still did not pass, and it cannot be claimed that the background feature has passed the motion acceptance check on this robot.
+- A subsequent read-only native subscription showed the head command was already close to 0, and the Studio log showed the telemetry subscription stopped after no viewer, indicating there was no continuously alive background music session at the time. The logs also contain web manual move/release events, but it has not been confirmed that these were the reason the session ended, so this cannot be attributed to the user's actions. The web motion panel state and the original prompt are being requested, to distinguish not started, terminated by takeover/safety state, and waiting for beat.
+- When the Windows computer-operation attempt tried to read the existing duck web page, the tool stopped that channel because it could not reliably confirm the browser URL; that protection and the login were not bypassed, and afterwards only the authorized SSH was used to read the device. The web UI state still awaits the user's text feedback.
+
+## The original problem still needs separate acceptance
+
+In this round the live speaker-output input RMS was about 327–2266, with clear acoustic changes observable; a 12-second private DSP comparison could detect 24 onsets, but the existing RMS beat had only 16/120 valid items. Another 45-second record had 149/450 valid items, the UI foreground state was uncertain, and the joints did not move. Therefore "music received", "stable beat recognized", "background session alive" and "the model makes the joints move" must each be confirmed separately. The aubio experiment is still only in staging and is not wired into production.
+
+The current model's body tracking reward weight is 0; an earlier short direct head yaw test could respond, while the body basically did not respond. See the [local music investigation](2026-10-26-local-music-fix.md). This background lifecycle fix does not change the body model's capability, nor does it add mouth motion to the music.
+
+Root workspace evidence: `artifacts/background-music-20261026/`; earlier sound/model probes are in `artifacts/music-local-fix-20261026/`.

@@ -1,12 +1,12 @@
-"""网页手柄（手柄页第三轮：图上的键能按）的端到端：假 robotd + 真 Studio + 无头 Edge。
+"""End-to-end test of the web gamepad (gamepad page round 3: the buttons on the picture can be pressed): fake robotd + real Studio + headless Edge.
 
-tests/vpad_e2e.mjs 在页面上点图上的键、拖摇杆、按键盘、手机上两个手指一起拖，把假 robotd 每一步收到的东西打出来；
-这里核对「点了什么 → robotd 收到什么」（pad-vpad-plan.md §8 / 审查 pad-vpad-review.md 的 V1–V7、V16、V17）。
+tests/vpad_e2e.mjs clicks buttons on the picture, drags the sticks, presses keyboard keys, and drags with two fingers at once on a phone, printing everything the fake robotd receives at each step;
+this file checks "what was clicked → what robotd received" (pad-vpad-plan.md §8 / V1–V7, V16, V17 of the review pad-vpad-review.md).
 
-要电脑上有 Node（≥ 22，自带 WebSocket）和 Edge；没有（比如鸭子上）就跳过。设 STUDIO_E2E=0 也跳过。
-端口默认 Studio 18090、假 robotd 17021 / configd 17022、Edge 调试口 9343，被占了就换空闲的（不碰别人在跑的）。
-VPAD_E2E_DIR=目录：日志、Edge 的 profile、假 robotd 的记录放这里（默认临时目录，跑完删）；VPAD_SHOTS=目录：顺手截图。
-单独跑：
+Requires Node (≥ 22, with built-in WebSocket) and Edge on the computer; without them (e.g. on the duck) it is skipped. Setting STUDIO_E2E=0 also skips it.
+Default ports: Studio 18090, fake robotd 17021 / configd 17022, Edge debug port 9343; if taken, free ones are used instead (it doesn't touch anything someone else is running).
+VPAD_E2E_DIR=dir: logs, Edge profile and the fake robotd's records go here (default is a temp dir, deleted after the run); VPAD_SHOTS=dir: take screenshots along the way.
+To run it alone:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_vpad_e2e'])"
 """
 import json
@@ -41,7 +41,7 @@ def _node_ok():
 
 
 def _port(want):
-    """想要的端口空着就用它，被占了（别人的 Studio / Edge）换一个空闲的。"""
+    """Use the wanted port if it's free; if taken (someone else's Studio / Edge), pick a free one."""
     for p in (want, 0):
         s = socket.socket()
         try:
@@ -55,7 +55,7 @@ def _port(want):
 
 
 def _wait_http(url, what, timeout=20):
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # 本机地址：不走系统代理
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # local address: bypass the system proxy
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         try:
@@ -70,7 +70,7 @@ def _wait_http(url, what, timeout=20):
 def _kill(p):
     if p is None or p.poll() is not None:
         return
-    if sys.platform == "win32":     # Edge 会起一串子进程：整棵树一起关
+    if sys.platform == "win32":     # Edge spawns a chain of child processes: close the whole tree
         subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True)
     else:
         p.terminate()
@@ -152,7 +152,7 @@ class VpadE2E(unittest.TestCase):
         self.assertEqual(self.recs("key_a"), [{"method": "robot.do", "params": {"skill": "ground_pick"}, "notify": False}])
 
     def test_x_hold_rolls_again_and_again(self):
-        """方案 C（V4）：按下发一次请求，按住每 40 ms 一次通知。"""
+        """Option C (V4): one request on press, then a notification every 40 ms while held."""
         rs = self.recs("x_hold")
         self.assertEqual(rs[0], {"method": "robot.do", "params": {"skill": "roulade"}, "notify": False})
         self.assertGreaterEqual(sum(1 for r in rs[1:] if r["method"] == "robot.do" and r["notify"]), 8)
@@ -164,8 +164,8 @@ class VpadE2E(unittest.TestCase):
         sounds = [r["params"] for r in rs if r["method"] == "robot.sound"]
         self.assertGreaterEqual(mouths.count({"open": 1}), 5)
         self.assertGreaterEqual(sounds.count({"tag": "wheee", "hold": True}), 5)
-        self.assertEqual(mouths[-1], {"open": 0})                       # 结束一定合嘴
-        self.assertEqual(sounds[-1], {"tag": "wheee", "hold": False})   # 松开发 hold:false
+        self.assertEqual(mouths[-1], {"open": 0})                       # mouth always closes at the end
+        self.assertEqual(sounds[-1], {"tag": "wheee", "hold": False})   # release sends hold:false
         self.assertTrue(all(r["notify"] for r in rs))
 
     def test_rt_chirps_once(self):
@@ -176,16 +176,16 @@ class VpadE2E(unittest.TestCase):
     def test_head_mode_moves_head_not_body(self):
         rs = self.recs("head")
         heads = [r["params"] for r in rs if r["method"] == "robot.head"]
-        self.assertGreaterEqual(sum(1 for h in heads if h["neck_pitch"] > 1.0), 3)   # 右摇杆往上 = 脖子（附 2）
-        self.assertEqual(heads[-1], HEAD0)                                            # 松手 / 退出：头回正
+        self.assertGreaterEqual(sum(1 for h in heads if h["neck_pitch"] > 1.0), 3)   # right stick up = neck (appendix 2)
+        self.assertEqual(heads[-1], HEAD0)                                            # release / exit: head returns to center
         self.assertFalse(any(nonzero(p) for p in moves(rs)), "头模式里不该走")
         self.assertNotIn("robot.pose", [r["method"] for r in rs])
 
     def test_body_mode_crouch_then_exit_with_active_false(self):
         poses = [r["params"] for r in self.recs("body") if r["method"] == "robot.pose"]
-        self.assertTrue(any(p["z"] < -0.01 and p["active"] is True for p in poses if "z" in p))   # 往下推 = 蹲
-        self.assertIn({"z": 0, "roll": 0, "pitch": 0, "active": True}, poses)                     # 松手回中
-        self.assertEqual(poses[-1], {"active": False})                                            # 退出：一定写 active:false
+        self.assertTrue(any(p["z"] < -0.01 and p["active"] is True for p in poses if "z" in p))   # push down = crouch
+        self.assertIn({"z": 0, "roll": 0, "pitch": 0, "active": True}, poses)                     # release returns to center
+        self.assertEqual(poses[-1], {"active": False})                                            # exit: always writes active:false
         self.assertTrue(all("active" in p for p in poses))
 
     def test_keyboard_only_when_focused_and_no_arrows(self):
@@ -211,12 +211,12 @@ class VpadE2E(unittest.TestCase):
                          [("robot.enable", {"on": True, "toggle": False})])
 
     def test_select_relaxes_on_press(self):
-        """V3：图上的 Select 按下就卸力（松手之前 robotd 已经收到了）；镜像时也能按。"""
+        """V3: Select on the picture releases torque on press (robotd has received it before the button is released); it also works when mirrored."""
         self.assertIn("robot.relax", [r["method"] for r in self.out["steps"]["select"]["whilePressed"]])
         self.assertIn("robot.relax", [r["method"] for r in self.recs("mirror_select")])
 
     def test_dpad_up_needs_a_3s_hold_like_official(self):
-        """十字上照官方：按不到 3 秒不切；按满 3 秒发 robot.setMode（要切到的那个），主程序拒了页面写原因。"""
+        """D-pad up follows official: a press under 3 s doesn't switch; after a full 3 s it sends robot.setMode (the mode to switch to); if the main program rejects it, the page shows the reason."""
         def modes(step):
             return [r["params"] for r in self.recs(step) if r["method"] == "robot.setMode"]
         self.assertEqual(modes("dpad_up_short"), [])
@@ -226,7 +226,7 @@ class VpadE2E(unittest.TestCase):
         self.assertEqual(modes("dpad_up_back"), [{"mode": "walk"}])
 
     def test_dpad_right_reboots_with_one_press(self):
-        """十字右照官方：按一下就发 robot.rebootMotors（空 = 全部），不用确认。"""
+        """D-pad right follows official: one press sends robot.rebootMotors (empty = all), no confirmation needed."""
         self.assertEqual([(r["method"], r["params"]) for r in self.recs("dpad_right") if not r["notify"]],
                          [("robot.rebootMotors", {"ids": []})])
 
@@ -236,7 +236,7 @@ class VpadE2E(unittest.TestCase):
         self.assertTrue(any(p["vx"] > 0.15 for p in moves(self.recs("back_again"))), "回到手柄页以后摇杆不管用了（V5 open）")
 
     def test_mirror_sends_nothing(self):
-        """V16：实体手柄连着，图上点的、拖的、按的都不发。"""
+        """V16: while a physical gamepad is connected, nothing clicked, dragged or pressed on the picture is sent."""
         self.assertEqual(self.recs("mirror"), [])
         self.assertIn("实体手柄连着", self.out["steps"]["mirror"]["bar"])
 

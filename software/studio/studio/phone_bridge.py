@@ -1,29 +1,29 @@
-"""手机上 https 之后要补的两件事：摄像头信令转发、手机录音转文字。
+"""Two things that need to be added once the phone uses https: camera signaling forwarding and phone voice recordings to text.
 
-为什么得有这个模块：
+Why this module is needed:
 
-1. 摄像头：mediad 的信令口 8443 是明文 ws。http 页面直连没事，页面一换成 https，
-   浏览器就把「https 页面连明文 ws」当混合内容挡掉，摄像头直接黑掉。
-   所以挂一个同域同协议的 /media-ws，由 Studio 转发到本机 127.0.0.1:8443 —— 同源同协议，
-   不存在混合内容，桌面版 http 那条路也照样能走。
+1. Camera: mediad's signaling port 8443 is plaintext ws. Connecting directly from an http page is fine, but once the page switches to https,
+   the browser blocks "https page connecting to plaintext ws" as mixed content, and the camera goes black.
+   So we mount a same-origin, same-protocol /media-ws, which Studio forwards to the local 127.0.0.1:8443 —— same origin and protocol,
+   so there's no mixed content, and the desktop http path still works as before.
 
-2. 手机说话：浏览器的语音识别（Web Speech API）在安卓 Chrome 上走的是谷歌服务，国内基本不通，
-   iOS 各家表现也不一致。与其指望它，不如把手机录的一段 PCM 传回来，
-   用板上 duck-echo 正在用的那一套 Vosk 中文模型来认——跟对着鸭子说话是同一个模型、同一套词表。
+2. Speaking on the phone: the browser's speech recognition (Web Speech API) goes through Google services on Android Chrome, which basically doesn't work in mainland China,
+   and behavior on iOS varies between vendors too. Rather than rely on it, we send a clip of PCM recorded on the phone back,
+   and recognize it with the same Vosk Chinese model duck-echo uses on the board —— the same model and vocabulary as talking to the duck directly.
 
-依赖说明：vosk 和 websockets 都不在 Studio 自己的 deps 里，而在 duck-echo 用的 asr-deps 下，
-所以这里要靠 sys.path 临时加一下。两个都是「用到才 import」，万一没有也不能拖垮整个网页。
+Dependencies: vosk and websockets aren't in Studio's own deps but under duck-echo's asr-deps,
+so we temporarily add them via sys.path here. Both are "imported only when used", so if either is missing it must not bring down the whole web page.
 
-11-03 的两处修正（手机说了话、板子回空字符串、还等了 12 秒）：
+Two fixes from 11-03 (the phone spoke, the board returned an empty string, after waiting 12 seconds):
 
-* **要带命令词表（grammar）**。原来用的是无 grammar 的通用解码，中文小模型通用解码又慢又飘：
-  板子实测 1.2 秒的音频要跑 6.3 秒，2 秒就要 12 秒，还常常吐空。
-  换成 duck-echo 那份 COMMAND_GRAMMAR，同一段音频 **0.3 秒**，结果一样对。
-  词表是直接从 duck-echo 的 speech_control 里借的——两边共用一份，才不会出现
-  「对着鸭子说得动、对着手机说不懂」这种玄学。
-* **音量归一化**。手机麦克风隔着半米说话，峰值经常只有几百（满幅 32767），
-  小模型直接当噪声丢掉。峰值低于 TARGET_PEAK 时线性放大（最多 8 倍），
-  同时把峰值/均方/耗时回给前端 —— 认不出来时用户能立刻看到「是太小还是没说话」。
+* **Use the command vocabulary (grammar)**. Previously it used general decoding with no grammar, and general decoding with the small Chinese model is slow and erratic:
+  on the board, 1.2 seconds of audio took 6.3 seconds to process, 2 seconds took 12 seconds, and it often returned nothing.
+  Switching to duck-echo's COMMAND_GRAMMAR, the same audio takes **0.3 seconds** with equally correct results.
+  The vocabulary is borrowed directly from duck-echo's speech_control —— sharing one copy is the only way to avoid
+  mysteries like "talking to the duck works, talking to the phone doesn't".
+* **Volume normalization**. With the phone mic half a meter away, the peak is often only a few hundred (full scale 32767),
+  and the small model just discards it as noise. When the peak is below TARGET_PEAK it's amplified linearly (up to 8x),
+  and the peak/RMS/elapsed time are returned to the front end —— when recognition fails the user can immediately see "too quiet, or nothing said".
 """
 import array
 import asyncio
@@ -36,19 +36,19 @@ import time
 
 ASR_DEPS = '/opt/microduck/resources/asr-deps'
 MODEL_DIR = '/opt/microduck/resources/models/vosk-model-small-cn-0.22'
-ECHO_DIR = '/opt/microduck/software/current/duck-echo'   # duck-echo 就在隔壁，词表直接借它的
+ECHO_DIR = '/opt/microduck/software/current/duck-echo'   # duck-echo is right next door; borrow its vocabulary directly
 MEDIA_UPSTREAM = 'ws://127.0.0.1:8443'
 SAMPLE_RATE = 16000
 
-MIN_PEAK = 120          # 整段最大幅度低于这个值就当没说话（int16 满幅 32767）
-MIN_CONF = 0.35         # 低于这个置信度当没听清：宁可不做，也别乱动
-TARGET_PEAK = 20000     # 归一化目标
+MIN_PEAK = 120          # if the max amplitude of the whole clip is below this, treat it as nothing said (int16 full scale 32767)
+MIN_CONF = 0.35         # below this confidence treat it as not heard clearly: better to do nothing than move randomly
+TARGET_PEAK = 20000     # normalization target
 MAX_GAIN = 8.0
-CHUNK = 8000            # 0.25 秒一喂
+CHUNK = 8000            # feed 0.25 seconds at a time
 
-# 手机中控认的口令（和 web/m/actions.js 的 RULES 同一批）。duck-echo 的词表只有坐下/站起来，
-# 手机这边还会点头、走一小步、前滚翻……所以这里自己列一份，再和 duck-echo 的合并。
-# 模型是单字词表：词条要按单字用空格隔开，整词会被 vosk_model_find_word 过滤掉。
+# Commands recognized by the phone web console (the same set as RULES in web/m/actions.js). duck-echo's vocabulary only has sit down / stand up,
+# while the phone side can also nod, take a small step, do a forward roll... so we list our own here and merge it with duck-echo's.
+# The model has a single-character vocabulary: entries must be single characters separated by spaces; whole words get filtered out by vosk_model_find_word.
 MOBILE_COMMANDS = [
     '点头', '摇头', '歪头', '偏头', '前滚翻', '翻跟头', '翻身', '低头捡东西', '低头', '捡东西',
     '叫一声', '叫一下', '叫两声', '打招呼', '你好', '张嘴', '开口',
@@ -71,7 +71,7 @@ def _deps_on_path():
 
 
 def _load_model():
-    """第一次用到才加载，加载完就一直留着（模型不大，但别每次请求都读一遍磁盘）。"""
+    """Loaded on first use and kept afterward (the model isn't big, but don't read the disk on every request)."""
     global _model, _error
     with _lock:
         if _model is not None or _error is not None:
@@ -79,16 +79,16 @@ def _load_model():
         try:
             _deps_on_path()
             from vosk import Model, SetLogLevel
-            # 不关掉的话，每认一句话都会把整张词表（两百多条）刷进 Studio 日志
+            # If not turned off, every recognized sentence would dump the whole vocabulary (200+ entries) into the Studio log
             SetLogLevel(-1)
             _model = Model(MODEL_DIR)
-        except Exception as exc:                       # 没装 / 模型不在：只是这个功能没有
+        except Exception as exc:                       # not installed / model missing: just this feature is unavailable
             _error = '%s: %s' % (type(exc).__name__, exc)
     return _model, _error
 
 
 def _mobile_grammar():
-    """手机口令 → 单字分隔的词条，带上常见前后缀。"""
+    """Phone command → single-character-separated entries, with common prefixes and suffixes."""
     out = []
     for phrase in MOBILE_COMMANDS:
         body = ' '.join(phrase)
@@ -98,7 +98,7 @@ def _mobile_grammar():
 
 
 def _grammar_json(model):
-    """手机口令 + duck-echo 的命令词表。一个都过滤不出来就返回 None（退回通用解码，慢但能跑）。"""
+    """Phone commands + duck-echo's command vocabulary. Returns None if nothing survives filtering (falls back to general decoding: slow but works)."""
     global _grammar, _grammar_ready
     if _grammar_ready:
         return _grammar
@@ -111,7 +111,7 @@ def _grammar_json(model):
     except Exception:
         pass
     try:
-        # 词表里真实存在的说法才留下：小模型是单字词表，写成整词的会整条丢掉
+        # Only keep phrasings that really exist in the vocabulary: the small model has a single-character vocabulary, and entries written as whole words get dropped entirely
         kept, seen = [], set()
         for phrase in entries:
             if phrase in seen:
@@ -129,7 +129,7 @@ def _grammar_json(model):
 
 
 def _normalize(pcm):
-    """PCM → 归一化后的 PCM + 这段音频的体检结果。"""
+    """PCM → normalized PCM + a health check of this audio clip."""
     samples = array.array('h')
     samples.frombytes(pcm[:len(pcm) // 2 * 2])
     if not samples:
@@ -148,13 +148,13 @@ def _normalize(pcm):
 
 
 def transcribe_detail(pcm, use_grammar=True):
-    """16 kHz / 16 bit / 单声道 / 小端的裸 PCM → {'text', 'error', 'info'}。
+    """16 kHz / 16 bit / mono / little-endian raw PCM → {'text', 'error', 'info'}.
 
-    info 里带上这次的体检数据（秒数、峰值、放大倍数、识别耗时、置信度、没认出来的原因），
-    前端能照着说人话：「声音太小」「听清了但不确定」。
+    info carries this run's health-check data (seconds, peak, gain, recognition time, confidence, reason for not recognizing),
+    so the front end can explain in plain language: "声音太小" (too quiet), "听清了但不确定" (heard but not sure).
 
-    use_grammar=False 走通用解码：慢得多（2 秒音频要 6~12 秒），但不受命令词表限制，
-    自检页用它来看「板子到底听到什么」，也用来判断 [unk] 是「没听清」还是「词不在表里」。
+    use_grammar=False uses general decoding: much slower (6~12 seconds for 2 seconds of audio), but not limited by the command vocabulary;
+    the self-check page uses it to see "what the board actually heard", and to tell whether [unk] means "not heard clearly" or "word not in vocabulary".
     """
     out = {'text': '', 'error': None, 'info': {}}
     model, err = _load_model()
@@ -186,8 +186,8 @@ def transcribe_detail(pcm, use_grammar=True):
         return out
 
     text = ''.join(p.get('text', '') for p in parts).replace(' ', '')
-    # 带词表解码时，语音对不上词表里的任何一条就会吐 [unk]（unknown word）。
-    # 它不是一个「词」，不能当成识别结果往下传 —— 否则前端会去找一个叫 [unk] 的动作。
+    # When decoding with a vocabulary, speech that doesn't match any entry yields [unk] (unknown word).
+    # It isn't a "word" and can't be passed on as a recognition result —— otherwise the front end would look for an action called [unk].
     unknown = '[unk]' in text
     text = text.replace('[unk]', '').strip()
     confs = [w.get('conf', 0.0) for p in parts for w in p.get('result', [])]
@@ -198,12 +198,12 @@ def transcribe_detail(pcm, use_grammar=True):
         info['reason'] = 'unknown' if unknown else 'unclear'
         return out
     if unknown:
-        # 「点头 [unk]」这种：认出一半，还剩一截听不懂。按没认出处理更安全。
+    # Cases like "点头 [unk]" (nod [unk]): half recognized, with a part not understood. Treating it as unrecognized is safer.
         info['reason'] = 'unknown'
         info['heard'] = text
         return out
     if conf < MIN_CONF:
-        # 认出来了但不敢用：把原话留在 info 里，diag 页能看见，前端只提示「没听清」
+        # Recognized but not trustworthy: keep the original text in info so the diag page can see it; the front end only says "没听清" (didn't catch that)
         info['reason'] = 'unclear'
         info['heard'] = text
         return out
@@ -212,29 +212,29 @@ def transcribe_detail(pcm, use_grammar=True):
 
 
 def transcribe(pcm):
-    """老接口：只要文字和错误。"""
+    """Old API: only text and error."""
     detail = transcribe_detail(pcm)
     return detail['text'], detail['error']
 
 
 def warmup():
-    """启动时先在后台把模型和词表读好，别让用户说的第一句话干等它。
+    """Load the model and vocabulary in the background at startup, so the user's first sentence doesn't have to wait for it.
 
-    Zero 3W 上冷加载实测 2~5 秒，开机那阵子 CPU 忙的时候更久（用户 11-03 就遇到过一次
-    上传后等了 25 秒才回来）。这段时间页面上什么都不会变，看着就像「长按没反应」，
-    所以让 Studio 一起来就把它读好。
+    Cold loading on the Zero 3W measured 2~5 seconds, longer while the CPU is busy right after boot (the user hit it once on 11-03:
+    after uploading it took 25 seconds to come back). During that time nothing on the page changes, and it looks like "long press does nothing",
+    so have Studio load it as soon as it starts.
     """
     model, err = _load_model()
     if model is not None:
-        _grammar_json(model)          # 词表也要编译一次，第一句话才不会又卡在这里
+        _grammar_json(model)          # the vocabulary also needs compiling once, so the first sentence doesn't get stuck here again
     return (model is not None), err
 
 
 async def pump_media(ws, upstream=MEDIA_UPSTREAM):
-    """在 starlette 的 WebSocket 和本机 mediad 之间双向转发。
+    """Forward in both directions between starlette's WebSocket and the local mediad.
 
-    两边 API 不一样（starlette 收 dict，websockets 库直接给 str/bytes），所以各写一个方向的泵，
-    谁先结束就把另一个也收掉。
+    The two APIs differ (starlette receives dicts, the websockets library gives str/bytes directly), so we write a pump for each direction,
+    and whichever finishes first shuts down the other one too.
     """
     _deps_on_path()
     import websockets
@@ -242,7 +242,7 @@ async def pump_media(ws, upstream=MEDIA_UPSTREAM):
     async with websockets.connect(upstream, max_size=None, ping_interval=None) as up:
 
         async def down_to_up():
-            """浏览器 → mediad"""
+            """browser → mediad"""
             try:
                 while True:
                     message = await ws.receive()
@@ -256,7 +256,7 @@ async def pump_media(ws, upstream=MEDIA_UPSTREAM):
                 return
 
         async def up_to_down():
-            """mediad → 浏览器"""
+            """mediad → browser"""
             try:
                 async for data in up:
                     if isinstance(data, bytes):

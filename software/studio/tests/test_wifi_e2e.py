@@ -1,11 +1,11 @@
-"""Studio「连 WiFi」的端到端：假 configd 写 hotspot 的 net.json + 真 Studio + 无头 Edge（390 宽）。
+"""End-to-end test of Studio's "Join WiFi" (「连 WiFi」): a fake configd writes the hotspot's net.json + real Studio + headless Edge (390 wide).
 
-tests/wifi_e2e.mjs 看卡片、选 Home、填错密码、确认、看到「正在切换」，再等 last-try 红字「密码不对」。
-任务 17：连接发出去以后页面断线（页面里的 WebSocket 垫片）→「找鸭子」卡片、探 probe.svg（CDP Fetch 拦）、热点回来停下、探到了跳过去。
-要电脑上有 Node（>= 22）和 Edge；没有（比如鸭子上）就跳过。设 STUDIO_E2E=0 也跳过。
-端口默认 Studio 18091、假 robotd 17031 / configd 17032、Edge 调试口 9344，被占了就换空闲的。
-WIFI_E2E_DIR=目录：日志、Edge profile、net.json 放这里（默认临时目录，跑完删）；WIFI_SHOTS=目录：顺手截图。
-单独跑：
+tests/wifi_e2e.mjs looks at the card, selects Home, enters a wrong password, confirms, sees "switching" (「正在切换」), then waits for the last-try red text "wrong password" (「密码不对」).
+Task 17: after the connect request is sent the page loses connection (a WebSocket shim in the page) → the "find the duck" (「找鸭子」) card, probing probe.svg (intercepted via CDP Fetch), stopping when the hotspot comes back, redirecting once found.
+Requires Node (>= 22) and Edge on the computer; without them (e.g. on the duck) it is skipped. Setting STUDIO_E2E=0 also skips it.
+Default ports: Studio 18091, fake robotd 17031 / configd 17032, Edge debug port 9344; if taken, free ones are used instead.
+WIFI_E2E_DIR=dir: logs, Edge profile and net.json go here (default is a temp dir, deleted after the run); WIFI_SHOTS=dir: take screenshots along the way.
+To run it alone:
     py -3.13 -I -c "import sys;sys.path[:0]=['deps','.','dev'];import unittest;unittest.main(module=None,argv=['x','-v','tests.test_wifi_e2e'])"
 """
 import json
@@ -91,7 +91,7 @@ class WifiE2E(unittest.TestCase):
         self.assertLessEqual(c["sw"], c["cw"])
 
     def test_card_addresses_by_device_and_own_hotspot_filtered(self):
-        """任务 16：开着 Clash 的 Windows 打不开 .local——地址按设备写；扫描结果里鸭子自己的热点滤掉；顶栏名字悬停看得到 IP。"""
+        """Task 16: Windows with Clash running can't open .local, so addresses are written per device; the duck's own hotspot is filtered from scan results; hovering the name in the top bar shows the IP."""
         c = self.out["card"]
         self.assertIn(f"Windows 电脑：http://duck-fake:{self.port}/（开着代理也能打开）", c["text"])
         self.assertIn(f"苹果手机、Mac：http://duck-fake.local:{self.port}/", c["text"])
@@ -124,7 +124,7 @@ class WifiE2E(unittest.TestCase):
         self.assertIn("Microduck-fake", c)
         s = self.out["switching"]
         self.assertIn("正在切换……手机马上会断开", s)
-        # 切换时那段话：三种地址按设备写（任务 16）
+        # the text shown while switching: the three kinds of address written per device (task 16)
         self.assertIn(f"Windows 电脑：http://duck-fake:{self.port}/（开着代理也能打开）", s)
         self.assertIn(f"苹果手机、Mac：http://duck-fake.local:{self.port}/", s)
         self.assertIn("安卓手机，或者上面都打不开：去路由器的设备列表找 duck-fake，用它的 IP 打开", s)
@@ -145,8 +145,8 @@ class WifiE2E(unittest.TestCase):
         self.assertEqual(m["diagClicked"], "/api/diag")
 
     def test_finding_card_probes_and_stops_when_hotspot_returns(self):
-        """任务 17：连接发出去、页面跟鸭子断了 →「找鸭子」卡片（地址能点）、每 2 秒探 duck-fake / duck-fake.local 的 probe.svg；
-        页面重新连上原来的地址（热点回来了）→ 卡片收起、不再探、照旧显示失败原因。"""
+        """Task 17: connect request sent, page loses the duck → "find the duck" card (addresses clickable), probing probe.svg on duck-fake / duck-fake.local every 2 s;
+        the page reconnects to the original address (hotspot came back) → card collapses, probing stops, the failure reason is still shown."""
         f = self.out["findA"]
         self.assertEqual(f["phase"], "finding")
         self.assertIn("鸭子正在连「Ghost」……", f["text"])
@@ -156,21 +156,21 @@ class WifiE2E(unittest.TestCase):
         self.assertLessEqual(f["sw"], f["cw"])
         probed = {re.sub(r"\?t=\d+$", "", u) for u in f["probes"]}
         self.assertEqual(probed, {f"http://duck-fake:{self.port}/probe.svg", f"http://duck-fake.local:{self.port}/probe.svg"})
-        self.assertGreaterEqual(len(f["probes"]), 4, f["probes"])               # 4.5 秒里至少两轮、每轮两个地址
+        self.assertGreaterEqual(len(f["probes"]), 4, f["probes"])               # at least two rounds in 4.5 s, two addresses per round
         b = self.out["findBack"]
         self.assertFalse(b["finding"])
         self.assertIn("上次连「Ghost」没成功：鸭子找不到这个 WiFi", b["lastTry"])
-        self.assertEqual(b["probesLater"], b["probesAtBack"])                   # 热点回来了：不再探
+        self.assertEqual(b["probesLater"], b["probesAtBack"])                   # hotspot came back: no more probing
 
     def test_found_duck_opens_new_address(self):
-        """任务 17：探到 duck-fake.local 了：页面自己跳过去。"""
+        """Task 17: duck-fake.local was reached by a probe: the page redirects there by itself."""
         self.assertEqual(self.out["found"]["href"], f"http://duck-fake.local:{self.port}/")
         self.assertEqual(self.out["found"]["title"], "found")
 
     def test_hotspot_password_warning_only_while_no_password(self):
         self.assertTrue(self.out["hotspotPasswordHint"])
         self.assertFalse(self.out["hotspotPasswordHintAfterSet"])
-        self.assertEqual(self.out["passwordSet"], 200)          # 网页设密码这一下真的成功了
+        self.assertEqual(self.out["passwordSet"], 200)          # setting the password from the web page really succeeded
 
 
 if __name__ == "__main__":

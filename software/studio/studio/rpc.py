@@ -1,33 +1,33 @@
-"""robotd / configd 的 JSON-RPC 客户端。
+"""JSON-RPC client for robotd / configd.
 
-线上格式（duck-ipc-proto/src/lib.rs 开头）：JSON-RPC 2.0，一行一个对象（NDJSON）。
+Wire format (top of duck-ipc-proto/src/lib.rs): JSON-RPC 2.0, one object per line (NDJSON).
     → {"jsonrpc":"2.0","id":1,"method":"robot.health","params":{}}
     ← {"jsonrpc":"2.0","id":1,"result":{...}}
-没有 id 的是通知（订阅的 robot.state 就是）。
+Messages without an id are notifications (the subscribed robot.state is one).
 
-robotd 每条连接**一次只处理一个请求**：读一行、答一行。所以：
-- 一个 Conn 同一时间只有一个请求在等回包（用锁排队）；
-- 超时了就把这条连接关掉，下次用时重连。不关的话，超时的那个请求会一直挡在前面，
-  晚到的回包也对不上号；
-- 卸力单独占一条连接（见 robotd.py），不跟慢请求排队。
+robotd handles **only one request at a time** per connection: read a line, answer a line. Therefore:
+- A Conn has only one request waiting for a reply at any time (queued with a lock);
+- On timeout, close the connection and reconnect on next use. Otherwise the timed-out request keeps blocking the front,
+  and late replies don't match up either;
+- Relax gets its own connection (see robotd.py) and doesn't queue behind slow requests.
 
-地址统一写成字符串，其余代码不用管走的是哪种：
-    unix:/run/robotd.sock      鸭子上
-    tcp:127.0.0.1:17001        电脑上（Windows 的 Python 没有 AF_UNIX），连假 robotd
+Addresses are always written as strings, so the rest of the code doesn't care which kind is used:
+    unix:/run/robotd.sock      on the duck
+    tcp:127.0.0.1:17001        on a computer (Python on Windows has no AF_UNIX), connecting to a fake robotd
 
-「主程序不在」和「答得慢」要分开：socket 文件不在、拒绝连接 → Unreachable；
-连上了但没按时回 → Timeout。界面上一个写「主程序不在」，一个写「主程序没回话」。
+"Main program missing" and "slow to answer" must be kept apart: socket file missing, connection refused → Unreachable;
+connected but no reply in time → Timeout. The UI shows "主程序不在" (main program missing) for one and "主程序没回话" (main program not responding) for the other.
 """
 import asyncio
 import itertools
 import json
 import os
 
-LINE_LIMIT = 1 << 20      # busStatus 实测 16.9 KB；默认 64 KiB 的上限迟早会撞，放到 1 MiB
+LINE_LIMIT = 1 << 20      # busStatus measured at 16.9 KB; the default 64 KiB limit would be hit sooner or later, so raise it to 1 MiB
 
 
 class RpcError(Exception):
-    """对方回了 error。code 见 lib.rs 的 error_code（-32602 参数不对、1 忙……）。"""
+    """The peer replied with an error. For code see error_code in lib.rs (-32602 invalid params, 1 busy, ...)."""
 
     def __init__(self, method, code, message, data=None):
         super().__init__(f"{method}：{message}（code {code}）")
@@ -35,11 +35,11 @@ class RpcError(Exception):
 
 
 class Unreachable(Exception):
-    """连不上：socket 不在、拒绝连接、连接被对方关掉。"""
+    """Cannot connect: socket missing, connection refused, connection closed by the peer."""
 
 
 class Timeout(Exception):
-    """连上了，但没按时回话。"""
+    """Connected, but no reply in time."""
 
 
 def parse_addr(addr):
@@ -77,12 +77,12 @@ def encode(rid, method, params):
 
 
 async def read_message(reader, timeout):
-    """读一行、解成 JSON。超长行、对方关连接都算 Unreachable；乱码返回 None（调用方跳过）。"""
+    """Read one line and parse it as JSON. Over-long lines and the peer closing the connection count as Unreachable; garbage returns None (caller skips it)."""
     try:
         raw = await asyncio.wait_for(reader.readline(), timeout)
     except asyncio.TimeoutError:
         raise
-    except (ValueError, asyncio.LimitOverrunError) as e:      # 一行超过 LINE_LIMIT
+    except (ValueError, asyncio.LimitOverrunError) as e:      # a line longer than LINE_LIMIT
         raise Unreachable(f"对方发来的一行太长（超过 {LINE_LIMIT} 字节）") from e
     except (ConnectionError, OSError, asyncio.IncompleteReadError) as e:
         raise Unreachable(f"连接断了：{type(e).__name__}: {e}") from e
@@ -92,11 +92,11 @@ async def read_message(reader, timeout):
         msg = json.loads(raw)
     except ValueError:
         return None
-    return msg if isinstance(msg, dict) else None      # [1,2,3]、"x" 这类也当乱码跳过
+    return msg if isinstance(msg, dict) else None      # things like [1,2,3] or "x" are also skipped as garbage
 
 
 class Conn:
-    """一条串行连接。call() 排队执行；超时、断线都会关掉连接，下次 call() 自动重连。"""
+    """One serial connection. call() runs queued; timeouts and disconnects close the connection, and the next call() reconnects automatically."""
 
     def __init__(self, addr, name="rpc", log=None):
         self.addr, self.name, self.log = addr, name, log
@@ -112,7 +112,7 @@ class Conn:
         return self._lock.locked()
 
     async def call(self, method, params=None, timeout=2.0):
-        """timeout 包括建连（robotd 卡住时连接可能一直挂着）。"""
+        """timeout includes connecting (the connection may hang forever when robotd is stuck)."""
         async with self._lock:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
@@ -136,7 +136,7 @@ class Conn:
                         continue
                     if msg.get("id") == rid:
                         break
-                    # 通知、或者上一次超时请求的迟到回包：丢掉
+                    # A notification, or a late reply to an earlier timed-out request: drop it
             except asyncio.TimeoutError:
                 self._close()
                 raise Timeout(f"{method} {timeout:g} 秒没回话") from None
@@ -147,8 +147,8 @@ class Conn:
                 self._close()
                 raise Unreachable(f"连接断了：{type(e).__name__}: {e}") from e
             except asyncio.CancelledError:
-                # 调用方被取消时请求可能已经发出：robotd 还会按顺序处理它、回一个迟到的包。
-                # 关掉连接，后面的请求不会排在它后面，也不会读到它的回包
+                # When the caller is cancelled, the request may already have been sent: robotd will still process it in order and send a late reply.
+                # Close the connection so later requests don't queue behind it or read its reply
                 self._close()
                 raise
         if "error" in msg:
@@ -159,7 +159,7 @@ class Conn:
     async def _connect(self):
         self._r, self._w = await open_conn(self.addr)
         if self.connected is False and self.reconnects:
-            # 措辞固定、次数放在原文里：1 分钟内反复重连会被去重合并，不会刷屏
+            # Fixed wording, with the count in the raw text: repeated reconnects within 1 minute are deduplicated and merged, so they don't flood the log
             self._note("info", f"跟主程序的 {self.name} 连接恢复", raw=f"第 {self.reconnects} 次重连")
         self.connected = True
 
@@ -167,7 +167,7 @@ class Conn:
         if self._w is not None:
             try:
                 self._w.close()
-            except Exception:  # noqa: BLE001 —— 关连接时什么错都不重要
+            except Exception:  # noqa: BLE001 -- no error matters when closing the connection
                 pass
         self._r = self._w = None
         if self.connected:
@@ -183,8 +183,8 @@ class Conn:
 
 
 async def call_once(addr, method, params=None, timeout=2.0, name="once", log=None):
-    """新开一条连接、问一次、关掉。卸力用它：不留长连接，就不会撞上 robotd 重启后已经死掉的旧连接。
-    本机 socket 建连不到 1 毫秒。"""
+    """Open a new connection, ask once, close it. Relax uses this: with no long-lived connection, it never hits an old connection that died after robotd restarted.
+    Connecting to a local socket takes under 1 millisecond."""
     c = Conn(addr, name, log)
     try:
         return await c.call(method, params, timeout)

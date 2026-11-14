@@ -91,10 +91,10 @@ http://<duck IP>:8080/
 
 ### 3.2 Page layout
 
-The page title is 「鸭子舵机调试台」 (Duck servo debug console). From top to bottom:
+The page title is "鸭子舵机调试台" (Duck servo debug console). From top to bottom:
 
 1. **Connection status**: green dot in the top-left corner = WebSocket connected
-2. **Servo scan area**: click the 「扫描」 (Scan) button to scan for bus devices
+2. **Servo scan area**: click the "扫描" (Scan) button to scan for bus devices
 3. **Servo control area**: torque switch, target position/speed sliders
 4. **IMU attitude panel** (`躯干姿态 · IMU`, torso attitude · IMU):
    - Mode label: `总线 · ID 200` (bus · ID 200)
@@ -114,7 +114,7 @@ The page title is 「鸭子舵机调试台」 (Duck servo debug console). From t
 **Once the page is connected, it starts reading IMU data automatically; no extra setup is needed.**
 
 After the WebSocket connection is established, server.py's polling loop starts automatically, and every sync_read frame includes ID 200.
-The IMU panel status changes from 「等待数据」 (waiting for data) to 「实时跟随」 (live tracking), and the angles and sample data start refreshing in real time.
+The IMU panel status changes from 「等待数据」 (waiting for data) to "实时跟随" (live tracking), and the angles and sample data start refreshing in real time.
 
 ### 3.4 Check that the IMU data is normal
 
@@ -131,11 +131,11 @@ Check in the IMU panel:
 
 ### 3.5 Servo operation (optional)
 
-1. Click the 「扫描」 (Scan) button and wait for the scan to finish (about 2 seconds)
+1. Click the "扫描" (Scan) button and wait for the scan to finish (about 2 seconds)
 2. The list of online servos is shown in the scan area
 3. Click 「扭矩开」 (Torque on) to enable servo torque
 4. Drag the sliders to set the target position, or click a preset pose button
-5. When finished, click 「扭矩关」 (Torque off)
+5. When finished, click "扭矩关" (Torque off)
 
 > **Safety note**: with torque enabled the servos hold their position; first make sure nothing interferes within the servo horn's range of motion.
 
@@ -149,7 +149,7 @@ Check in the IMU panel:
 4. Check the log for errors: `tail -20 /tmp/servo-web.log`
 5. Open `http://<duck IP>:8080/` in a browser on your computer
 6. The green dot in the top-left corner lights up = WebSocket connected successfully
-7. The IMU panel appears and its status shows 「实时跟随」 (live tracking)
+7. The IMU panel appears and its status shows "实时跟随" (live tracking)
 
 ### 4.2 IMU data verification
 
@@ -168,18 +168,18 @@ Check in the IMU panel:
 
 ### 4.4 Combined servo test
 
-1. Click 「扫描」 (Scan) and confirm the servos are online
+1. Click "扫描" (Scan) and confirm the servos are online
 2. Click 「扭矩开」 (Torque on)
 3. Drag the position slider; the servo should follow
 4. At the same time, check that the IMU panel data is unaffected (the IMU and servos are read in the same frame)
-5. When finished, click 「扭矩关」 (Torque off)
+5. When finished, click "扭矩关" (Torque off)
 
 ### 4.5 Multi-device same-frame read verification
 
 1. Connect the IMU board + 1~2 Feetech servos to the bus
 2. Start server.py and open the web page
 3. The scan finds the IMU (ID 200) + servos
-4. The IMU panel shows 「实时跟随」 (live tracking) + the servo position data refreshes at the same time
+4. The IMU panel shows "实时跟随" (live tracking) + the servo position data refreshes at the same time
 5. The read rate is stable (it does not drop noticeably because of multiple devices)
 6. No ck_err / timeout errors in the log
 
@@ -205,7 +205,7 @@ systemctl start robotd
 |---|---|
 | The browser cannot open the page | Whether the RK3566 is on, whether the IP is correct, whether the firewall allows port 8080 |
 | Gray dot in the top-left corner (cannot connect) | Whether server.py is running; confirm the process with `ps aux \| grep server.py` |
-| IMU panel not shown | Whether server.py was started with the `--imu-bus` parameter; whether the log shows 「IMU 已启用」 (IMU enabled) |
+| IMU panel not shown | Whether server.py was started with the `--imu-bus` parameter; whether the log shows "IMU 已启用" (IMU enabled) |
 | Status shows 「等待数据」 (waiting for data) | Whether the IMU board is powered, whether the bus wiring is correct, whether `/dev/ttyS2` is held by robotd |
 | All angles show `—` | validPacket did not pass: confirm that the imu_bus.py live frame contains `ready=1, configured=1` |
 | Sample count not increasing | No response on the bus: check whether the IMU board has been flashed with the Feetech protocol firmware and whether its power is normal |

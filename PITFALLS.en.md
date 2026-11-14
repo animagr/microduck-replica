@@ -259,3 +259,201 @@ Cause: the BNO085 stopped responding on I²C (nothing answering at the address).
 
 
 ---
+
+## Software
+
+**With Clash's TUN mode on the PC, ping, SSH and the web page all fail to reach the board**
+Symptom: on 2026-10-11 the board was clearly online (a port scan showed 22 open), but the PC couldn't ping it, SSH reported `Error reading SSH protocol banner`, and opening `http://192.168.0.102:8080` in the browser gave 502.
+Cause: Clash Verge's TUN virtual adapter (Meta) took over all routes including the LAN (`Find-NetRoute` shows traffic going via Meta), so connections to the board were intercepted.
+→ Temporarily turn off TUN, or set `192.168.0.0/16` to direct in Clash. If you don't want to touch Clash, binding the connection in your program to the wired adapter's local address (Python `socket.bind(('192.168.0.100', 0))` before connecting to the board) gets around it; for the web page you can set up a local port forward, or open it on a phone.
+
+**On kissqy's one-click image, the G50 Pro gets disconnected a few seconds after pairing successfully**
+Symptom: on 2026-10-13 with the new card (kissqy R1 image), gamepad set to S, `bluetoothctl pair` reported success, then it disconnected and padd couldn't read it. The same gamepad worked fine with the old card.
+Cause: on this card Bluetooth comes up non-bondable at boot (reason not fully determined), so pairing returns No Bonding and the keys can't be stored; BlueZ's default `ClassicBondedOnly=true` only accepts bonded HID devices, so it's rejected. The official setup-board intentionally sets `UserspaceHID` in `/etc/bluetooth/input.conf` to false (the gamepad goes through the kernel, saving about 16% of one core's CPU; pairing works fine on the official board); whether that played a role wasn't verified.
+→ Before pairing run `btmgmt bondable on`, then `pair` → `trust` → immediately `connect`; on success you'll see `Nintendo Switch Pro Controller` and `hid_nintendo`. At the time we also changed `input.conf` to `UserspaceHID=true`, `ClassicBondedOnly=false`, changing several things together; **it only succeeded once, and the next two attempts failed to pair**; `UserspaceHID=true` uses more CPU, so next time try only enabling bondable first.
+**Addendum (10-15 evening, same card)**: typing `pair`, `trust` and `connect` as three separate commands, pairing succeeded but the connection was refused by the gamepad (`control_connect_cb() … Permission denied (13)`); pressing HOME on the gamepad to make it reconnect, it connected for 10 seconds and then dropped again, and the gamepad never appeared in the system. What worked: first `btmgmt bondable on`, `btmgmt connectable on`, `bluetoothctl remove <gamepad address>` to delete the old record, then do everything in one go in the **same** `bluetoothctl` session (`agent NoInputNoOutput` → `default-agent` → `scan on` → wait for the gamepad to appear → `pair` → `trust` → immediately `connect`); the padd log showed `pad connected — driving pad=Nintendo Switch Pro Controller`, and WiFi didn't drop. This time `input.conf` was still as modified on 10-13 (`UserspaceHID=true`, `ClassicBondedOnly=false`); which item is actually required wasn't verified separately.
+
+**The G50 Pro only remembers the last card it paired with; switching cards requires re-pairing**
+Symptom: after the gamepad was paired with the new card, switching back to the old card, the gamepad can't connect to the old card.
+Cause: the gamepad only stores the key from the most recent pairing, while the old card still holds the previous key, so they don't match.
+→ Every time you switch cards, pair again on the current card (using the procedure in the previous entry).
+
+**The duck's static IP was taken by another device on the LAN; the PC connects only intermittently**
+Symptom: on 2026-10-13 the old card used a static 192.168.0.102, and at the same time another device on the LAN (judging by the MAC address, a phone) also got .102; the PC's connection to the duck kept coming and going.
+Cause: the router's DHCP didn't know the duck had manually claimed that address and handed it out to someone else.
+→ Set up a 「静态地址分配」 (static address assignment, bound by MAC) for the duck in the router, or set the duck's static IP outside the DHCP range. Temporary workaround: turn off WiFi on the device occupying the address, or, as administrator on the PC, statically bind that IP to the duck's MAC (`netsh interface ip add neighbors`; lost when the PC reboots).
+
+**No logs at all after a full-robot brownout: Armbian's logs are in RAM**
+Symptom: after a brownout and reboot, `journalctl` only shows the current boot; the last few seconds of our own recording weren't written to the card either. The board has no RTC and the clock goes back every boot, so you can't even find the right file by time.
+Cause: Armbian keeps logs in zram (memory) by default, intentionally not writing to disk to protect the SD card; Python's file buffering only flushes every few seconds.
+→ Run one service each for recording and the system log, **fsync once per second**, with the boot number in the file name (first 6 characters of `/proc/sys/kernel/random/boot_id`). Scripts: `duck_rec.py`, `duck_journal.py` and two services in [`tools/radxa/onboard-analysis/`](tools/radxa/onboard-analysis/). Don't disable zram (see "Don't disable armbian-zram-config" below).
+
+**Armbian ships with `overlay_prefix=rk35xx`, but the RK3566's overlays are named `rk3568-*`**
+With the wrong prefix the loader finds nothing and fails silently; the board boots normally, **but there's no `/dev/ttyS2`**. You'll think the wiring is wrong. An `apt upgrade` that replaces the kernel may revert it.
+→ In `/boot/armbianEnv.txt` change it to `overlay_prefix=rk3568`, add `overlays=uart2-m0`, and reboot. The official `setup-board.sh` does exactly this.
+
+**The kernel console is also on ttyS2 by default**
+UART2 is the RK3566's debug serial port, and Armbian sends kernel logs there, which means onto the servo bus.
+→ Remove `console=ttyS2,1500000` from `extraargs` in `/boot/armbianEnv.txt`.
+
+**Armbian runs a login console on UART2 by default**
+`agetty` holds `/dev/ttyS2`, and the servos never respond. If the wiring is right and it still doesn't work, it's most likely this.
+→ `systemctl mask serial-getty@ttyS2`, then `fuser -v /dev/ttyS2` to confirm no other process has it.
+
+**Don't disable armbian-zram-config**
+Armbian keeps logs in zram (memory) by default without writing them to disk, which protects the SD card. Some people disable it to make reading logs easier, multiplying the write volume several times.
+→ Keep it. The official `deploy/README.md` says verbatim that not writing to disk is "an intentional arrangement", and disabling it is "each board's own decision, not the default".
+
+**Using i2c3 on pins 3/5 loses USB-C PD negotiation**
+The RK3566's i2c3 originally runs on the M1 pinmux serving the FUSB302 (USB-C PD). The official overlay muxes it to M0 (pins 3/5) and disables the fusb302.
+→ Accept the trade-off: USB-C still supplies 5 V, it just doesn't negotiate. The robot is powered from the battery, so this doesn't matter.
+
+---
+
+**`wsl --mount` can't mount a USB card reader; don't count on it to write files into a flashed card**
+Trying to use WSL2 to write Armbian's first-boot preset `.not_logged_in_yet` into the card's ext4 root partition, `wsl --mount \\.\PHYSICALDRIVE2 --partition 1` immediately reports `Wsl/Service/AttachDisk/MountDisk/HCS/ERROR_FILE_NOT_FOUND`. This is a WSL limitation for USB removable disks, unrelated to whether the card was flashed correctly.
+→ Do it the other way round: put the file into the image first, then flash. In WSL, extract the `.img.xz` to a local disk (not under `/mnt/`, loop mounting won't work there), mount the root partition with `mount -o loop,offset=$((32768*512))`, write the file, then flash the resulting `.img`. The script is in [`tools/radxa/`](tools/radxa/).
+
+**The Armbian images tested earlier hang at boot on the Zero 3W V1.12 (AIC8800 WiFi version): judge from logs and the system disk**
+Zero 3Ws shipped after 2024-11 are V1.12; flashing the Armbian 26.2.1 / 26.8.1 vendor images, the LED shows a heartbeat double blink (the kernel started), but it never even reaches initramfs, not a single byte of the system disk is touched, and it never shows up on the LAN.
+Radxa's official image boots first time on the same card and board. After ruling things out one by one (card, SDR104 high-speed mode, power, device tree all identical), the only difference left is the bootloader:
+for zero3, Armbian uses mainline U-Boot 2025.10 + the 2024-01 memory init firmware v1.21; Radxa's own is rk U-Boot 2017.09 + DDR v1.23 (2024-09) + BL31 v1.45.
+→ Write `idbloader.img` / `u-boot.itb` from Radxa's `u-boot-rk2410` package to sectors 64 / 16384 of the card, then write a `/boot/extlinux/extlinux.conf` for Armbian (Radxa's U-Boot uses extlinux and doesn't read boot.scr); with the kernel and system unchanged, it boots immediately.
+The script is in [`tools/radxa/`](tools/radxa/) and makes the card in one step. Ways to locate this kind of problem without a serial console: read the card to see whether the root partition has been written, and put LED signals and black-box logs into the initramfs.
+
+**On V1.12J (the 2026-09 batch), swapping the bootloader isn't enough; the device tree has to be swapped too**
+Symptom: after swapping in the Radxa bootloader per the previous entry, Armbian still won't boot; Radxa's official B1 image does. Someone also found that a cold boot with HDMI plugged in won't start.
+Cause: this batch of boards switched WiFi to the AIC8800DS2, which Armbian's bundled `rk3566-radxa-zero3.dtb` doesn't support; the one in Radxa's B1 image does.
+→ Take **both the bootloader and the DTB from the B1 image**, point extlinux's `fdt` at the copied one, and keep Armbian's kernel and root filesystem
+(both sides are 6.1 vendor kernels, so they can be mixed). A group chat member got it working on 2026-09-20. After swapping the DTB, remember to check that `/dev/ttyS2` and the USB serial port are still there;
+the overlays are Armbian's, and their nodes may not match. Commands are in the [image usage guide](tools/radxa/镜像使用说明.md#6-如果你的板子不是这一批).
+
+**After switching to the Radxa bootloader, editing `armbianEnv.txt` has no effect**
+Symptom: added an overlay (e.g. `i2c3-pihat`) to `overlays=` in `/boot/armbianEnv.txt`, but after rebooting there's still no `/dev/i2c-3`; the same happens when the official `setup-board.sh` edits it, though the script's own check says it's configured.
+Cause: Radxa's U-Boot only reads `/boot/extlinux/extlinux.conf` and doesn't run Armbian's `boot.scr`, and it's `boot.scr` that reads `armbianEnv.txt`.
+→ Overlays must go on the `fdtoverlays` line of `extlinux.conf`, with the full dtbo path (`/boot/dtb/rockchip/overlay/rk3568-xxx.dtbo`); confirm the file exists before rebooting.
+
+**The AIC8800 doesn't support GCMP-256; with the router in WPA3 mixed mode it can't connect**
+The Zero 3W V1.12's AIC8800D80/DS2 only has CCMP-128. Home routers (TP-LINK and the like) default to WPA2/WPA3 mixed, and the WPA3 half uses GCMP-256, so the handshake fails.
+→ Force `key_mgmt=WPA-PSK`, `pairwise=CCMP`, `ieee80211w=0` in wpa_supplicant (the card-making script already does this), or switch the router to pure WPA2. Both 5 GHz and 2.4 GHz work.
+
+**No USB serial port when the board is plugged into a PC: you need the `dwc3-peripheral` overlay**
+The Zero 3W's OTG port is `dr_mode = otg` in the device tree; under the Armbian vendor kernel it won't automatically switch to device mode when plugged into a PC, and even with `g_serial` loaded the PC sees nothing.
+→ Load `rk3568-dwc3-peripheral.dtbo` (bundled with Armbian) in extlinux, then `g_serial` + `serial-getty@ttyGS0`; plug into the PC and an extra COM port appears with direct root login, a lifesaver in emergencies. The card-making script already does this.
+
+**Running the official scripts on the board, GitHub downloads stall**
+`setup-board.sh` / `install.sh` both download from raw.githubusercontent.com, api.github.com and objects.githubusercontent.com; direct connections from China basically hang (IPv6-first makes it worse).
+→ Turn on 「允许局域网」 (Allow LAN) in Clash on the PC and write `http_proxy=http://<PC IP>:7890` into the board's `/etc/environment` (in the card-making script, just fill in `HTTP_PROXY=` in `card.conf`). apt uses Debian mirrors and needs no proxy.
+Note: the official installation has updaterd invoke the install hooks, and curl in the hooks doesn't read `/etc/environment`. On 2026-10-12 downloading ONNX Runtime directly timed out after 90 seconds; after writing `/root/.curlrc` for root (one line: `proxy = "http://<PC IP>:7890"`), it downloaded in two seconds. Remember to delete it after installing.
+
+**The official install.sh only installs the latest version, but kissqy's R17 needs 0.15.1**
+Symptom: kissqy's R17 sits on top of official `daemon-v0.15.1`; by 10-07 the official release was already at 0.16.1, `install.sh` always installs the latest, and there's no switch to pick a version.
+Cause: the script has updaterd look up latest on GitHub by itself.
+→ First download the `daemon-v0.15.1` release files locally, copy `install.sh`, hard-code the release tag as `daemon-v0.15.1`, and add `--from <local directory>` to `updaterd install`. Signature verification still happens. The modified script is at `Radxa-Zero3W/official-daemon-v0.15.1/scripts/install-local.sh`. After installing, change `auto_apply` in `/etc/robot/updater.toml` to `"off"` so it doesn't upgrade itself.
+
+**If you don't need sound, don't run the audio part of the official setup-board.sh, and don't run migrate-network.sh remotely**
+Symptom: the audio step of `setup-board.sh` apt-installs the Armbian vendor kernel and points `/boot/Image`, `dtb` and `uInitrd` at the new kernel; `migrate-network.sh` switches WiFi from netplan to NetworkManager.
+Cause: the V1.12 board relies on Radxa's U-Boot and `extlinux.conf` to boot, so swapping the kernel remotely risks a board that won't boot. That step only enables the audio chip on the HAT, and walking doesn't need sound; without a HAT it's even less useful. If WiFi drops while switching networking, you can't connect back remotely.
+→ If you don't need sound, neither needs to run: the servo serial overlay and moving the serial console out of the way were already handled when making the card. Walking only needs the services installed by the official `install.sh`.
+
+**Installing kissqy's R17 without an aic3104 sound card in the system hangs at audio setup**
+Symptom: `service.sh upgrade` stops at `alsactl store aic3104` with exit code 19 and the message 「安装未完成；阶段：audio-setup」 (installation incomplete; stage: audio-setup).
+Cause: his install script assumes this sound card is always present. Without a HAT, or with a HAT but without running the audio step of the official `setup-board.sh` (as was the case for the first robot on 2026-10-12), the system only has the HDMI sound card.
+→ Our branch has fixed this (skips audio setup when the sound card is absent; walking is unaffected). With his original package, you can first modify `voice-setup.py` in his package and then recompute `SHA256SUMS`.
+
+**kissqy's one-click image R1 uses Armbian's stock bootloader; V1.12 boards may not boot**
+Symptom: taking apart his image R1 on 2026-10-12, the boot area is Armbian mainline U-Boot 2025.10 + memory init firmware v1.21, using `boot.scr`; our first robot (V1.12, AIC8800) got stuck on exactly this combination in September.
+Cause: his board boots, so his batch gets along with this bootloader; whether all V1.12 boards fail can't be generalized, but ours definitely does.
+→ Use [`tools/radxa/kissqy-r1-v112.sh`](tools/radxa/kissqy-r1-v112.sh) to swap in the Radxa bootloader on his image and write extlinux (carrying his overlays over unchanged), leaving everything else alone. Verified offline: the boot area is byte-for-byte identical to Radxa's package, the partition table is untouched, and only the expected few changes were made to the root partition. **Not yet tested on the robot**; try it on a blank card first, don't flash the card you're currently using. V1.12J may also need the device tree swapped per the entry above.
+
+**kissqy's one-click image R1 only supports the IMU board on the bus; IMU modules don't work**
+Symptom: the robotd in the image (control.40) only has code for reading ID 200, requiring the board identity `06 00 00 00 F2` (his FT6 firmware), with no code for reading an I²C IMU; the boot configuration doesn't enable I2C4 either. Ducks with BNO085 or LSM6DSV16X modules flashed with it get stuck at 「Feetech ID 200 无应答」 (Feetech ID 200 not responding).
+Cause: his full stack was built for his own hardware. The I²C IMU support we added to robotd (branch `hd1910-trunk-imu-i2c`) was written on the v146 source, and his V164 source hasn't been published yet.
+→ If you use an IMU module, keep using the v146 + I²C IMU stack you installed yourself (see the [10-12 session record](docs/HD1910-20261012-kissqy整套上机.md)); once he publishes the V164 source, port the patch over, or ask him to merge it into the image.
+
+**`service.sh init` can't send HOME while robotd is running**
+Symptom: in motion mode, `sudo bash service.sh init` reports `cannot claim robot IPC socket … another robotd owns this socket`.
+Cause: the `robotd init` subcommand needs exclusive robotd lock and is only meant for when robotd isn't running. His web console sends JSON-RPC over `/run/robotd.sock` (one per line, `{"jsonrpc":"2.0","id":1,"method":"robot.init","params":{}}`).
+→ Use HOME in the web console, or send `robot.init` to the socket yourself. Use `robot.enable` (`{"on":true}` / `{"on":false}`) to enable/stop the policy, and `robot.relax` to release torque.
+
+**The web joystick doesn't respond: four layers of causes stacked together, not just overheating**
+Symptom: on 2026-10-12 kissqy's web console (R17 v1.0.146) connected and all the data was normal, but clicking HOME or Start on the web gamepad did nothing. The console log said 「输入已过期，未发送」 (input expired, not sent) or "timed out", and padd occasionally reported `Failed to open "/dev/input/event4"`.
+Cause: every button press opens a new SSH connection, starts webpad on demand, creates a virtual gamepad and waits for padd to recognize it; all four layers are slow. ① Armbian wastes 3.8 seconds on a welcome script on every SSH login; ② the web console discards the input if the channel isn't open within 0.4 seconds; ③ webpad's cold start plus padd recognizing the gamepad takes 1–2 seconds, so a quick click-and-release loses the press; ④ padd tries to open the new device before the system has finished registering it, and doesn't retry on failure (same when running padd as root, so it's not a permissions issue). In the early hours we thought it was just overheating; overheating only makes every layer slower.
+→ Use a physical Bluetooth gamepad (next entry), which bypasses the whole path. If you still want the web gamepad, first disable the SSH welcome script (the entry after next) and hold buttons for 1–2 seconds before releasing. kissqy has already changed the web gamepad in V164 to go directly through robotd. Layer-by-layer measurements are in the [10-12 night session record](docs/HD1910-20261012-夜-IMU校准与首次迈步.md#1-网页手柄按了没反应四层原因叠在一起).
+
+**ThundeRobot G50 Pro as a physical gamepad: set the switch on the back to S and pair it directly with the duck over Bluetooth**
+Symptom: the gamepad's 2.4G receiver plugged into the PC is useless for the duck: the web console doesn't read gamepads on the PC, and the receiver can't be plugged into the board inside the head.
+Cause: both the official and kissqy designs pair a Bluetooth gamepad directly with the board, and padd reads it. The X / S / T / D switch on the back of the G50 Pro selects the platform, not wired vs. wireless; in S mode it presents itself as a Switch Pro Controller, which the board's kernel supports out of the box and the official pairing tool also supports.
+→ Unplug the receiver from the PC, set the back switch to S, and with the gamepad off hold HOME until the light blinks fast; on the board run `sudo systemctl start configd`, then `sudo robotctl pad pair`. If it isn't found, use `bluetoothctl` to scan for the `Pro Controller` address and run `robotctl pad pair <address>`. Once paired it reconnects automatically. "≡" is Start (first press HOME, second press model takeover), "⧉" is Select (release torque). In the board config, X is bound to a forward roll, so don't press letter buttons at random.
+**Addendum (10-21, replica image 20261021b, third duck): on our image, set the switch to X; S doesn't work.** Pairing in S mode from the Studio gamepad page: the helper (official `robotctl pad pair`) reported paired, but the kernel never showed an input device for the gamepad, padd never saw it, and the gamepad switched itself off after a few tens of seconds; in X mode (Xbox) it connected right away, and e-stop and walking worked normally. Cause not yet determined: at the time the duck's Bluetooth was "non-bondable, non-connectable", and no pairing record was left in `/var/lib/bluetooth` (but 「忘掉」 (Forget) was clicked twice in between, which may be why the records were gone). Next time, capture with `btmon` while pairing in S mode.
+
+**Armbian wastes 3.8 seconds on a welcome script on every SSH login**
+Symptom: SSH logins are slow; tools that open SSH frequently (kissqy's web console gamepad, ToF channel) time out as soon as they're used, and the board CPU stays busy.
+Cause: `pam_motd.so motd=/run/motd.dynamic` in `/etc/pam.d/sshd` makes every login run `/etc/update-motd.d/`, of which `20-ip-info` alone takes 2.9 seconds, 3.8 seconds in total.
+→ Back it up first, then comment out that line (keep the `pam_motd.so noupdate` line). After the change, a request-response over SSH went from 3–4 seconds to 0.7 seconds.
+
+**Without ToF connected, kissqy's web console reconnects over SSH every 5 seconds**
+Symptom: in 10 minutes the board got 112 SSH logins, each also running the welcome script from the previous entry.
+Cause: tofd is disabled (no ToF connected), and after the web console fails to subscribe to ToF it retries forever, each retry being a full SSH login.
+→ If no ToF is connected, don't let the web console subscribe to it; the web console in our branch added `--tofd-socket ""`.
+
+**Gamepad Start needs two presses: the first is HOME, only the second is model takeover**
+Symptom: after standing up, pushing the joystick does nothing, with the log saying `the policy is not driving — press Start on the pad`; sometimes pressing a second time makes it go back to HOME once more.
+Cause: the first press only locks the joints in the standing pose without starting the model; the model takes over on the second press, and only then does the joystick work. Before takeover robotd also checks the standing pose: every joint within ≤5° of HOME and body tilt ≤10° for 3 consecutive frames; if it fails, it goes back to HOME again.
+→ After it stands up, take your hands away, wait until it's steady on its own, then press the second time. If rejected, look at which check failed: knees collapsed, IMU off, or body tilted.
+
+**If the Armbian first-boot preset is missing two variables, it stops at a prompt waiting for keyboard input**
+Without `PRESET_DEFAULT_REALNAME` in `/root/.not_logged_in_yet` it stops at "Please provide your real name"; without `PRESET_CONNECT_WIRELESS` and no network, it stops at "Connect via wireless? [Y/n]". A headless board gets stuck right there, and the password stays the factory root / 1234 forever.
+→ Write both (the card-making script already does).
+
+**kissqy's source has two copies of `padd.service`; the install package installs the one in `packaging/`**
+Changing padd's systemd settings (e.g. allowing `AF_INET` for the UDP gamepad) only in `padd/systemd/padd.service` has no effect on the robot. kissqy's install script (`packaging/gamepad.py`) copies `packaging/padd.service` into `/etc/systemd/system/`; the copy in `padd/systemd/` is for upstream development.
+→ Change both, then update that line in `packaging/SHA256SUMS`. For boards already installed, don't reinstall; patch with a drop-in: put a `.conf` under `/etc/systemd/system/padd.service.d/`.
+
+**Cross-compiling padd fails with a `libudev-sys` build error**
+The gilrs crate padd uses to read the gamepad links against libudev, and `cargo board` cross-compilation can't find an aarch64 libudev (robotd and robotctl don't depend on it, so this didn't come up before).
+→ Use the repo's own `scripts/cross-sysroot.sh` to fetch arm64 packages from Debian and unpack them into a sysroot; in China set `DUCK_DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian`; when it finishes, copy the `export` lines it prints into the current shell, then run `cargo board -p padd`.
+
+**The official new versions and kissqy's version each bump the interface version number independently; the same number means different things**
+When porting features from the new official version onto kissqy's base, it's easy to assume "similar version numbers mean compatible". kissqy went from official 0.15.1's 37 up to 40 on his own, while official went from 37 to 41 in 0.17.1, and the interfaces added on each side differ.
+→ When porting features, check one by one that each interface you call exists in kissqy's robotd (this time `sit_toggle`, `robot.policies.sitting` and both sound calls were checked); don't drop in the official client code wholesale.
+
+**The "repair gamepad connection" in kissqy's new web console only supports the GameSir Nova 2 Lite; it does nothing for the G50 Pro**
+Symptom: on the evening of 2026-10-13, after switching to kissqy's new version (web console R17 V164 1.0.164), the ThundeRobot G50 Pro couldn't connect; kissqy suggested clicking 「修复手柄连接」 (repair gamepad connection) in the web console.
+Cause: this feature (`console/gamepad_repair.py`) was written specifically for the GameSir Nova 2 Lite: the gamepad name is hard-coded, and the repair clears the current connection, re-pairs, then goes through gamesir-xboxd to turn it into a virtual Xbox controller (kissqy's explanation: the official stack only accepts Xbox controllers; other gamepads connect over Bluetooth but fail authentication and get stuck). For any other gamepad it just refuses and doesn't delete the G50 Pro's pairing, so it does nothing for the G50 Pro. The cause we found for the G50 Pro failing on the new card is something else: Bluetooth is "non-bondable" and pairing returns No Bonding (see "On kissqy's one-click image, the G50 Pro gets disconnected a few seconds after pairing successfully" above).
+→ Pair the G50 Pro manually per [10-13 night §1.2](docs/HD1910-20261013-夜-掉电-舵机D与蹭地.md#12-g50-pro-配对上又被断开) (`btmgmt bondable on` → `pair` → `trust` → immediately `connect`), or use the new version's web gamepad for now (kissqy says it now keeps a persistent SSH connection). If you want his "repair" feature, buy the Nova 2 Lite he pairs it with.
+
+**If you installed your own modified robotd, don't click "Install / upgrade firmware" in kissqy's web console**
+Symptom: this button replaces the robotd on the board. The I²C IMU support we added to robotd and the P / D / torque set by the local adjustable version would all be wiped (determined by reading the code; never actually clicked).
+Cause: it reinstalls the robotd bundled in kissqy's install package; his install script also deletes `servo-test-parameters.json` (intentionally, to clear manual parameters from older versions).
+→ Our local web console blocks this button when connected to our adjustable board; but connecting with kissqy's original web console, or connecting to an old card (R17 plus the I²C IMU patch) with the old web console, nothing blocks it, so don't click it. If you really want to go back to the original, install with kissqy's original web console, and then power-cycle the servos once (see "Servo P / D / torque limits are written to RAM").
+
+**In the fork's calibration mode, Studio always shows "main program starting"**
+Symptom: on 2026-10-20 with a new card, the main program was running in calibration mode (`--commissioning`) and the servos and IMU were being read, but Studio kept showing 「主程序启动中」 (main program starting) with no readings at all, so the first two steps of the onboarding checklist couldn't be done.
+Cause: during startup `robot.busStatus` returns a startup report (`phase: configuring_bus`). Motion mode clears it after the first successful read, but calibration mode never does, so it always returns `configuring_bus` and the live snapshot (`ready`, `last_sample`) is never provided. It wasn't caught on the PC because our mock main program was written according to "assumed behavior" and returned snapshots as soon as calibration mode started.
+→ Fork `341b68f`: calibration mode also clears it after the first successful read. On older fork builds, the telltale sign is `phase` stuck at `configuring_bus` while `total_success` keeps increasing. Mock main programs and test data must reproduce replies exactly as recorded on the real robot.
+
+**With Clash on the PC (system proxy), `http://duck-xxxx.local:8000` gives 502**
+Symptom: on 2026-10-21 the duck joined the home WiFi; opening `duck-0de6.local:8000` in the browser gave 502, while the IP and `duck-0de6:8000` both worked.
+Cause: Clash's system proxy bypass list is `localhost;127.*;192.168.*;10.*;172.16-31.*;<local>`. `<local>` only covers names without a dot; `.local` has a dot, so it's treated as an external domain and sent to the proxy.
+→ On Windows use `http://duck-xxxx:8000/` without `.local` (goes through LLMNR, which is in the bypass list), or just use the IP; on Apple devices use `.local`; if you use TUN mode, set the LAN to direct in your proxy software. Studio and the manual already give addresses per device.
+
+**Self-made image, SSH port 22 refuses connections: not a single host key was generated**
+Symptom: on 2026-10-21 with version 2 of the acceptance card, the duck responds to ping and the web page opens, but SSH port 22 refuses connections outright.
+Cause: Debian's `sshd-keygen` only runs on "first boot" (`ConditionFirstBoot`). When making the image, `/etc/machine-id` was emptied to an empty file, which systemd doesn't treat as first boot, so the keys weren't generated, `sshd -t` failed, and ssh couldn't start.
+→ Add a drop-in to `ssh.service` that runs `ssh-keygen -A` (leaves existing keys alone) and then `sshd -t` before every start. When making images, don't count on "first boot" to do things automatically; write what needs doing into a service yourself.
+
+**Skipping both steps 1 and 2 of the onboarding checklist, after writing to the main program it's still in calibration mode**
+Symptom: on 2026-10-21 with a new card, the servo zeros had been calibrated before and we didn't want to recalibrate the IMU, so the first two steps were skipped; after step 3 wrote the config, the main program came up and still didn't enter motion mode.
+Cause: the fork only enters motion mode when "the orientation of the IMU in use has been confirmed". Skipping step 2 means the orientation was never confirmed.
+→ Studio step 3: if step 2 is marked done or skipped and the orientation hasn't been confirmed, it writes the default mounting and marks it confirmed (official mounting for the bus board, the fork default for the BNO085, x down and z forward for the LSM6DSV16X module). If yours is mounted differently, calibrate once while standing before writing.
+
+**In calibration mode the duck can't stand up; it can only move one servo at a time, releasing torque after each move**
+Symptom: we wanted to calibrate the IMU while standing first, then write to the main program. Studio's 「站姿使能」 (enable standing pose) is grayed out in calibration mode, so the only way was to first write a calibration with the IMU in its default mounting, switch to motion mode, then stand.
+Cause: the fork's calibration mode only has single-servo moves (release torque once in position), centering and recording zeros; there's no "hold the whole body standing".
+→ Fork `f4bbe53` added `hold-home`: all 15 servos move to HOME together over 3 seconds and lock, the IMU keeps reading and e-stop works as usual. In calibration mode Studio's 「站姿使能」 calls it directly. It doesn't balance, though, so hold the robot. Written on 10-21, not yet tested on the real robot.
+
+**On a new card's first power-up, the duck's hotspot takes about 2 minutes to appear** (changed in 20261021b)
+Symptom: on 2026-10-21, on the first boot after flashing, the phone searched for two minutes before `Microduck-xxxx` showed up.
+Cause: first boot itself has to expand the partition, set the name and detect the IMU; the network setup program also first has to confirm that it "can't connect to any WiFi" for a full 45 seconds before opening the hotspot. A new card has no WiFi saved at all, so those 45 seconds are wasted.
+→ From 20261021b: when there are no saved WiFi networks at all, the hotspot opens at the first tick without a connection; if it can't determine whether WiFi networks are saved, it still waits 45 seconds as before. With older images, just wait a bit longer.
