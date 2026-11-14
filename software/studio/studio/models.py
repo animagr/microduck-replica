@@ -1,4 +1,4 @@
-"""Studio 用户模型库；运行配置的成功以主程序实际加载回读为准。"""
+"""Studio user model library; a run configuration only counts as successful once the main program has actually loaded it and it reads back."""
 import asyncio
 import hashlib
 import json
@@ -50,7 +50,7 @@ def _json(path, limit=8 << 20):
 
 
 def _atomic_json(path, value):
-    """同目录临时文件、落盘、原子替换，避免掉电留下半份库记录。"""
+    """Temp file in the same directory, flush to disk, atomic replace, so a power loss doesn't leave half a library record."""
     fd, name = tempfile.mkstemp(prefix='.write-', dir=path.parent)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
@@ -70,7 +70,7 @@ def _atomic_json(path, value):
 
 
 def _signature(contract):
-    """HOME/P 是进程启动时安装的全局量，热换不能改变它们。"""
+    """HOME/P are globals installed at process startup; a hot swap can't change them."""
     try:
         if (type(contract.get('input_dim')) is not int or contract['input_dim'] != 61 or
                 type(contract.get('output_dim')) is not int or contract['output_dim'] != 14 or
@@ -125,7 +125,7 @@ class Models:
         try:
             return '/' + path.relative_to(self.root.resolve()).as_posix()
         except ValueError:
-            # 用于电脑端独立 state 目录；生产 state 在 /var/lib 下。
+            # Used for a separate state directory on a computer; the production state is under /var/lib.
             return path.as_posix()
 
     def _managed(self, path):
@@ -166,7 +166,7 @@ class Models:
 
     @staticmethod
     def _report_valid(name, value):
-        """空对象/半份报告不是权威回读，特别不能据此判定模型无人引用。"""
+        """An empty object / half a report is not an authoritative readback; in particular it can't be used to conclude that no one references a model."""
         if not isinstance(value, dict):
             return False
         def path_ok(path):
@@ -281,7 +281,7 @@ class Models:
             return catalog, builtins + entries, error
 
     def _capture_defaults(self, snap):
-        """优先随镜像的档案；只在首次建立库时记原始显式路径。"""
+        """Prefer the archive shipped with the image; only record the original explicit path when first creating the library."""
         candidates, names = {}, {}
         try:
             profile = _json(self._local(BASE + '/management-profile.json'))
@@ -400,7 +400,7 @@ class Models:
         return paths
 
     def _configured_refs(self):
-        """配置先落盘、加载后失败时，运行快照可能还是旧文件；不能遗漏重启引用。"""
+        """When the config is persisted first and loading then fails, the running snapshot may still be the old file; restart references must not be missed."""
         path = self._local('/etc/robot/feetech-ft5/robotd.toml')
         try:
             if path.stat().st_size > 2 << 20:
@@ -605,7 +605,7 @@ class Models:
         if not item.get('installed'):
             raise ModelError('模型 policy.onnx 文件缺失或不安全，请重新导入')
         await asyncio.to_thread(self._check_selection_files, item, catalog, snap)
-        # 预检可能持续数秒；写配置前重新确认卸力，不能沿用预检前的状态。
+        # The precheck can take several seconds; reconfirm relaxed before writing the config, rather than relying on the state from before the precheck.
         snap = await self._require_idle()
         old = next((r.get('path') for r in self._rows(snap['policies'], 'slots')
                     if isinstance(r, dict) and r.get('slot') == slot), None)

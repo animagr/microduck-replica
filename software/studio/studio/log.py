@@ -1,25 +1,25 @@
-"""Studio 的日志：分类、分级、落盘，出错写明卡在哪一步，帮人定位问题。
+"""Studio's logging: categories, levels, persistence to disk; errors state which step they got stuck at, to help people locate problems.
 
-每条日志去三个地方：
-- 文件 `logs/studio-日期.log`：一行一条，时间到毫秒带时区，出错带 traceback 和现场。
-  出问题时这个文件就是现场：导出诊断包、发群里、或者让 Claude 直接读，都从它开始；
-- 内存里最近 500 条：页面打开时先拿这些，之后实时推；
-- 标准输出：systemd 收进 journal（`journalctl -u microduck-studio`）。
+Each log entry goes to three places:
+- the file `logs/studio-日期.log` (日期 = date): one entry per line, time to the millisecond with time zone, errors with traceback and context.
+  When something goes wrong this file is the scene: exporting a diagnostics bundle, posting to the group, or having Claude read it directly all start from it;
+- the latest 500 entries in memory: the page fetches these first when opened, then gets live pushes;
+- stdout: systemd collects it into the journal (`journalctl -u microduck-studio`).
 
-一条错误怎么写才算清楚：
+How to write an error clearly (the Chinese strings below are literal UI text: "stand-up failed", hint "the duck's main program is still starting, retry in 10 s"):
     log.error("站起来没成功", cat="robotd", step="robot.init",
               raw="bus not ready: waiting_for_bus", hint="鸭子主程序还在启动，等 10 秒再试",
               ctx={"mode": "motion", "phase": "waiting_for_bus"})
-文件里是一行：…[robotd][错误] 站起来没成功 · 卡在：robot.init · 原文：… · 建议：… · 现场：{…}
-页面上显示「站起来没成功 · 卡在 robot.init」，展开能看到原文、建议和现场。
+In the file it's one line: …[robotd][错误] 站起来没成功 · 卡在：robot.init · 原文：… · 建议：… · 现场：{…} ([error] stand-up failed · stuck at · raw · suggestion · context)
+The page shows "站起来没成功 · 卡在 robot.init" (stand-up failed · stuck at robot.init), and expanding it shows the raw text, suggestion, and context.
 
-日志按「每条命令记请求、回执和耗时」来做，代码是自己写的；
-出错时把当时的状态和 robotd 的系统日志一起留下；密码之类的自动打码；时间到毫秒。
-一个 TOF 连接反复断连能刷 8700 多行，把有用的几条淹没，所以这里同样的事
-1 分钟内只记一次，后面合并计数。
+Logging is built around "for each command, record the request, ack, and duration"; the code is our own;
+on errors, the state at the time is kept together with robotd's system log; things like passwords are masked automatically; time to the millisecond.
+A single TOF connection repeatedly disconnecting can spam 8700+ lines and bury the few useful ones, so here the same event
+is logged only once per minute, with later occurrences merged into a count.
 
-SD 卡寿命：只留最近 14 天、总共不超过 50 MB；调试级别默认不落盘；写文件在后台线程，
-不卡事件循环。
+SD card lifetime: keep only the last 14 days, at most 50 MB total; debug level isn't persisted by default; file writes happen in a background thread,
+so they don't block the event loop.
 """
 import asyncio
 import json
@@ -38,17 +38,17 @@ _TAG = {"debug": "[调试]", "info": "", "warn": "[警告]", "error": "[错误]"
 
 KEEP_DAYS = 14
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
-MAX_FILE_BYTES = 20 * 1024 * 1024    # 单个文件（一天）超过这么大，只再记警告和错误
+MAX_FILE_BYTES = 20 * 1024 * 1024    # once a single file (one day) exceeds this, only warnings and errors are still logged
 MAX_SECRETS = 64
 RING = 500
 DEDUP_WINDOW_S = 60
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-# 按键名打码：这些键的值永远不会进日志（家里 WiFi 的 psk 就是走这条）
+# Masking by key name: values of these keys never enter the logs (the home Wi-Fi psk goes through here)
 SECRET_KEYS = frozenset({"psk", "password", "passwd", "secret", "token", "authorization"})
 
 
 def redact(value):
-    """把字典里敏感键的值换成「[已隐藏]」；嵌套的字典、列表也照做（原文是 JSON 的也走这里）。"""
+    """Replace values of sensitive keys in a dict with "[已隐藏]" ([hidden]); nested dicts and lists too (raw text that is JSON goes through here as well)."""
     if isinstance(value, dict):
         return {k: ("[已隐藏]" if isinstance(k, str) and k.lower() in SECRET_KEYS else redact(v))
                 for k, v in value.items()}
@@ -76,19 +76,19 @@ class Log:
         self._day = None
         self._day_bytes = 0
         self._capped = False
-        self._listeners = set()      # (loop, queue)：页面的 WebSocket 订阅
+        self._listeners = set()      # (loop, queue): the page's WebSocket subscriptions
         self._secrets = set()
-        self._seen = {}              # (cat, level, msg) -> [第一次的时间, 之后又来了几次]
+        self._seen = {}              # (cat, level, msg) -> [time of first occurrence, how many more times since]
         self.counts = {lv: 0 for lv in LEVELS}
-        self.write_errors = 0        # 写日志本身出错的次数（诊断包里能看到）
+        self.write_errors = 0        # number of times writing the log itself failed (visible in the diagnostics bundle)
         self._q = queue.SimpleQueue() if background else None
         if background:
             threading.Thread(target=self._writer, name="studio-log", daemon=True).start()
 
-    # ---- 写 ----
+    # ---- Writing ----
 
     def hide(self, value):
-        """以后日志里出现这个字符串，一律换成「[已隐藏]」（密码、令牌）。"""
+        """From now on, any occurrence of this string in the logs is replaced with "[已隐藏]" ([hidden]) (passwords, tokens)."""
         if value and len(value) >= 4:
             with self._lock:
                 if len(self._secrets) < MAX_SECRETS:
@@ -96,12 +96,12 @@ class Log:
 
     def write(self, msg, cat="系统", level="info", step=None, raw=None, hint=None, ctx=None,
               exc=False, dedup=True):
-        """cat 见 CATS；level 见 LEVELS。
-        step：卡在哪一步（接口名、流程的第几步）；raw：原始报错或返回原文；hint：建议怎么办；
-        ctx：现场（当时的模式、姿势、电量……，字典）；exc=True 把当前异常的 traceback 写进文件；
-        dedup=False：每次都要记（比如命令的请求和回执）。
+        """cat: see CATS; level: see LEVELS.
+        step: which step it got stuck at (API name, which step of the flow); raw: the raw error or returned text; hint: suggested fix;
+        ctx: context (mode, pose, battery at the time…, a dict); exc=True writes the current exception's traceback to the file;
+        dedup=False: log every time (e.g. a command's request and ack).
 
-        **永远不抛异常**：卸力在发出之前要先记一行，记日志出错不能把卸力挡住（复核 #1）。"""
+        **Never raises**: a line must be logged before relax is sent, and a logging error must not block relaxing (re-review #1)."""
         try:
             return self._write(msg, cat, level, step, raw, hint, ctx, exc, dedup)
         except Exception:  # noqa: BLE001
@@ -152,11 +152,11 @@ class Log:
             for loop, q in list(self._listeners):
                 try:
                     loop.call_soon_threadsafe(_offer, q, entry)
-                except RuntimeError:      # 事件循环已经关了
+                except RuntimeError:      # the event loop is already closed
                     pass
         if self.echo:
             try:
-                # 标准输出可能已经写不进（SSH 窗口关了、journald 卡住）：丢掉这份，文件和页面那份还在
+                # stdout may no longer be writable (SSH window closed, journald stuck): drop this copy, the file and page copies are still there
                 print(line + ("\n" + tb.rstrip() if tb else ""), flush=True)
             except Exception:  # noqa: BLE001
                 self.write_errors += 1
@@ -174,7 +174,7 @@ class Log:
     def error(self, msg, **kw):
         return self.write(msg, level="error", **kw)
 
-    # ---- 读 ----
+    # ---- Reading ----
 
     def recent(self, limit=200, cats=None, min_level="info"):
         floor = LEVELS.index(min_level) if min_level in LEVELS else 1
@@ -184,7 +184,7 @@ class Log:
         return items[-limit:]
 
     def subscribe(self, loop=None, maxsize=200):
-        """页面实时日志：返回一个 asyncio.Queue，满了就丢最旧的（页面慢不拖累写日志的人）。"""
+        """Live log for the page: returns an asyncio.Queue that drops the oldest when full (a slow page doesn't hold up whoever is logging)."""
         loop = loop or asyncio.get_running_loop()
         q = asyncio.Queue(maxsize=maxsize)
         with self._lock:
@@ -196,7 +196,7 @@ class Log:
             self._listeners = {(lp, qq) for lp, qq in self._listeners if qq is not q}
 
     def files(self, days=2):
-        """诊断包用：最近 days 天的日志文件，新的在后。"""
+        """For the diagnostics bundle: log files from the last `days` days, newest last."""
         self.flush()
         if not self.dir.is_dir():
             return []
@@ -208,14 +208,14 @@ class Log:
                     "write_errors": self.write_errors}
 
     def flush(self, timeout=2.0):
-        """等后台线程把排队的行写完（导出诊断包、退出前用）。"""
+        """Wait for the background thread to finish writing queued lines (used when exporting a diagnostics bundle and before exiting)."""
         if self._q is None:
             return
         done = threading.Event()
         self._q.put(done)
         done.wait(timeout)
 
-    # ---- 文件 ----
+    # ---- Files ----
 
     def _clean(self, text):
         if text is None:
@@ -250,7 +250,7 @@ class Log:
                 self._day_bytes = _size(path)
                 self._capped = False
             if self._day_bytes > MAX_FILE_BYTES:
-                # 刷屏保护：今天已经写了 20 MB，普通的行不再写进文件（页面上照常），警告和错误照写
+                # Spam protection: 20 MB already written today, ordinary lines are no longer written to the file (the page shows them as usual), warnings and errors are still written
                 if not important:
                     if not self._capped:
                         self._capped = True
@@ -264,11 +264,11 @@ class Log:
                 f.write(data)
             self._day_bytes += len(data)
         except OSError:
-            # 写不进文件（卡满、只读）也不能让调用方出错；标准输出那份还在
+            # Failing to write the file (card full, read-only) must not make the caller fail either; the stdout copy is still there
             pass
 
     def _prune(self):
-        """只留最近 KEEP_DAYS 天，总量超过 MAX_TOTAL_BYTES 时从最旧的删起（今天的不删）。"""
+        """Keep only the last KEEP_DAYS days; when the total exceeds MAX_TOTAL_BYTES, delete starting from the oldest (today's is never deleted)."""
         logs = sorted(self.dir.glob(f"{self.prefix}-*.log"))
         today = self.dir / f"{self.prefix}-{self._day}.log"
         old = [p for p in logs if p != today]
@@ -280,7 +280,7 @@ class Log:
         for p in logs:
             if total <= MAX_TOTAL_BYTES:
                 break
-            if p == today:      # 钟停在 1970 时今天的文件排在最前：跳过它接着删，不能就此停下
+            if p == today:      # when the clock is stuck at 1970, today's file sorts first: skip it and keep deleting, don't stop here
                 continue
             total -= _size(p)
             _unlink(p)
@@ -310,11 +310,11 @@ def _unlink(p):
 
 
 class Timer:
-    """记一条命令的来回：
+    """Log one command's round trip ("站起来" = stand up):
         with log_cmd(log, "站起来", "robot.init", ctx=...) as t:
             reply = await ...
-            t.ok(reply)        # 或 t.fail("原因", raw=..., hint=...)
-    请求、回执、耗时各一行（不合并），失败时带现场。"""
+            t.ok(reply)        # or t.fail("reason", raw=..., hint=...)
+    One line each for request, ack, and duration (not merged), with context on failure."""
 
     def __init__(self, log, what, step, who=None, args=None, ctx=None):
         self.log, self.what, self.step, self.ctx = log, what, step, ctx
@@ -367,7 +367,7 @@ _default = None
 
 
 def setup(directory, **kw):
-    """进程里只建一个；各模块 `from studio.log import get; log = get()`。"""
+    """Only one is created per process; each module does `from studio.log import get; log = get()`."""
     global _default
     _default = Log(directory, **kw)
     return _default

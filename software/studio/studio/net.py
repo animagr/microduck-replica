@@ -1,18 +1,18 @@
-"""配网（WiFi）：读 netcheck 的状态文件、调 configd 的 net.status / scan / connect / forget、跟小助手开关热点。
+"""Wi-Fi setup: read netcheck's status file, call configd's net.status / scan / connect / forget, and toggle the hotspot via the helper.
 
-镜像里的 microduck-netcheck 开机连不上 WiFi 就开热点（NM 连接名 Microduck-Hotspot，地址 10.42.0.1），
-并把现在的样子写进 /run/microduck/net.json。Studio 只读它：
+The image's microduck-netcheck opens a hotspot at boot if it can't connect to Wi-Fi (NM connection name Microduck-Hotspot, address 10.42.0.1),
+and writes the current state into /run/microduck/net.json. Studio only reads it:
 
     {"mode": "wifi" | "hotspot" | "none",
      "hotspot_ssid": "Microduck-c51b", "hotspot_ip": "10.42.0.1", "hotspot_psk": "microduck",
      "hostname": "duck-c51b", "since": 1790000000.0,
      "scan": [{"ssid": "Home", "signal": 72, "security": "wpa_psk"}], "scan_at": 1790000000.0}
 
-文件不在（电脑上开发、老镜像）就当「不知道」：页面整块 WiFi 隐藏，别的照常。
-热点模式下 wlan0 扫不了（AP 模式），configd 的 net.scan 空 / 出错就用文件里开热点前的 scan，并标 cached。
+If the file is missing (development on a computer, old image) it's treated as "unknown": the page hides the whole Wi-Fi block, everything else as usual.
+In hotspot mode wlan0 can't scan (AP mode); if configd's net.scan is empty / errors, use the scan from before the hotspot was opened in the file, marked cached.
 
-密码：家里的 WiFi 密码只在内存里从网页 → configd 传一次，从不写日志、state、last-try 或诊断包。
-state 里的 hotspot.psk 是鸭子自己热点的公共密码（microduck），页面要显示给用户，不是家里的密码。
+Passwords: the home Wi-Fi password is passed only once, in memory, from the web page → configd, and is never written to logs, state, last-try, or the diagnostics bundle.
+hotspot.psk in state is the public password of the duck's own hotspot (microduck), which the page shows to the user; it's not the home password.
 """
 import asyncio
 import json
@@ -31,14 +31,14 @@ LAST_TRY_NAME = "net-last-try.json"
 READ_EVERY_S = 2.0
 STATUS_EVERY_S = 5.0
 STATUS_TIMEOUT_S = 4.0
-CONNECT_DELAY_S = 2.0          # 先让页面收到「开始切换」，再动热点
+CONNECT_DELAY_S = 2.0          # let the page receive "starting to switch" first, then touch the hotspot
 CONNECT_TIMEOUT_S = 60.0
 SCAN_TIMEOUT_S = 15.0
 FORGET_TIMEOUT_S = 10.0
-STATUS_MAX_AGE_S = 15.0        # 5 秒一次，三次都失败才当作不知道
+STATUS_MAX_AGE_S = 15.0        # every 5 seconds; only treated as unknown after three failures
 PORT = 8000
-HOTSPOT_IP = "10.42.0.1"       # NetworkManager 共享热点的默认地址（net.json 没写 hotspot_ip 时用）
-OWN_PREFIX = "Microduck-"      # 鸭子热点的名字都是 Microduck-xxxx（netcheck 起的）
+HOTSPOT_IP = "10.42.0.1"       # NetworkManager's default shared-hotspot address (used when net.json has no hotspot_ip)
+OWN_PREFIX = "Microduck-"      # the duck's hotspots are all named Microduck-xxxx (named by netcheck)
 PSK_HEX = re.compile(r"^[0-9A-Fa-f]{64}$")
 PERMISSION = "Studio 没权限改 WiFi（configd 没放行 radxa）"
 
@@ -53,11 +53,11 @@ REASON_TEXT = {
 
 
 class Refused(Exception):
-    """配网操作没法做 / 参数不对：message 是给页面看的人话。"""
+    """The Wi-Fi setup operation can't be done / bad parameters: message is plain language for the page."""
 
 
 def validate_ssid(value):
-    """SSID 1–32 字节（UTF-8；中文一个字 3 个字节）。不 strip：SSID 前后的空格可能是名字的一部分。"""
+    """SSID is 1–32 bytes (UTF-8; one Chinese character is 3 bytes). No strip: spaces around an SSID may be part of the name."""
     if not isinstance(value, str) or value == "":
         raise Refused("WiFi 名字要是 1–32 个字节")
     try:
@@ -72,7 +72,7 @@ def validate_ssid(value):
 
 
 def validate_psk(value):
-    """空 = 开放网络；否则 8–63 个字符，或者 64 位十六进制（WPA 的两种写法）。"""
+    """Empty = open network; otherwise 8–63 characters, or 64 hex digits (the two WPA forms)."""
     if value is None or value == "":
         return None
     if not isinstance(value, str):
@@ -89,9 +89,9 @@ def validate_connect(ssid, psk):
 
 
 def addresses(host, ip, port=PORT, scheme="http"):
-    """「这只鸭子的地址」：现在能用的几个，按设备说该用哪个（10-20 真机：开着 Clash 系统代理的 Windows 打不开 .local——
-    走了代理、502；不带点的主机名 Windows 用 LLMNR 问得到，代理按 <local> 绕过；IP 哪儿都能开）。
-    HTTPS 的出厂证书只覆盖主机名、固定热点地址和回环地址。"""
+    """The "this duck's address" list: the ones usable now, and which to use per device (10-20 real hardware: Windows with the Clash system proxy on couldn't open .local ——
+    it went through the proxy, 502; Windows resolves a dotless hostname via LLMNR, and the proxy bypasses it via <local>; an IP works everywhere).
+    The factory HTTPS certificate only covers the hostname, the fixed hotspot address, and the loopback address."""
     out = []
     if ip and (scheme != "https" or ip in (HOTSPOT_IP, "127.0.0.1")):
         out.append({"kind": "ip", "url": f"{scheme}://{ip}:{port}/", "note": "IP：哪台设备都能打开（换了路由器、重新分了地址会变）"})
@@ -101,8 +101,8 @@ def addresses(host, ip, port=PORT, scheme="http"):
 
 
 def own_hotspot(n, hotspot_ssid):
-    """扫描结果里这一条是不是鸭子自己的热点（真机扫出来 Microduck-0de6、显示「已保存」，点了会让人往里填家里密码）。
-    net.json 有 hotspot_ssid 就按它认；没有就认「Microduck- 开头、而且是已保存」的。"""
+    """Whether this scan result entry is the duck's own hotspot (real hardware scanned Microduck-0de6 shown as "已保存" (Saved); tapping it would make people enter the home password there).
+    If net.json has hotspot_ssid, match by it; otherwise match ones "starting with Microduck- and saved"."""
     ssid = n.get("ssid") if isinstance(n, dict) else None
     if not isinstance(ssid, str):
         return False
@@ -112,7 +112,7 @@ def own_hotspot(n, hotspot_ssid):
 
 
 def explain(reason, detail=None):
-    """configd 的失败原因 → 页面上的一句话。other 附上 detail；没权限的错误原样说出来。"""
+    """configd failure reason → one sentence on the page. For other, append detail; permission errors are passed on verbatim."""
     if detail and str(detail).strip() == PERMISSION:
         return PERMISSION
     base = REASON_TEXT.get(reason, REASON_TEXT["other"])
@@ -122,7 +122,7 @@ def explain(reason, detail=None):
 
 
 def _scrub(text, psk=None):
-    """写日志 / last-try 之前再兜一层：家里的密码和它在 URL 里出现的样子都换成 [已隐藏]。"""
+    """One more safety net before writing logs / last-try: the home password and how it appears in URLs are replaced with [已隐藏] ([hidden])."""
     if text is None:
         return None
     out = str(text)
@@ -142,7 +142,7 @@ def _rpc_error(e, what):
 
 
 class Net:
-    """配网状态 + 操作。start() 起两个循环：2 秒读 net.json、5 秒问 configd net.status（只在文件在时）。"""
+    """Wi-Fi setup state + operations. start() launches two loops: read net.json every 2 seconds, ask configd net.status every 5 seconds (only when the file exists)."""
 
     def __init__(self, configd_addr, state_file=NET_STATE, state_dir=None, log=None, *, dev_mode=False,
                  hostname=None, port=PORT, scheme="http"):
@@ -164,9 +164,9 @@ class Net:
         self._bad_state_logged = False
         self._status_error_logged = False
         self._tasks = []
-        self.connect_task = None       # app.py 放后台连 WiFi 的那一路（页面断开也不能被回收）
+        self.connect_task = None       # the background Wi-Fi connection task started by app.py (must not be garbage-collected even if the page disconnects)
 
-    # ---- 生命周期 ----
+    # ---- Lifecycle ----
 
     def start(self):
         loop = asyncio.get_running_loop()
@@ -187,7 +187,7 @@ class Net:
         while True:
             try:
                 await asyncio.to_thread(self._read_once)
-            except Exception as e:  # noqa: BLE001 —— 读状态文件出错不能让整个 Studio 停
+            except Exception as e:  # noqa: BLE001 —— an error reading the status file must not stop all of Studio
                 if self.log:
                     self.log.warn("读配网状态文件时出错", cat="网络", step=str(self.state_file),
                                   raw=f"{type(e).__name__}: {e}", dedup=True)
@@ -252,13 +252,13 @@ class Net:
                 self._status_error_logged = False
             await asyncio.sleep(STATUS_EVERY_S)
 
-    # ---- 给页面 ----
+    # ---- For the page ----
 
     def mode(self):
         return self.info.get("mode") if isinstance(self.info, dict) else None
 
     def view(self, now=None):
-        """推给页面的 net 字段。文件不在 / 坏了 = {"known": false}。"""
+        """The net field pushed to the page. File missing / broken = {"known": false}."""
         if not isinstance(self.info, dict):
             return {"known": False}
         now = time.monotonic() if now is None else now
@@ -272,7 +272,7 @@ class Net:
             last["reason_text"] = explain(last.get("reason"), last.get("detail"))
         mode = self.info.get("mode")
         ip4 = st.get("ip4") if connected else None
-        # 现在能用的 IP：热点模式就是鸭子热点的地址（10.42.0.1），否则是 configd net.status 的 ip4（没连上就没有）
+        # IP usable now: in hotspot mode it's the duck hotspot's address (10.42.0.1), otherwise configd net.status's ip4 (absent if not connected)
         ip_now = (self.info.get("hotspot_ip") or HOTSPOT_IP) if mode == "hotspot" else ip4
         hotspot_ip = self.info.get("hotspot_ip") or HOTSPOT_IP
         return {
@@ -294,7 +294,7 @@ class Net:
         }
 
     def begin_connect(self):
-        """占住「正在连」：第二个 connect 回 False。不知道配网状态时抛 Refused。"""
+        """Claim "connecting": a second connect returns False. Raises Refused when the Wi-Fi setup state is unknown."""
         if not isinstance(self.info, dict):
             raise Refused("不知道鸭子的配网状态：WiFi 功能现在用不了")
         if self.busy is not None:
@@ -303,8 +303,8 @@ class Net:
         return True
 
     def begin_hotspot(self):
-        """占住热点开关：已有操作回 False，不知道配网状态时抛 Refused。
-        跟 begin_connect 分开，页面上「正在连 WiFi」和「正在开关热点」不会互相插队。"""
+        """Claim the hotspot toggle: returns False if an operation is already in progress, raises Refused when the Wi-Fi setup state is unknown.
+        Kept separate from begin_connect so "connecting to Wi-Fi" and "toggling hotspot" on the page don't cut in on each other."""
         if not isinstance(self.info, dict):
             raise Refused("不知道鸭子的配网状态：WiFi 功能现在用不了")
         if self.busy is not None:
@@ -312,11 +312,11 @@ class Net:
         self.busy = "hotspot"
         return True
 
-    # ---- 扫描 ----
+    # ---- Scanning ----
 
     async def scan(self):
-        """configd net.scan。热点模式下网卡可能扫不了：空 / 出错就用 net.json 里开热点前的 scan。
-        鸭子自己的热点滤掉（own_hotspot）：不然它在列表里显示「已保存」，点了会让人往里填家里的密码。"""
+        """configd net.scan. In hotspot mode the NIC may not be able to scan: if empty / error, use the scan from before the hotspot was opened in net.json.
+        The duck's own hotspot is filtered out (own_hotspot): otherwise it shows as "已保存" (Saved) in the list, and tapping it would make people enter the home password."""
         if not isinstance(self.info, dict):
             raise Refused("不知道鸭子的配网状态：WiFi 功能现在用不了")
         own = self.info.get("hotspot_ssid")
@@ -345,16 +345,16 @@ class Net:
             raise Refused(error or "读不到 WiFi 列表")
         return {"networks": result, "cached": False, "scan_at": None}
 
-    # ---- 连接 ----
+    # ---- Connecting ----
 
     async def connect(self, ssid, psk, by):
-        """关热点 → configd net.connect → 写 last-try。调用前先 begin_connect()。
-        回 last-try 那份记录（不含密码）。失败时马上把热点开回来；bad_key 还要先忘掉这次写坏的配置。"""
+        """Turn off hotspot → configd net.connect → write last-try. Call begin_connect() first.
+        Returns the last-try record (without the password). On failure, turn the hotspot back on immediately; for bad_key, first forget the config this attempt broke."""
         ssid, psk = validate_connect(ssid, psk)
         if self.busy is None:
             self.busy = "connecting"
         if psk and self.log:
-            self.log.hide(psk)                    # 兜底：万一别的代码把密码带进日志，也打码
+            self.log.hide(psk)                    # safety net: in case other code brings the password into the logs, mask it too
         outcome = {"ok": False, "reason": "other", "detail": None, "ip4": None}
         hotspot_stopped = False
         hotspot_down_tried = False
@@ -416,7 +416,7 @@ class Net:
             if self.log:
                 self.log.warn("连 WiFi 没开始", cat="网络", step="关热点", raw=_scrub(str(e), psk),
                               hint="看小助手装没装、版本对不对")
-        except Exception as e:  # noqa: BLE001 —— Studio 自己的 bug 也要写 last-try
+        except Exception as e:  # noqa: BLE001 —— Studio's own bugs must also be written to last-try
             outcome = {"ok": False, "reason": "other", "detail": _scrub(f"{type(e).__name__}: {e}", psk), "ip4": None}
             if self.log:
                 self.log.error("连 WiFi 时 Studio 出错", cat="网络", raw=_scrub(f"{type(e).__name__}: {e}", psk),
@@ -448,7 +448,7 @@ class Net:
         return {"ok": False, "reason": "other", "detail": _scrub(f"看不懂的回包：{r}", psk), "ip4": None}
 
     async def _hotspot_up(self, by):
-        """开热点；返回 (ok, 给页面的一句话)。连接失败回补热点和「户外模式」按钮共用。"""
+        """Open the hotspot; returns (ok, a sentence for the page). Shared by the hotspot restore after a failed connection and the "户外模式" (Outdoor mode) button."""
         with log_cmd(self.log, "开热点", "小助手 wifi-hotspot-up", who=by) as t:
             try:
                 ok, result, detail = await asyncio.to_thread(helper.wifi_hotspot_up, by)
@@ -468,7 +468,7 @@ class Net:
             return False, why
 
     async def hotspot_up(self, by):
-        """户外模式：马上开热点，不等 netcheck。调用前先 begin_hotspot()。返回 (ok, reason)。"""
+        """Outdoor mode: open the hotspot right away without waiting for netcheck. Call begin_hotspot() first. Returns (ok, reason)."""
         try:
             if not helper.available(refresh=True):
                 raise Refused("还没装小助手：先在鸭子上运行 deploy/install.sh，Studio 才能开热点")
@@ -477,8 +477,8 @@ class Net:
             self.busy = None
 
     async def hotspot_down(self, by, ssid=None):
-        """户外模式：关热点，NetworkManager 会按已保存的配置连回家里的 WiFi。
-        调用前先 begin_hotspot()。ssid 只写给 netcheck 的连接窗口，可为空。返回 (ok, reason)。"""
+        """Outdoor mode: turn off the hotspot; NetworkManager reconnects to the home Wi-Fi using the saved config.
+        Call begin_hotspot() first. ssid is only written to netcheck's connection window, may be empty. Returns (ok, reason)."""
         try:
             if not helper.available(refresh=True):
                 raise Refused("还没装小助手：先在鸭子上运行 deploy/install.sh，Studio 才能关热点")
@@ -503,7 +503,7 @@ class Net:
             self.busy = None
 
     async def _forget_bad_key(self, ssid, by):
-        """密码错了：官方 connect 已经用这次的错密码替换了同名配置，先忘掉，免得 netcheck 以后还去试。"""
+        """Wrong password: the official connect has already replaced the same-named config with this wrong password, so forget it first so netcheck won't keep trying it later."""
         with log_cmd(self.log, f"忘掉密码不对的 WiFi「{ssid}」", "configd net.forget", who=by) as t:
             try:
                 r = await call_once(self.configd_addr, "net.forget", {"ssid": ssid}, timeout=FORGET_TIMEOUT_S)
@@ -519,7 +519,7 @@ class Net:
         self.status = {"state": "connected", "ssid": ssid, "ip4": ip4}
         self.status_at = time.monotonic()
 
-    # ---- 忘掉 ----
+    # ---- Forgetting ----
 
     async def forget(self, ssid):
         ssid = validate_ssid(ssid)
@@ -541,7 +541,7 @@ class Net:
             self.status, self.status_at = None, None
         return {"removed": removed}
 
-    # ---- last-try 文件 ----
+    # ---- last-try file ----
 
     def _load_last_try(self):
         if self.last_try_path is None:

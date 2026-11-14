@@ -1,7 +1,7 @@
-"""模型归档边界与无硬件预检；不写 robotd 配置、不接触总线。
+"""Model archive boundaries and hardware-free precheck; does not write robotd config or touch the bus.
 
-这里只识别导出合同的基础身份。观测映射、滤波、任务适配和 ONNX 图的
-完整兼容性由安装在本机的 robotd validate-policy 决定，不能用解包成功代替。
+This only identifies the basic identity of the export contract. Full compatibility of the observation mapping, filtering, task adaptation, and ONNX graph
+is decided by the robotd validate-policy installed on this machine; a successful unpack is no substitute.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ BAM_SHA256 = "ef2d51adfb1cc0831b9b02ca19aa9176fceecdf725148d084378d7d9a64afceb"
 
 
 class PackageError(ValueError):
-    """可直接显示给导入用户的中文错误。"""
+    """A Chinese error message that can be shown directly to the importing user."""
 
 
 def _safe_name(raw: str, directory: bool) -> PurePosixPath:
@@ -75,7 +75,7 @@ def _tar_entries(archive):
 
 
 class _TarStream:
-    """tarfile 在返回成员前会整块读取 PAX/长文件名，先限制这类分配。"""
+    """tarfile reads PAX/long file names in whole blocks before returning members, so limit such allocations first."""
     def __init__(self, stream):
         self.stream = stream
 
@@ -89,7 +89,7 @@ class _TarStream:
 
     def seek(self, offset, whence=0):
         position = offset if whence == 0 else self.tell() + offset
-        # tar 的文件头、末尾填充不属于展开文件体积，但仍然有界。
+        # tar file headers and trailing padding don't count toward the extracted size, but are still bounded.
         if whence not in (0, 1) or not 0 <= position <= MAX_EXPANDED_BYTES + MAX_FILES * 1024 + 10240:
             raise PackageError("归档展开体积超过上限")
         return self.stream.seek(offset, whence)
@@ -103,7 +103,7 @@ def _tar_archive(path):
 
 
 def _layout(entries):
-    """先检查整个归档，再读取文件，避免忽略未知文件里的危险条目。"""
+    """Check the whole archive first, then read files, so dangerous entries in unknown files aren't overlooked."""
     files, directories, seen = [], [], set()
     total = 0
     for raw, directory, size, opener in entries:
@@ -155,7 +155,7 @@ def _copy_file(opener, destination, size):
 
 
 def _json_object(path):
-    # JSON 解析会为字符串、数组与字典再分配内存；不能沿用 ONNX 的单文件额度。
+    # JSON parsing allocates more memory for strings, arrays, and dicts; the ONNX single-file quota can't be reused.
     if path.stat().st_size > MAX_JSON_BYTES:
         raise PackageError(f"{path.name} JSON 元数据超过 8 MiB 上限")
 
@@ -268,7 +268,7 @@ def _metadata(directory, names):
 
 
 def extract_package(archive: Path, destination: Path) -> dict:
-    """导入单个 ZIP/tar.gz/tgz 模型；成功才交付目录，拒绝覆盖已有内容。"""
+    """Import a single ZIP/tar.gz/tgz model; the directory is only handed over on success, and existing content is never overwritten."""
     archive, destination = Path(archive), Path(destination)
     if destination.is_symlink() or (destination.exists() and
             (not destination.is_dir() or any(destination.iterdir()))):
@@ -305,7 +305,7 @@ def extract_package(archive: Path, destination: Path) -> dict:
 
 
 def validate_policy(path: Path, executable: str, *, env=None) -> dict:
-    """运行 robotd 的离线图预检；继承进程环境或使用调用方提供的运行库环境。"""
+    """Run robotd's offline graph precheck; inherits the process environment or uses the runtime library environment supplied by the caller."""
     try:
         result = subprocess.run([executable, "validate-policy", str(path)],
                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
