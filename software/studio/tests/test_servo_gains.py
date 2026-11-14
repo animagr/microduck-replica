@@ -1,8 +1,8 @@
-"""上力时的 P / D / 限力跟主程序一样（用户 10-19：「P、D 那些应该跟主程序保持一致，也是默认 P5、D0、限力 1000」）。
+"""P / D / torque limit when enabling torque are the same as the main program (user, Oct 19: "P, D and so on should match the main program, i.e. default P5, D0, torque limit 1000").
 
-对照的是 fork 固件（duck-control/src/hd1910.rs、hd1910_test.rs）：
-RAM 48..51 一包 [限力低, 限力高, P, D]、sync_read 48×4 回读核对、不碰 EEPROM 21/22、不碰锁标志 55。
-用协议级模拟舵机（sim_bus）跑：模拟舵机上电是出厂 P32 / D40 / 限力 1000。
+Compared against the fork firmware (duck-control/src/hd1910.rs, hd1910_test.rs):
+RAM 48..51 in one packet [limit low, limit high, P, D], sync_read 48×4 readback check, don't touch EEPROM 21/22, don't touch lock flag 55.
+Runs with the protocol-level simulated servo (sim_bus): the simulated servo powers up with factory P32 / D40 / torque limit 1000.
 """
 import json
 import os
@@ -26,7 +26,7 @@ FORK_WALK = FORK / "packaging" / "models" / "1cbf8730eadd75a5704332c9f3c10f60" /
 
 
 def run_gains(sv):
-    """模拟舵机运行中的 (P, D, 限力)：RAM 50、51、48..49。"""
+    """The simulated servo's running (P, D, torque limit): RAM 50, 51, 48..49."""
     return sv.r[50], sv.r[51], sv.r[48] | sv.r[49] << 8
 
 
@@ -36,13 +36,13 @@ def write_json(path, obj):
 
 
 def bump(path, n):
-    """把 mtime 挪开（同一秒里连写两次，mtime 可能不变；这里用的是 mtime_ns + 大小，保险起见也挪一下）。"""
+    """Shift the mtime (two writes within the same second may leave mtime unchanged; this uses mtime_ns + size, but shift it anyway to be safe)."""
     t = time.time() + n
     os.utime(path, (t, t))
 
 
 class Recorder:
-    """记下总线上每一包（ID、指令、参数），看写的顺序和写了哪些寄存器。"""
+    """Record every packet on the bus (ID, instruction, params) to see the write order and which registers were written."""
 
     def __init__(self, ser):
         self.packets = []
@@ -54,7 +54,7 @@ class Recorder:
         ser._handle = handle
 
     def writes(self):
-        """[(序号, 地址, {id: 数据})]：WRITE 和 SYNC_WRITE 都摊成按 ID 的。"""
+        """[(index, address, {id: data})]: both WRITE and SYNC_WRITE are flattened per ID."""
         out = []
         for n, (sid, instr, p) in enumerate(self.packets):
             if instr == feetech.WRITE:
@@ -71,7 +71,7 @@ class Recorder:
         return [n for n, a, d in self.writes() if a == 48 and len(d.get(sid, b"")) == 4]
 
 
-# ---------------- 主程序的上力参数（不碰总线） ----------------
+# ---------------- The main program's torque-enable parameters (no bus) ----------------
 
 class MainGainsTest(unittest.TestCase):
     def setUp(self):
@@ -91,7 +91,7 @@ class MainGainsTest(unittest.TestCase):
     def test_no_files_is_v167_default_5_0_1000(self):
         g = MainGains(params_path=str(self.dir / "nope" / "servo-test-parameters.json"), robotd_tomls=()).get()
         self.assertEqual((g["kp"], g["kd"], g["limit"], g["source"]), (5, 0, 1000, "主程序默认"))
-        self.assertIn("没有主程序的配置", g["detail"])        # 电脑上（台架 / 演示）就是这一条
+        self.assertIn("没有主程序的配置", g["detail"])        # on a computer (bench / demo) this is the message
         self.assertIsNone(g["warn"])
 
     def test_valid_file_wins(self):
@@ -101,7 +101,7 @@ class MainGainsTest(unittest.TestCase):
         self.assertEqual(self.warns, [])
 
     def test_bad_or_out_of_range_file_falls_back_and_warns(self):
-        """跟 fork hd1910_test.rs:111-121 同一组坏文件，外加 5.0、true、重复键（serde 都不收）。"""
+        """Same set of bad files as fork hd1910_test.rs:111-121, plus 5.0, true, duplicate keys (serde rejects all of them)."""
         bad = ['{"kp":256,"kd":0,"torque_limit":681}', '{"kp":3,"kd":0,"torque_limit":1001}', '{"kp":3,"kd":0}',
                '{"kp":0,"kd":0,"torque_limit":681}', '{"kp":33,"kd":0,"torque_limit":681}',
                '{"kp":3,"kd":65,"torque_limit":681}', '{"kp":3,"kd":0,"torque_limit":199}',
@@ -131,7 +131,7 @@ class MainGainsTest(unittest.TestCase):
         g = self.mg().get()
         self.assertEqual((g["kp"], g["kd"], g["limit"], g["source"]), (4, 0, 1000, "主程序默认"))
         self.assertIn("kp_fw", g["detail"])
-        # 合约里 kp_fw 不合法：P 按 5
+        # kp_fw in the contract is invalid: P falls back to 5
         for bad in ({"model": {"actuators": [{"kp_fw": 4.5}]}}, {"model": {"actuators": [{"kp_fw": 40}]}},
                     {"model": {"actuators": [{}, {}]}}, {"model": {}}):
             write_json(model / "deployment-contract.json", bad)
@@ -141,14 +141,14 @@ class MainGainsTest(unittest.TestCase):
     def test_walk_path_resolution_like_robotd(self):
         self.toml.write_text("[policy]\nmode = \"walk\"\n", encoding="utf-8")
         self.assertEqual(_walk_contract(str(self.toml)), "/opt/robot/policies/current/deployment-contract.json")
-        self.toml.write_text('[policy]\nwalk = "none"\n', encoding="utf-8")     # walk 不认 "none"，回默认
+        self.toml.write_text('[policy]\nwalk = "none"\n', encoding="utf-8")     # walk doesn't accept "none", falls back to default
         self.assertEqual(_walk_contract(str(self.toml)), "/opt/robot/policies/current/deployment-contract.json")
         self.toml.write_text('[policy]\nwalk = "/opt/robot/feetech-ft5-r5/models/abc/policy.onnx"\n', encoding="utf-8")
         self.assertEqual(_walk_contract(str(self.toml)), "/opt/robot/feetech-ft5-r5/models/abc/deployment-contract.json")
 
     @unittest.skipUnless(FORK_WALK is not None and FORK_WALK.is_file(), "设 MICRODUCK_FORK 指向 fork 固件目录才跑")
     def test_real_fork_walk_contract_is_5(self):
-        """fork 打包的走路模型（packaging/robotd-profile.toml 的 walk）kp_fw 是 5。"""
+        """The walk model packaged by the fork (walk in packaging/robotd-profile.toml) has kp_fw 5."""
         self.assertEqual(contract_kp(str(FORK_WALK)), 5)
 
     def test_cached_by_mtime(self):
@@ -157,13 +157,13 @@ class MainGainsTest(unittest.TestCase):
         self.assertEqual(mg.get()["kp"], 3)
         write_json(self.params, {"kp": 7, "kd": 1, "torque_limit": 681})
         bump(self.params, 5)
-        self.assertEqual(mg.get(max_age=60)["kp"], 3)           # max_age 内不 stat
-        self.assertEqual(mg.get()["kp"], 7)                     # 文件变了就重读
+        self.assertEqual(mg.get(max_age=60)["kp"], 3)           # no stat within max_age
+        self.assertEqual(mg.get()["kp"], 7)                     # reread when the file changes
         self.params.unlink()
-        self.assertEqual(mg.get()["source"], "主程序默认")      # 删了回默认
+        self.assertEqual(mg.get()["source"], "主程序默认")      # deleted: back to default
 
 
-# ---------------- 总线上：每条上力的路 ----------------
+# ---------------- On the bus: every path that enables torque ----------------
 
 class SimBase(unittest.TestCase):
     def setUp(self):
@@ -184,7 +184,7 @@ class SimBase(unittest.TestCase):
         while len(s.rows) < 15 and time.monotonic() < end:
             time.sleep(0.02)
         self.sessions.append(s)
-        # 电脑上没有 /etc/robot：默认就是 5/0/1000；要参数文件的测试换一个 MainGains 指到临时目录
+        # no /etc/robot on a computer: defaults are 5/0/1000; tests that need a params file use another MainGains pointed at a temp dir
         pp = os.path.join(d, "etc", "servo-test-parameters.json")
         if params is not None:
             os.makedirs(os.path.dirname(pp))
@@ -212,15 +212,15 @@ class GainsOnBusTest(SimBase):
         self.assertEqual(r["on"], [22])
         self.assertEqual(sv.r[40], 1)
         self.assertEqual(run_gains(sv), (5, 0, 1000))
-        self.assertEqual((sv.r[21], sv.r[22], sv.r[52], sv.r[55]), (32, 40, 0, 1))   # EEPROM、I、锁标志都没动
+        self.assertEqual((sv.r[21], sv.r[22], sv.r[52], sv.r[55]), (32, 40, 0, 1))   # EEPROM, I and lock flag untouched
         self.assertEqual(r["gains"], {"kp": 5, "kd": 0, "limit": 1000, "source": "主程序默认"})
         g = rec.gains_writes(22)
         self.assertEqual(len(g), 1)
-        self.assertLess(g[0], rec.first_torque_on(22))                       # 先写 P/D/限力，再开扭矩
+        self.assertLess(g[0], rec.first_torque_on(22))                       # write P/D/torque limit first, then enable torque
         self.assertEqual(rec.writes()[[n for n, *_ in rec.writes()].index(g[0])][2][22], struct.pack("<H", 1000) + bytes([5, 0]))
         touched = {a for _, a, d in rec.writes() if 22 in d}
-        self.assertFalse(touched & {21, 22, 23, 55}, touched)                # 没写 EEPROM 的 P/D/I、没动锁
-        # 表里：运行中的 P/D/限力是回读值，跟主程序一样
+        self.assertFalse(touched & {21, 22, 23, 55}, touched)                # EEPROM P/D/I not written, lock untouched
+        # in the table: running P/D/torque limit are readback values, same as the main program
         snap = s.snapshot()
         row = {x["id"]: x for x in snap["rows"]}[22]
         self.assertEqual((row["p_run"], row["d_run"], row["limit"], row["gains_ok"]), (5, 0, 1000, True))
@@ -229,21 +229,21 @@ class GainsOnBusTest(SimBase):
 
     def test_only_writes_servos_that_differ(self):
         s = self.open()
-        self.sim(s, 20).r[50], self.sim(s, 20).r[51] = 5, 0              # 20 本来就是 5/0/1000
+        self.sim(s, 20).r[50], self.sim(s, 20).r[51] = 5, 0              # 20 is already 5/0/1000
         rec = Recorder(s.sim_serial)
         s.ops.handle({"op": "torque", "on": 1, "ids": [20, 21]})
         self.assertEqual(rec.gains_writes(20), [])
         self.assertEqual(len(rec.gains_writes(21)), 1)
         s.ops.handle({"op": "torque", "on": 0, "ids": [20, 21]})
         rec.packets.clear()
-        s.ops.handle({"op": "torque", "on": 1, "ids": [20, 21]})              # 再上力：都对了，一包都不写
+        s.ops.handle({"op": "torque", "on": 1, "ids": [20, 21]})              # enable torque again: all correct, nothing written
         self.assertEqual([a for _, a, _ in rec.writes() if a == 48], [])
         self.assertEqual((self.sim(s, 20).r[40], self.sim(s, 21).r[40]), (1, 1))
 
     def test_rewrites_after_servo_reboot(self):
         s = self.open()
         s.ops.handle({"op": "torque", "on": 1, "ids": [23]})
-        s.ops.handle({"op": "reboot", "id": 23})                              # 重启：RAM 回出厂 P32/D40
+        s.ops.handle({"op": "reboot", "id": 23})                              # reboot: RAM back to factory P32/D40
         self.assertEqual(run_gains(self.sim(s, 23)), (32, 40, 1000))
         s.ops.handle({"op": "torque", "on": 1, "ids": [23]})
         self.assertEqual(run_gains(self.sim(s, 23)), (5, 0, 1000))
@@ -258,7 +258,7 @@ class GainsOnBusTest(SimBase):
         self.assertEqual(s.snapshot()["gains"]["source"], "参数文件")
 
     def test_bad_params_file_uses_default_and_warns(self):
-        s = self.open(params={"kp": 0, "kd": 0, "torque_limit": 681})       # 旧版允许 kp=0，fork 不收
+        s = self.open(params={"kp": 0, "kd": 0, "torque_limit": 681})       # older version allowed kp=0, the fork rejects it
         s.ops.handle({"op": "torque", "on": 1, "ids": [22]})
         self.assertEqual(run_gains(self.sim(s, 22)), (5, 0, 1000))
         warns = s.log.recent(cats=["总线"], min_level="warn")
@@ -267,11 +267,11 @@ class GainsOnBusTest(SimBase):
 
     def test_readback_mismatch_refuses_torque_and_logs_register(self):
         s = self.open()
-        self.sim(s, 22).readonly = {50}                                       # P 写不进去
+        self.sim(s, 22).readonly = {50}                                       # P can't be written
         rec = Recorder(s.sim_serial)
         r = s.ops.handle({"op": "torque", "on": 1, "ids": [22, 21]})
         self.assertEqual(r["on"], [21])
-        self.assertEqual(self.sim(s, 22).r[40], 0)                           # 没上力
+        self.assertEqual(self.sim(s, 22).r[40], 0)                           # torque not enabled
         self.assertEqual(self.sim(s, 21).r[40], 1)
         self.assertIn("50（P）写 5 读回 32", r["bad"]["22"])
         self.assertIsNone(rec.first_torque_on(22))
@@ -280,17 +280,17 @@ class GainsOnBusTest(SimBase):
 
     def test_no_reply_refuses_torque(self):
         s = self.open()
-        self.sim(s, 24).muted = {48}                                          # 48 起读不回
+        self.sim(s, 24).muted = {48}                                          # reads from 48 on don't come back
         r = s.ops.handle({"op": "torque", "on": 1, "ids": [24]})
         self.assertEqual(r["on"], [])
         self.assertIn("读不到 P/D/限力", r["bad"]["24"])
         self.assertEqual(self.sim(s, 24).r[40], 0)
 
     def test_already_on_with_other_gains_is_only_checked(self):
-        """上着力的不改 P（换 P 带载关节会塌一下）：只核对，页头标黄。fork 扭矩开着时 arm 也只核对。"""
+        """Servos with torque on don't get P changed (changing P on a loaded joint makes it sag briefly): only check, and highlight the page header yellow. The fork's arm also only checks while torque is on."""
         s = self.open()
         sv = self.sim(s, 13)
-        sv.r[40] = 1                                                          # 别处上的力，还是出厂 P32/D40
+        sv.r[40] = 1                                                          # torque enabled elsewhere, still factory P32/D40
         s._read_torque()
         rec = Recorder(s.sim_serial)
         r = s.ops.handle({"op": "torque", "on": 1, "ids": [13]})
@@ -301,7 +301,7 @@ class GainsOnBusTest(SimBase):
         snap = s.snapshot()
         self.assertEqual(snap["gains"]["differ_on"], [13])
         self.assertFalse({x["id"]: x for x in snap["rows"]}[13]["gains_ok"])
-        # 松开再保持：改过来
+        # release then hold: fixed
         s.ops.handle({"op": "torque", "on": 0, "ids": [13]})
         s.ops.handle({"op": "torque", "on": 1, "ids": [13]})
         self.assertEqual(run_gains(sv), (5, 0, 1000))
@@ -310,19 +310,19 @@ class GainsOnBusTest(SimBase):
     def test_manual_register_write_flags_header(self):
         s = self.open()
         s.ops.handle({"op": "torque", "on": 1, "ids": [20]})
-        s.ops.handle({"op": "write_reg", "id": 20, "addr": 50, "size": 1, "value": 10})   # 高级用法照旧允许
+        s.ops.handle({"op": "write_reg", "id": 20, "addr": 50, "size": 1, "value": 10})   # advanced usage still allowed
         self.assertEqual(self.sim(s, 20).r[50], 10)
         g = s.snapshot()["gains"]
         self.assertEqual([(m["id"], m["addr"], m["value"]) for m in g["manual"]], [(20, 50, 10)])
         self.assertEqual(g["differ_on"], [20])
         self.assertTrue(any("手动改了" in e["msg"] for e in s.log.recent(cats=["总线"], min_level="warn")))
-        s.ops.handle({"op": "torque", "on": 1, "ids": [20]})                  # 上着力再点保持：只核对，不改回
+        s.ops.handle({"op": "torque", "on": 1, "ids": [20]})                  # clicking hold with torque on: only check, don't change back
         self.assertEqual(self.sim(s, 20).r[50], 10)
         s.ops.handle({"op": "torque", "on": 0, "ids": [20]})
-        s.ops.handle({"op": "torque", "on": 1, "ids": [20]})                  # 松开再保持：写回主程序的
+        s.ops.handle({"op": "torque", "on": 1, "ids": [20]})                  # release then hold: write back the main program's values
         self.assertEqual(self.sim(s, 20).r[50], 5)
         self.assertEqual(s.snapshot()["gains"]["manual"], [])
-        # EEPROM 的 P（21）：上电后才用，一直记着「手动改过」；上力照样写运行中的 5
+        # EEPROM P (21): only used after power-up, always remembered as "manually changed"; enabling torque still writes the running 5
         s.ops.handle({"op": "write_reg", "id": 21, "addr": 21, "size": 1, "value": 20, "unlock": True})
         s.ops.handle({"op": "write_reg", "id": 21, "addr": 48, "size": 2, "value": 700})
         self.assertEqual(self.sim(s, 21).r[21], 20)
@@ -331,7 +331,7 @@ class GainsOnBusTest(SimBase):
         self.assertEqual([(m["id"], m["addr"]) for m in s.snapshot()["gains"]["manual"]], [(21, 21)])
 
 
-# 每条会上力的路：(名字, 准备, 做, 看哪颗)。准备在「写不进去」之前跑（准备里自己可能要先上一次力）
+# Every path that enables torque: (name, prepare, do, which servo to check). prepare runs before "can't write" is set (prepare may itself need to enable torque once)
 def _hold_one(t, s):
     s.ops.handle({"op": "torque", "on": 1, "ids": [22]})
 
@@ -348,11 +348,11 @@ def _idle(t, s):
 
 
 def _calib_from_off(t, s):
-    s.ops.handle({"op": "calibrate", "ids": "22"})                           # 校完自动保持（torque_on_aligned）
+    s.ops.handle({"op": "calibrate", "ids": "22"})                           # holds automatically after calibration (torque_on_aligned)
 
 
 def _prep_on_stale(t, s):
-    """22 上着力、但 RAM 里还是出厂 P32/D40（比如别处上的力）：校准 / 撤销里恢复扭矩前要先写。"""
+    """22 has torque on, but RAM still has factory P32/D40 (e.g. torque enabled elsewhere): calibration / undo must write them before restoring torque."""
     s.ops.handle({"op": "torque", "on": 1, "ids": [22]})
     sv = t.sim(s, 22)
     sv.r[50], sv.r[51] = 32, 40
@@ -395,7 +395,7 @@ class EveryTorquePathTest(SimBase):
                 self.assertIsNotNone(on, name)
                 g = rec.gains_writes(sid)
                 self.assertTrue(g and g[0] < on, f"{name}：P/D/限力 {g} 要在开扭矩 {on} 之前写")
-                self.assertEqual((sv.r[21], sv.r[22], sv.r[55]), (32, 40, 1), name)    # EEPROM 没动、锁着
+                self.assertEqual((sv.r[21], sv.r[22], sv.r[55]), (32, 40, 1), name)    # EEPROM untouched, locked
 
     def test_every_path_refuses_torque_when_readback_wrong(self):
         for name, prep, act, sid in PATHS:
@@ -405,7 +405,7 @@ class EveryTorquePathTest(SimBase):
                     prep(self, s)
                 sv = self.sim(s, sid)
                 sv.r[50] = 32
-                sv.readonly = {50}                   # P 写不进去（「原来上着力」的两条路：校准 / 撤销里先关扭矩，恢复时卡住）
+                sv.readonly = {50}                   # P can't be written (the two "was holding torque" paths: calibration / undo turn torque off first, then get stuck on restore)
                 rec = Recorder(s.sim_serial)
                 act(self, s)
                 self.assertEqual(sv.r[40], 0, f"{name}：P 写不进去，不该上力")
@@ -414,8 +414,8 @@ class EveryTorquePathTest(SimBase):
                 self.assertTrue(any(f"#{sid}" in e["msg"] and "50（P）" in e["msg"] for e in errs), (name, errs))
 
     def test_all_torque_writes_go_through_gains(self):
-        """grep 一遍：舵机页往扭矩开关写 1 的地方只有 torque_on_aligned 的 sync_write 和 _gains_then_torque
-        （以后新加上力的路，要么走这两个，要么在这里加上、先写 P/D/限力）。"""
+        """grep once: the only places in the servo page that write 1 to the torque switch are the sync_write in torque_on_aligned and _gains_then_torque
+        (any new torque-enable path added later must either go through these two or be added here and write P/D/torque limit first)."""
         import re
         on = re.compile(r"write_u8\([^()]*,\s*40,\s*1\)|sync_write\(40,\s*1,.*(bytes\(\[1\]\)|b\"\\x01\")")
         hits = []

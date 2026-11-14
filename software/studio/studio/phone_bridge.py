@@ -198,7 +198,7 @@ def transcribe_detail(pcm, use_grammar=True):
         info['reason'] = 'unknown' if unknown else 'unclear'
         return out
     if unknown:
-    # Cases like "点头 [unk]" (nod [unk]): half recognized, with a part not understood. Treating it as unrecognized is safer.
+        # Cases like "点头 [unk]" (nod [unk]): half recognized, with a part not understood. Treating it as unrecognized is safer.
         info['reason'] = 'unknown'
         info['heard'] = text
         return out
