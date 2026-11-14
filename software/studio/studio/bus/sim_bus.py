@@ -1,27 +1,27 @@
 # -*- coding: utf-8 -*-
-"""（搬自同仓库 tools/servo-web/sim_bus.py。Studio 用它在电脑上不接舵机也能跑舵机页，测试也用它。）
+"""(Moved from tools/servo-web/sim_bus.py in this same repo. Studio uses it to run the servo page on a computer without servos attached; the tests use it too.)
 
-协议级的 HD-1910 模拟器：假装是一个串口，收飞特指令包、按寄存器表回应答包。
+Protocol-level HD-1910 simulator: pretends to be a serial port, receives Feetech instruction packets, and returns reply packets according to the register table.
 
-跟 server.py 里的 FakeBus 不一样：FakeBus 模拟的是高层接口，测不到 feetech.py；
-这个让真实的 FeetechBus 对着它收发字节，包格式、校验和、同步读写、锁、扭矩、中位校准的前提条件都按真机来。
+Different from FakeBus in server.py: FakeBus simulates the high-level interface and can't test feetech.py;
+this one lets the real FeetechBus send and receive bytes against it, and packet format, checksums, sync read/write, lock, torque, and the preconditions for center calibration all behave like real hardware.
 
   bus = feetech.FeetechBus(None, ser=SimSerial([20, 21, ...]))
 
-模拟的真机行为（有出处的）：
-- 扭矩开关写 128：HD-1910（固件 3.46）回「成功」但什么都不做（2026-09-20 实测 4 轮，解锁、扭矩关着也一样；
-  协议手册里 HLS ≥3.43 也不支持）。accept_128=True 时按 STS 的规矩：锁标志 = 0 且扭矩开关 = 0 才校准
-- 0x0B 位置校准：当前位置的读数改成参数值（没参数 = 2048）。support_0b=False 模拟不认这条指令的舵机
-- 偏移寄存器 31：offset_adds 控制是「位置 = 原始 + 偏移」还是「原始 − 偏移」，手册没写死，两种都能模拟
-- 重力下垂：扭矩一关，装在鸭子身上的关节就往下掉（真机实测颈部 130 ms 掉 80 步 ≈ 0.62 步/ms）。
-  droop 设成每毫秒掉几步 —— 不模拟这个，"关扭矩等太久把垂下去的位置校成零位"这类 bug 测不出来
-- 总线延迟：真机每个来回（发包 + 等应答 + USB latency timer）约 1~2 ms。latency_ms 模拟它，
-  同时驱动一个虚拟时钟：下垂按这个时钟算，所以测试是确定性的，不看机器快慢；time.sleep 也照样计入
-- 寄存器表到 86 为止，读过头只回剩下的字节（真机实测：读 80 起 10 个回 7 个）
-- 位置、速度、电流第 15 位是符号位；偏移寄存器 31 同样按第 15 位记符号（真机读到过 34279 = -1511）
-- REBOOT (0x08) 不回包
-- P / D / I 两份：EEPROM 21–23 出厂 32 / 40 / 0；运行中用的是 RAM 50–52（上电、重启从 EEPROM 拷），
-  转矩限制 48 上电 = 最大扭矩 16（实机数据：主程序诊断 registers_before_arm 的 eeprom_pdi / temporary_pdi）
+Simulated real-hardware behaviors (with sources):
+- Writing 128 to the torque switch: the HD-1910 (firmware 3.46) replies "success" but does nothing (hardware test 2026-09-20, 4 rounds, same with unlocked and torque off;
+  the protocol manual also says HLS ≥3.43 doesn't support it). With accept_128=True it follows the STS rule: calibrate only if lock flag = 0 and torque switch = 0
+- 0x0B position calibration: the reading of the current position is changed to the parameter value (no parameter = 2048). support_0b=False simulates a servo that doesn't recognize this instruction
+- Offset register 31: offset_adds controls whether "position = raw + offset" or "raw − offset"; the manual doesn't pin it down, so both can be simulated
+- Gravity droop: as soon as torque is off, joints mounted on the duck fall down (hardware test: the neck dropped 80 steps in 130 ms ≈ 0.62 steps/ms).
+  Set droop to how many steps per millisecond it falls —— without simulating this, bugs like "waited too long after torque off and calibrated the drooped position as zero" can't be caught
+- Bus latency: on real hardware each round trip (send packet + wait for reply + USB latency timer) is about 1~2 ms. latency_ms simulates it,
+  and also drives a virtual clock: droop is computed on this clock, so tests are deterministic regardless of machine speed; time.sleep is counted too
+- The register table ends at 86; reading past it only returns the remaining bytes (hardware test: reading 10 from 80 returned 7)
+- Bit 15 of position, speed, and current is the sign bit; offset register 31 also stores the sign in bit 15 (real hardware once read 34279 = -1511)
+- REBOOT (0x08) doesn't reply
+- Two copies of P / D / I: EEPROM 21–23 factory 32 / 40 / 0; the running values are in RAM 50–52 (copied from EEPROM at power-up and reboot),
+  torque limit 48 at power-up = max torque 16 (real-hardware data: eeprom_pdi / temporary_pdi from the main program's registers_before_arm diagnostics)
 """
 import struct
 import time
@@ -39,29 +39,29 @@ class SimServo:
     def __init__(self, sid, phys=2048):
         self.r = bytearray(TABLE_END)
         r = self.r
-        r[0], r[1], r[2], r[3], r[4] = 3, 46, 0, 3, 10      # 固件 3.46，END=0 小端
-        r[5], r[6], r[8] = sid, 0, 1                        # ID、波特率 1M、应答级别 1
+        r[0], r[1], r[2], r[3], r[4] = 3, 46, 0, 3, 10      # firmware 3.46, END=0 little-endian
+        r[5], r[6], r[8] = sid, 0, 1                        # ID, baud rate 1M, reply level 1
         struct.pack_into("<HH", r, 9, 0, 4095)
         r[13], r[15] = 70, 40
         struct.pack_into("<H", r, 16, 1000)
-        r[18], r[21], r[22], r[33] = 52, 32, 40, 4          # 相位 52、出厂 P32 / D40 / I0（EEPROM 21–23）、模式 4
-        r[50:53] = r[21:24]                                 # 运行中的 P / D / I（RAM 50–52）：上电从 EEPROM 拷
+        r[18], r[21], r[22], r[33] = 52, 32, 40, 4          # phase 52, factory P32 / D40 / I0 (EEPROM 21–23), mode 4
+        r[50:53] = r[21:24]                                 # running P / D / I (RAM 50–52): copied from EEPROM at power-up
         struct.pack_into("<H", r, 48, 1000)
-        r[55] = 1                                           # 出厂锁着
+        r[55] = 1                                           # locked from the factory
         r[62], r[63] = 74, 30
-        self.phys = phys          # 编码器的物理读数（没加偏移）
-        self.off = 0              # 偏移：报告的位置 = phys + off
+        self.phys = phys          # physical encoder reading (without offset)
+        self.off = 0              # offset: reported position = phys + off
         self.goal = None
-        self.calibrations = 0     # 真正做了几次中位校准，测试用
-        self.muted = set()        # 读这些地址不回包，模拟中途掉线
-        self.accept_128 = False   # HD-1910 不认 128
+        self.calibrations = 0     # how many center calibrations were actually done, for tests
+        self.muted = set()        # reads of these addresses get no reply, simulating dropping off mid-way
+        self.accept_128 = False   # the HD-1910 ignores 128
         self.support_0b = True
-        self.ignore_offset_writes = False   # 模拟连写偏移都不认的舵机
-        self.offset_adds = True   # 报告位置 = phys + off；False 时 = phys − off（手册没写死，两种都得能跑）
-        self.droop = 0.0          # 扭矩关着时每毫秒往下掉几步；真机颈部实测 0.62
-        self._t = 0.0             # 上次 tick 时的总线虚拟时钟（毫秒）
-        self.mute_after_calib = set()   # 校准一做完就把这些地址加进 muted
-        self.readonly = set()     # 写这些地址回「成功」但不生效：模拟写不进去（测「回读不对就不上力」）
+        self.ignore_offset_writes = False   # simulates a servo that ignores even offset writes
+        self.offset_adds = True   # reported position = phys + off; when False = phys − off (the manual doesn't pin it down, both must work)
+        self.droop = 0.0          # steps per millisecond it falls while torque is off; measured 0.62 on the real neck
+        self._t = 0.0             # bus virtual clock at the last tick (milliseconds)
+        self.mute_after_calib = set()   # add these addresses to muted as soon as a calibration finishes
+        self.readonly = set()     # writes to these addresses reply "success" but have no effect: simulates failed writes (tests "don't enable torque if readback is wrong")
 
     @property
     def id(self):
@@ -71,9 +71,9 @@ class SimServo:
         return self.phys + (self.off if self.offset_adds else -self.off)
 
     def tick(self, clock_ms=0.0):
-        """扭矩开着就直接走到目标（模拟器不管动力学）；关着就按 droop 往下掉。
+        """If torque is on, go straight to the target (the simulator ignores dynamics); if off, fall according to droop.
 
-        clock_ms 是总线的虚拟时钟，由 SimSerial 按每包延迟和真实 sleep 推进。"""
+        clock_ms is the bus virtual clock, advanced by SimSerial by the per-packet latency and real sleeps."""
         dt_ms, self._t = clock_ms - self._t, clock_ms
         if self.r[40] == 1 and self.goal is not None:
             self.phys = self.goal - (self.off if self.offset_adds else -self.off)
@@ -92,11 +92,11 @@ class SimServo:
             if a == 40 and b == 128:
                 if self.accept_128 and self.r[40] == 0 and self.r[55] == 0:
                     self.recalibrate(2048)
-                continue                                     # 回成功，什么都不做
+                continue                                     # reply success, do nothing
             if a in self.readonly:
                 continue
             self.r[a] = b
-        # 多字节寄存器落地
+        # multi-byte registers take effect
         if addr <= 42 < addr + len(data):
             self.goal = feetech.sign15(struct.unpack_from("<H", self.r, 42)[0])
         if addr <= 31 < addr + len(data) and not self.ignore_offset_writes:
@@ -105,7 +105,7 @@ class SimServo:
             self.goal = self.pos()
 
     def recalibrate(self, value):
-        # phys 因为下垂是小数，偏移得取整：真舵机的寄存器只能存整数
+        # phys is fractional because of droop, so the offset has to be rounded: a real servo's register can only store integers
         self.off = round((value - self.phys) if self.offset_adds else (self.phys - value))
         self.calibrations += 1
         self.muted |= self.mute_after_calib
@@ -116,17 +116,17 @@ class SimServo:
 
 
 class SimSerial:
-    """假串口：write() 收指令，按总线上的舵机生成应答；read() 把应答吐出来。"""
+    """Fake serial port: write() receives instructions and generates replies from the servos on the bus; read() spits out the replies."""
 
     def __init__(self, ids, phys=None):
         self.timeout = 0.02
         self.servos = {i: SimServo(i, (phys or {}).get(i, 2048)) for i in ids}
         self.rx = bytearray()
-        self.latency_ms = 0.0     # 每个来回多少毫秒；真机 URT-2 约 1~2
-        self.clock = 0.0          # 总线虚拟时钟（毫秒）：每包 +latency，再加上调用方 sleep 掉的真实时间
+        self.latency_ms = 0.0     # milliseconds per round trip; about 1~2 for a real URT-2
+        self.clock = 0.0          # bus virtual clock (milliseconds): +latency per packet, plus the real time the caller slept
         self._wall = time.monotonic()
 
-    # ---- 串口接口 ----
+    # ---- Serial interface ----
     def reset_input_buffer(self):
         self.rx.clear()
 
@@ -149,11 +149,11 @@ class SimSerial:
             data = data[4 + length:]
             instr, params = pkt[4], pkt[5:-1]
             if ((~sum(pkt[2:-1])) & 0xFF) != pkt[-1]:
-                continue                                         # 校验错：真舵机不理
+                continue                                         # checksum error: a real servo ignores it
             self._handle(sid, instr, params)
         return len(data)
 
-    # ---- 舵机 ----
+    # ---- Servos ----
     def _by_id(self, sid):
         for s in self.servos.values():
             if s.id == sid:
@@ -161,7 +161,7 @@ class SimSerial:
         return None
 
     def _advance(self):
-        """推进虚拟时钟：一次总线来回的延迟，加上上次之后真实睡掉的时间（代码里的 time.sleep 要算进下垂）。"""
+        """Advance the virtual clock: the latency of one bus round trip, plus the real time slept since last time (time.sleep in the code counts toward droop)."""
         now = time.monotonic()
         self.clock += self.latency_ms + (now - self._wall) * 1000
         self._wall = now
@@ -188,7 +188,7 @@ class SimSerial:
             addr, ln = p[0], p[1]
             for i in p[2:]:
                 s = self._by_id(i)
-                # alive() 给假 IMU 小板用：模拟"总线处理器还没起来"和"板子彻底不答"
+                # alive() is for the fake IMU board: simulates "bus processor not up yet" and "board not answering at all"
                 if s and addr not in getattr(s, "muted", ()) and getattr(s, "alive", lambda _: True)(self.clock):
                     self._reply(s, s.read(addr, ln, self.clock))
             return
@@ -197,7 +197,7 @@ class SimSerial:
             return
         if instr == feetech.PING:
             if sid == feetech.BROADCAST or not getattr(s, "alive", lambda _: True)(self.clock):
-                return                                       # 手册：总线上多个设备时不能用广播 PING
+                return                                       # manual: broadcast PING can't be used with multiple devices on the bus
             self._reply(s)
         elif instr == feetech.READ:
             if p[0] in s.muted or not getattr(s, "alive", lambda _: True)(self.clock):
@@ -205,12 +205,12 @@ class SimSerial:
             self._reply(s, s.read(p[0], p[1], self.clock))
         elif instr == feetech.WRITE:
             s.write(p[0], p[1:])
-            self._reply(s)                                       # 改 ID 时用新 ID 回
+            self._reply(s)                                       # when changing the ID, reply with the new ID
         elif instr == feetech.CALIBRATE:
             if s.support_0b:
                 s.recalibrate(2048 if len(p) < 2 else feetech.sign15(p[0] | p[1] << 8))
             self._reply(s)
         elif instr == feetech.REBOOT:
-            s.r[40] = 0                                          # 不回包，回来时扭矩关
-            s.r[50:53] = s.r[21:24]                              # RAM 的 P/D/I、限力恢复成上电值（真机：重启舵机 RAM 回出厂）
+            s.r[40] = 0                                          # no reply; comes back with torque off
+            s.r[50:53] = s.r[21:24]                              # RAM P/D/I and force limit restored to power-up values (real hardware: rebooting a servo resets RAM to factory)
             s.r[48:50] = s.r[16:18]

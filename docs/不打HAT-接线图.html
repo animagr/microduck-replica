@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Microduck 复刻 · 不打 HAT 接线图</title>
 <!--
-  这是源文件：接线拓扑是内联 SVG，其余是 HTML。
-  换模块、换脚位、改价格 —— 直接改这个文件，浏览器打开就是新图。
-  配套说明：../docs/不打HAT.md
-  打印：浏览器 Ctrl+P，纸张选 A3 横向，边距 0。
+  This is the source file: the wiring topology is inline SVG, the rest is HTML.
+  To swap a module, change a pin or update a price, edit this file directly; open it in a browser and you get the new diagram.
+  Companion guide: ../docs/不打HAT.md
+  Printing: Ctrl+P in the browser, choose A3 landscape paper, margins 0.
 -->
 <style>
   body { margin: 0; background: #e6e3dd; }
@@ -24,7 +24,7 @@
 <body>
 <div class="page" style="width: 1587px; height: 1123px; box-sizing: border-box; background: #f6f4f0; color: #1a1815; font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; padding: 34px 40px 28px; display: flex; flex-direction: column; gap: 18px;">
 
-  <!-- ═══ 标题 ═══ -->
+  <!-- ═══ Title ═══ -->
   <div style="display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #1a1815; padding-bottom: 12px;">
     <div>
       <div style="font-size: 38px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1;">Microduck 复刻 · 整机接线图</div>
@@ -37,7 +37,7 @@
     </div>
   </div>
 
-  <!-- ═══ 两条警告 ═══ -->
+  <!-- ═══ Two warnings ═══ -->
   <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px;">
 
     <div style="background: #fbf0e4; border: 2px solid #b3452f; border-left-width: 9px; padding: 15px 19px; display: flex; flex-direction: column; gap: 7px;">
@@ -71,7 +71,7 @@
     </div>
   </div>
 
-  <!-- ═══ 主接线图 ═══ -->
+  <!-- ═══ Main wiring diagram ═══ -->
   <div style="flex-grow: 1; background: #fffefb; border: 2px solid #1a1815; padding: 16px 20px 10px; display: flex; flex-direction: column;">
 
     <div style="display: flex; align-items: center; gap: 26px; margin-bottom: 6px;">
@@ -91,7 +91,7 @@
         </marker>
       </defs>
 
-      <!-- ── 电池 ── -->
+      <!-- ── Battery ── -->
       <rect x="8" y="150" width="196" height="132" rx="4" fill="#fbeeea" stroke="#b3452f" stroke-width="2.5"/>
       <text x="106" y="180" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1815">NP-F550</text>
       <text x="106" y="203" text-anchor="middle" font-size="14" fill="#57524a">2S 锂电池</text>
@@ -99,9 +99,9 @@
       <text x="106" y="258" text-anchor="middle" font-size="12.5" fill="#6b655c">满电 8.4 · 带载 6.6–8.2</text>
       <text x="106" y="275" text-anchor="middle" font-size="12.5" fill="#6b655c">配电池仓 + 取电扣板</text>
 
-      <!-- 电池 → 降压 (5V 支路) -->
+      <!-- Battery → buck converter (5V branch) -->
       <path d="M 204 186 H 246 V 74 H 300" stroke="#b3452f" stroke-width="4" fill="none" marker-end="url(#ar)"/>
-      <!-- 电池 → 开关 → 保险丝 → 舵机总线 (原压直供) -->
+      <!-- Battery → switch → fuse → servo bus (direct battery voltage) -->
       <path d="M 204 246 H 246 V 432 H 936" stroke="#b3452f" stroke-width="5.5" fill="none" marker-end="url(#ar)"/>
       <rect x="180" y="306" width="132" height="72" rx="4" fill="#fff" stroke="#b3452f" stroke-width="2.5"/>
       <text x="246" y="330" text-anchor="middle" font-size="14" font-weight="600" fill="#8f3524">电源开关</text>
@@ -110,14 +110,14 @@
       <text x="258" y="400" font-size="12.5" font-weight="600" fill="#8f3524">主干 18–20 AWG</text>
       <text x="258" y="416" font-size="12.5" font-weight="600" fill="#8f3524">硅胶线，别用杜邦线</text>
 
-      <!-- ── 降压模块 ── -->
+      <!-- ── Buck converter module ── -->
       <rect x="300" y="26" width="212" height="96" rx="4" fill="#fdf4e6" stroke="#c07818" stroke-width="2.5"/>
       <text x="406" y="52" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">降压模块</text>
       <text x="406" y="75" text-anchor="middle" font-size="14" fill="#57524a">6–9 V → 5 V ／ ≥2 A</text>
       <text x="406" y="97" text-anchor="middle" font-size="12.5" fill="#6b655c">UBEC 或 MP1584 同步降压</text>
       <text x="406" y="114" text-anchor="middle" font-size="12.5" fill="#8f3524">别用 LM2596 · 输入并 470µF</text>
 
-      <!-- 降压 → Radxa 5V -->
+      <!-- Buck converter → Radxa 5V -->
       <path d="M 512 74 H 596" stroke="#c07818" stroke-width="4" fill="none" marker-end="url(#ar)"/>
       <text x="554" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#a06412">+5 V</text>
 
@@ -147,14 +147,14 @@
       <text x="1038" y="185" text-anchor="middle" font-size="12.5" fill="#1a1815">SDA←pin3 &nbsp;SCL←pin5</text>
       <text x="1038" y="203" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f3524">3V3←pin 17 &nbsp;GND←pin 6</text>
 
-      <!-- Radxa → 转接板：信号 + 3.3V 逻辑供电 -->
+      <!-- Radxa → adapter board: signal + 3.3V logic supply -->
       <path d="M 700 246 V 292" stroke="#1f5f7a" stroke-width="3.5" fill="none" marker-end="url(#ar)"/>
       <text x="712" y="268" font-size="12.5" fill="#1f5f7a">pin 8 / 10 / 6</text>
       <text x="712" y="284" font-size="12" fill="#6b655c">TX↔RX 交叉</text>
       <path d="M 840 246 V 292" stroke="#1f5f7a" stroke-width="3" stroke-dasharray="5 4" fill="none" marker-end="url(#ar)"/>
       <text x="852" y="276" font-size="12.5" font-weight="600" fill="#8f3524">pin 1 · 3.3V</text>
 
-      <!-- ── 半双工转接板 ── -->
+      <!-- ── Half-duplex adapter board ── -->
       <rect x="600" y="296" width="286" height="118" rx="4" fill="#eef4f7" stroke="#1f5f7a" stroke-width="2.5"/>
       <text x="743" y="322" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">半双工转接板</text>
       <text x="743" y="344" text-anchor="middle" font-size="13" fill="#57524a">ST/SC 系列 · TTL 版或 USB 版 ¥22</text>
@@ -162,13 +162,13 @@
       <text x="743" y="386" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f3524">逻辑供电只能取 3.3V，取 5V 会打坏主控</text>
       <text x="743" y="405" text-anchor="middle" font-size="12" fill="#6b655c">USB 版更省事，但串口变 /dev/ttyUSB0</text>
 
-      <!-- 转接板 → 总线 DATA -->
+      <!-- Adapter board → bus DATA -->
       <path d="M 886 356 H 936" stroke="#1f5f7a" stroke-width="4" fill="none" marker-end="url(#ar)"/>
       <text x="911" y="346" text-anchor="middle" font-size="12" fill="#1f5f7a">DATA</text>
 
       <text x="620" y="423" text-anchor="middle" font-size="13" font-weight="600" fill="#8f3524">VDD 6.6–8.4 V ← 舵机吃电池原压</text>
 
-      <!-- ── 舵机总线 ── -->
+      <!-- ── Servo bus ── -->
       <rect x="940" y="296" width="552" height="146" rx="4" fill="#fbeeea" stroke="#b3452f" stroke-width="2.5"/>
       <text x="1216" y="322" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">飞特舵机总线　1 Mbps 半双工单线</text>
       <line x1="958" y1="334" x2="1474" y2="334" stroke="#e0c3ab" stroke-width="1.5"/>
@@ -177,7 +177,7 @@
       <text x="958" y="404" font-size="13.5" fill="#1a1815">imu_to_dxl 自制板　总线上第 16 个设备</text>
       <text x="958" y="426" font-size="12.5" fill="#6b655c">J4 / J5 = PH 2.0 mm，脚序已按飞特画（1=DATA 2=VDD 3=GND）</text>
 
-      <!-- GND 共地母线 -->
+      <!-- GND common-ground rail -->
       <path d="M 106 282 V 452" stroke="#3d3a35" stroke-width="3" fill="none"/>
       <path d="M 106 452 H 1216" stroke="#3d3a35" stroke-width="3" fill="none"/>
       <path d="M 406 122 V 452" stroke="#3d3a35" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
@@ -187,7 +187,7 @@
     </svg>
   </div>
 
-  <!-- ═══ 底部四栏 ═══ -->
+  <!-- ═══ Bottom four columns ═══ -->
   <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
 
     <div style="background: #fffefb; border: 2px solid #1a1815; padding: 12px 15px;">

@@ -1,29 +1,29 @@
-"""调 root 小助手（/usr/local/sbin/microduck-helper）停、起主程序 robotd（舵机总线交接）。
+"""Call the root helper (/usr/local/sbin/microduck-helper) to stop and start the main program robotd (servo bus handover).
 
-Studio 不是 root。sudoers 只放行 microduck-helper 这一个全路径，所以这里用 `sudo -n`
-调它、stdin 传一个 JSON，别的权限一点没有。小助手认 bus-take / bus-give-back /
+Studio isn't root. sudoers only allows this one full path, microduck-helper, so here we use `sudo -n`
+to call it and pass a JSON on stdin, with no other privileges at all. The helper accepts the fixed verbs bus-take / bus-give-back /
 bus-abort / pad-pair / pad-forget / wifi-hotspot-down / wifi-hotspot-up / calib-read / calib-commit /
-ssh-status / ssh-password / imu-recalibrate 固定动词，参数逐个校验，
-robotd 的状态它自己去读，不信网页传来的（deploy/INSTALL.md）。
+ssh-status / ssh-password / imu-recalibrate, validates each parameter,
+and reads robotd's state itself rather than trusting what the web page sends (deploy/INSTALL.md).
 
-- bus-take：停 robotd、立旗（robotd 起不来）、确认串口空出来 → Studio 打开总线。不卸力。
-- bus-give-back {"soft": true}：Studio 已经在总线上全卸了 → 撤旗、起 robotd、等启动四步成功。
-- bus-give-back {"marker": {...}}：不卸力交还（写交接标记，fork 的 robotd 读走并接手保持）。
-  要 fork 的 robotd 装上、drop-in 打开 Environment 才认；旧版不认，会照老规矩全卸（result=limp）。
-- pad-pair：以 root 跑官方 `robotctl pad pair --json`。weird-ble 板上 robotctl 会先停 btd、把适配器断电再开，
-  所以这条主路能配上新 Switch Pro 类手柄。旧版小助手回 bad_verb，调用方据此退回 configd / bluetoothctl。
-- pad-forget：以 root 跑官方 `robotctl pad forget MAC`。
-- wifi-hotspot-down / wifi-hotspot-up：配网时关 / 开鸭子自己的热点（nmcli connection down / up
-  Microduck-Hotspot）。热点本来就没开 / 本来就开着算成功；这两个不拿 bus 的 helper.lock，用 wifi.lock。
-- calib-read：只读当前标定文件，回解析后的内容和现在的模式（标定 / 运动）；不拿锁、不写东西。
-- calib-commit：把舵机零位 / 方向 / IMU 方向写进 robotd 的标定文件（hd1910-calibration.toml），
-  出厂镜像跑标定模式时顺便删掉 commissioning drop-in，再重启主程序切运动模式。成功要
-  mode=motion、phase=control，而且 calibration-status 读回来逐项一致。它跑在独立 systemd 单元里，
-  Studio 被重启也只是暂时看不到输出；最终结果在 /run/microduck-helper/last-result.json。
-  dry_run 只回要写的 TOML。旧版小助手回 bad_verb，调用方据此提示重装。
+- bus-take: stop robotd, raise the flag (robotd can't start), confirm the serial port is free → Studio opens the bus. Does not relax.
+- bus-give-back {"soft": true}: Studio has already relaxed everything on the bus → lower the flag, start robotd, wait for the four startup steps to succeed.
+- bus-give-back {"marker": {...}}: hand back without relaxing (write a handover marker; the fork's robotd reads it and takes over holding).
+  Only recognized when the fork's robotd is installed and the drop-in enables Environment; old versions don't recognize it and relax everything as before (result=limp).
+- pad-pair: run the official `robotctl pad pair --json` as root. On weird-ble boards robotctl first stops btd and power-cycles the adapter,
+  so this main path can pair new Switch Pro-style gamepads. Old helpers reply bad_verb, and the caller then falls back to configd / bluetoothctl.
+- pad-forget: run the official `robotctl pad forget MAC` as root.
+- wifi-hotspot-down / wifi-hotspot-up: turn the duck's own hotspot off / on during Wi-Fi setup (nmcli connection down / up
+  Microduck-Hotspot). Hotspot already off / already on counts as success; these two don't take the bus's helper.lock, they use wifi.lock.
+- calib-read: read-only of the current calibration file, returns the parsed content and the current mode (commissioning / motion); takes no lock, writes nothing.
+- calib-commit: write servo zero positions / directions / IMU orientation into robotd's calibration file (hd1910-calibration.toml);
+  when the factory image runs commissioning mode it also deletes the commissioning drop-in, then restarts the main program into motion mode. Success requires
+  mode=motion, phase=control, and calibration-status reading back identical item by item. It runs in a separate systemd unit,
+  so a Studio restart only temporarily loses its output; the final result is in /run/microduck-helper/last-result.json.
+  dry_run only returns the TOML to be written. Old helpers reply bad_verb, and the caller then prompts to reinstall.
 
-没装小助手（电脑上开发、台架、演示）就优雅回退：bus_take 当没做（交给 servo.open 自己的
-robotd_active 检查去报错），bus_give_back 当没做（交还以后主程序由人手动起）。
+Without the helper installed (development on a computer, bench, demo) it falls back gracefully: bus_take is treated as not done (left to servo.open's own
+robotd_active check to report the error), bus_give_back is treated as not done (after handing back, the main program is started manually).
 """
 import json
 import os
@@ -36,7 +36,7 @@ import threading
 import time
 
 HELPER = "/usr/local/sbin/microduck-helper"
-FLAG = "/run/microduck-helper/bus-held"       # 接管期间立着：robotd 的 drop-in 看到它就不肯起来
+FLAG = "/run/microduck-helper/bus-held"       # raised during takeover: robotd's drop-in sees it and refuses to start
 LAST_RESULT = "/run/microduck-helper/last-result.json"
 IMU_REDO_MANIFEST = "/var/lib/microduck-helper/imu-recalibrate/manifest.json"
 NATIVE_UPDATE_JOURNAL = "/var/lib/microduck-helper/native-update/journal.json"
@@ -52,16 +52,16 @@ _avail = None
 
 
 def flag_present():
-    """接管旗在不在（只在 Linux 上查；电脑 / 测试里 patch 这个函数）。"""
+    """Whether the takeover flag is present (only checked on Linux; patch this function on a computer / in tests)."""
     if not sys.platform.startswith("linux"):
         return False
     return os.path.exists(FLAG)
 
 
 def available(refresh=False):
-    """小助手在不在、sudoers 放行没（结果缓存：装不装在运行中不会变）。
-    用 `sudo -n microduck-helper bus-nope` 探：能调就返回 2（动词不认识，说明文件在、sudoers 放行）；
-    返回别的 = 没装 / 没放行 / 不在 Linux。refresh=True 时重新探一次（配网每次连接都要看）。"""
+    """Whether the helper is present and allowed by sudoers (result cached: installed or not doesn't change at runtime).
+    Probed with `sudo -n microduck-helper bus-nope`: if callable it returns 2 (unknown verb, meaning the file exists and sudoers allows it);
+    any other return = not installed / not allowed / not on Linux. refresh=True probes again (Wi-Fi setup checks on every connection)."""
     global _avail
     if refresh:
         _avail = None
@@ -79,9 +79,9 @@ def available(refresh=False):
 
 
 def _call(verb, payload, timeout, on_line=None):
-    """跑 `sudo -n microduck-helper <verb>`，stdin 传 JSON。回 (ok, result, detail)。
-    ok = 最后一行 done 的 exit 是 0；result / detail 是 done 那一行的 detail 字段。
-    on_line 给了就边跑边把每一行进度交出去（写标定的进度）；不给还是等它跑完再解析。"""
+    """Run `sudo -n microduck-helper <verb>` with JSON on stdin. Returns (ok, result, detail).
+    ok = the exit of the final done line is 0; result / detail are the detail fields of the done line.
+    If on_line is given, each progress line is handed over as it runs (calibration-write progress); otherwise wait for it to finish, then parse."""
     data = json.dumps(payload, ensure_ascii=False)
     if on_line is None:
         try:
@@ -109,8 +109,8 @@ def _call(verb, payload, timeout, on_line=None):
 
 
 def _call_stream(verb, data, timeout, on_line):
-    """同一条命令，但把标准输出一行一行交出去（小助手每一步一行）。stderr 并进 stdout：
-    这样 sudo 自己报的错也不会把管道堵住。"""
+    """Same command, but hand over stdout line by line (the helper prints one line per step). stderr is merged into stdout:
+    this way errors reported by sudo itself won't block the pipe either."""
     try:
         proc = subprocess.Popen(["sudo", "-n", HELPER, verb], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
@@ -175,25 +175,25 @@ def _call_stream(verb, data, timeout, on_line):
 
 
 def bus_take(by, allow_seated=False, timeout=30):
-    """停 robotd、把舵机总线交给 Studio（不卸力）。回 (ok, result, detail)。"""
+    """Stop robotd and hand the servo bus to Studio (without relaxing). Returns (ok, result, detail)."""
     return _call("bus-take", {"by": by, "allow_seated": allow_seated}, timeout)
 
 
 def bus_give_back(by, *, soft=True, marker=None, timeout=60):
-    """交还总线、起 robotd。soft=True 是软交还（Studio 已全卸）；传 marker 是不卸力交还（fork 接手保持）。
-    回 (ok, result, detail)。"""
+    """Hand back the bus and start robotd. soft=True is a soft handback (Studio has relaxed everything); passing marker is a handback without relaxing (the fork takes over holding).
+    Returns (ok, result, detail)."""
     payload = {"by": by, "soft": True} if soft else {"by": by, "marker": marker}
     return _call("bus-give-back", payload, timeout)
 
 
 def bus_abort(by, timeout=10):
-    """中止交接（交接倒数期间页面按了卸力）：KILL robotd、删标记、把总线还给 Studio。回 (ok, result, detail)。"""
+    """Abort the handover (the page pressed relax during the handover countdown): KILL robotd, delete the marker, give the bus back to Studio. Returns (ok, result, detail)."""
     return _call("bus-abort", {"by": by}, timeout)
 
 
 def pad_pair(by, mac=None, timeout=60):
-    """官方 robotctl pad pair（小助手以 root 跑）。回 (ok, result, detail)。
-    detail["pair"] 是 PadPairResult；detail["stderr"] 是 robotctl 的几行提示（暂停 btd、警告等）。"""
+    """Official robotctl pad pair (run as root by the helper). Returns (ok, result, detail).
+    detail["pair"] is a PadPairResult; detail["stderr"] is robotctl's few lines of messages (pausing btd, warnings, etc.)."""
     payload = {"by": by, "timeout": timeout}
     if mac:
         payload["mac"] = mac
@@ -201,12 +201,12 @@ def pad_pair(by, mac=None, timeout=60):
 
 
 def pad_forget(by, mac, timeout=60):
-    """官方 robotctl pad forget（小助手以 root 跑）。回 (ok, result, detail)。"""
+    """Official robotctl pad forget (run as root by the helper). Returns (ok, result, detail)."""
     return _call("pad-forget", {"by": by, "mac": mac}, timeout)
 
 
 def wifi_hotspot_down(by, ssid=None, timeout=30):
-    """关鸭子自己的热点（小助手最多等 10 秒）。热点本来就没开算成功。ssid 写进连接窗口文件，给 netcheck 看。"""
+    """Turn off the duck's own hotspot (the helper waits at most 10 s). Hotspot already off counts as success. ssid is written into the connection window file for netcheck."""
     payload = {"by": by}
     if ssid:
         payload["ssid"] = ssid
@@ -214,12 +214,12 @@ def wifi_hotspot_down(by, ssid=None, timeout=30):
 
 
 def wifi_hotspot_up(by, timeout=40):
-    """开鸭子自己的热点（小助手最多等 30 秒）。本来就开着算成功。回 (ok, result, detail)。"""
+    """Turn on the duck's own hotspot (the helper waits at most 30 s). Already on counts as success. Returns (ok, result, detail)."""
     return _call("wifi-hotspot-up", {"by": by}, timeout)
 
 
 def calib_read(by=None, timeout=10):
-    """只读主程序的标定文件和现在的模式（calib-read）。回 (ok, result, detail)。"""
+    """Read-only of the main program's calibration file and the current mode (calib-read). Returns (ok, result, detail)."""
     payload = {"by": by} if by else {}
     return _call("calib-read", payload, timeout)
 
@@ -321,12 +321,12 @@ def _native_update_state(*,root,journal):
 
 
 def ssh_status(timeout=10):
-    """SSH 密码登录开没开、ssh 在不在跑、radxa 登记了几把钥匙（ssh-status，只读）。回 (ok, result, detail)。"""
+    """Whether SSH password login is on, whether ssh is running, how many keys radxa has registered (ssh-status, read-only). Returns (ok, result, detail)."""
     return _call("ssh-status", {}, timeout)
 
 
 def ssh_password(by, on, password=None, timeout=40):
-    """打开（用户自己定的密码设给 radxa）/ 关掉 SSH 密码登录（ssh-password）。密码只走小助手的 stdin，不进日志。"""
+    """Turn on (set the user's chosen password for radxa) / turn off SSH password login (ssh-password). The password only goes through the helper's stdin, never into logs."""
     payload = {"by": by, "on": bool(on)}
     if on:
         payload["password"] = password
@@ -334,7 +334,7 @@ def ssh_password(by, on, password=None, timeout=40):
 
 
 def last_result():
-    """读小助手最后一次写下的完整结果（Studio 重启 / 调用超时以后用）。读不到回 None。"""
+    """Read the complete result the helper last wrote (used after a Studio restart / call timeout). Returns None if unreadable."""
     try:
         with open(LAST_RESULT, encoding="utf-8") as f:
             v = json.load(f)
@@ -344,8 +344,8 @@ def last_result():
 
 
 def calib_commit(by, joints, imu, dry_run=False, timeout=180, on_line=None):
-    """把舵机零位 / 方向 / IMU 方向写进主程序（小助手 calib-commit）。回 (ok, result, detail)。
-    dry_run=True 只回要写的 TOML（detail["toml"]），不写文件、不重启。on_line 收每一步进度。"""
+    """Write servo zero positions / directions / IMU orientation into the main program (helper calib-commit). Returns (ok, result, detail).
+    dry_run=True only returns the TOML to be written (detail["toml"]), without writing the file or restarting. on_line receives each step's progress."""
     payload = {"by": by, "joints": joints, "imu": imu, "dry_run": bool(dry_run)}
     return _call("calib-commit", payload, timeout, on_line=on_line)
 
@@ -431,7 +431,7 @@ _COMMON = {
 
 
 def friendly(result, detail, verb):
-    """把 result 换成人话（result 的值见 deploy/INSTALL.md §1）。detail 里的小助手原话一并带上。"""
+    """Turn result into plain language (result values are in deploy/INSTALL.md §1). The helper's original message in detail is included too."""
     if verb == "imu-recalibrate":
         if result in ("bad_verb", "denied", "not_root") or "sudo" in str(result).lower():
             return "重做初次 IMU 校准需要新版 root 小助手（0.7.0 起）和 sudoers：请更新 deploy/install.sh"
@@ -447,17 +447,17 @@ def friendly(result, detail, verb):
         table = _TAKE_WHY if verb == "bus-take" else _GIVE_WHY
     msg = detail.get("msg") if isinstance(detail, dict) else None
     if verb in ("ssh-status", "ssh-password"):
-        # 小助手的原话就是完整的一句（「sshd 配置检查没过，已经退回去：…」）
+        # The helper's original message is a complete sentence ("sshd 配置检查没过，已经退回去：…" (sshd config check failed, already reverted: …))
         if msg and result not in ("ssh_status", "ssh_password_on", "ssh_password_off"):
             return msg
         if result == "bad_verb":
             return "小助手太旧，不会开 SSH：重装 deploy/install.sh（0.6.0 起才有）"
         return _COMMON.get(result) or (result or "没成")
-    # calib-commit 的小助手原话已经是完整的一句话（带「已经换回原来的文件」这类收尾），直接用；
-    # 其它动词保持「结果词：原话」的写法（test_helper 的 friendly 约定）。
+    # The helper's original message for calib-commit is already a complete sentence (with an ending like "已经换回原来的文件" (already swapped back to the original file)), use it directly;
+    # other verbs keep the "result word: original message" format (test_helper's friendly convention).
     if msg and verb == "calib-commit" and result not in ("committed", "preview"):
         return msg
-    # 交还以后主程序在回话、只是一直报启动阶段（旧 fork 的标定模式）：别说成「起不来」，小助手的原话就是完整的一句
+    # After handback the main program is responding but keeps reporting a startup phase (the old fork's commissioning mode): don't call it "won't start"; the helper's original message is a complete sentence
     if msg and verb == "bus-give-back" and isinstance(detail, dict) and detail.get("still_starting"):
         return msg
     text = table.get(result) or _COMMON.get(result) or (result or "没成")

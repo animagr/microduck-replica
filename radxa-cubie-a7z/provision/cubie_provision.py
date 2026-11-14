@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""开机配网：没连上已保存的 Wi-Fi 就开热点，手机打开页面把家里的网填进来。
+"""Network setup at boot: if no saved Wi-Fi connects, open a hotspot so a phone can open the page and enter the home network.
 
-没有已保存的 Wi-Fi 时马上开热点。有已保存的网时先等 45 秒，连上就保持安静。
-页面提交后先挡住自己 90 秒，再关掉热点去连接；失败就把热点开回来。
+With no saved Wi-Fi, open the hotspot immediately. With a saved network, wait 45 seconds first and stay quiet if it connects.
+After the page is submitted, block itself for 90 seconds, then shut the hotspot and connect; on failure, bring the hotspot back.
 """
 
 import html
@@ -31,7 +31,7 @@ _servers = []
 
 
 def decide(now, boot_at, saved, lan_ip, hold_until):
-    """返回 hold、client、hotspot、wait 之一。"""
+    """Return one of hold, client, hotspot, wait."""
     if lan_ip:
         return "client"
     if hold_until is not None and now < hold_until:

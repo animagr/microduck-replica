@@ -1,59 +1,59 @@
-// 手柄区块（并进了总览，往下一刷就是：总览重排方案 §1.2）：看手柄现在怎么样、配新手柄（可视化向导）、测急停、
-// 网页手柄（图上的键就能按）、网页遥控（站起来 / 开始走 / 坐下、摇杆、技能、动作）。#/pad 是总览上的锚点，打开就滚到这一块。
+// Gamepad section (merged into the overview, just scroll down: overview re-layout plan §1.2): see how the gamepad is doing now, pair a new gamepad (visual wizard), test the e-stop,
+// web gamepad (the keys on the picture can be pressed), web remote control (stand up / start walking / sit down, sticks, skills, actions). #/pad is an anchor on the overview; opening it scrolls to this section.
 //
-// 数据全来自后端 studio/pad.py 推的 {t:'pad', …}（这一块在屏幕上时 10 Hz，不在 1 Hz）。
-// 页面发的指令统一是 link.cmd('pad.op', {op, …})：
-//   watch                 我在看手柄这一块（在屏幕上连续 0.3 秒以后每 2 秒一次，后端 6 秒没收到就关掉 padd 旁路、放慢轮询）
-//   refresh / scan {seconds} / pair {mac?} / cancel / forget {mac} / keys_done / wizard_reset   配对向导
-//   estop_test {action}   测急停：start / cancel
-//   drive {open, seq}     进了手柄区（只解开「离开了」，不拿方向盘）；drive {on:false, seq} 离开；drive {on:true, force} 接管
-//                         「在手柄区」= 路由是 / 或 /pad ∧ 页面可见 ∧ 这一块在视口里（审查 O1，见下面的 padActivity）
-//   sticks {mode,lx,ly,rx,ry,seq}  网页手柄的摇杆（图上的那两个）：-1..1，x 向右、y 向下为正；后端按 padd 的公式
-//                         换算成 robot.move / head / pose；按住才发（10 Hz），seq 是页面的递增序号
-//   stop {seq}            松手：走路模式发一次 0，头模式头回正，身体模式身体回中。比 stop 旧的帧后端一律丢掉
-//   mode {mode, seq}      图上的 Y / B：drive / head / body
-//   mode {mode, hb:true}  头、身体模式时每秒报一次「还在」（后端 3 秒没听到就退出）；只续不进：后端已经退出了就回 dropped
-//   keys {held, down, seq}   按住的键 LT / RT / X：按下、松开时发，按住时每 0.15 秒报一次（后端 0.45 秒、X 0.3 秒没听到当松开）
-//   key {key, src:'svg'}  图上的 A / X / LB / RB / 十字下按下那一下（按 pad.bindings 做）
-//   start {expect, src:'svg'}   图上的 Start：后端挑的跟 expect 不一样就拒（状态刚变了）
-//   reboot {src:'svg'}    图上的十字右：重启全部舵机（照官方：按一下就发、不用确认；主程序先全身卸力）
-//   drive_mode {expect, src:'svg'}   图上的十字上按住 3 秒（计时在页面）：切走路 / 轮滑，expect 是要切到的
-//   stand / walk / walk_stop / sit         站起来 / 开始走 / 停下（站好）/ 坐下（后端按姿势再判一遍）
-//   skill {name} / sound {tag}             官方技能（robot.do）/ 叫一声（robot.sound）
-//   action_start {id, press} / action_hold {press} / action_stop   动作和组合动作：按住才做（每 0.15 秒说一次「还按着」），松手就停；
-//                         press 是这一次按下的序号，后端只认同一次按下的续命（代码审查 C7）
-// 图上的 Select 走顶上卸力同一条路：link.cmd('relax')，按下就发、什么时候都能按（审查三 V3）。
-// 按键作用照鸭子上 fork 的 padd（fork 固件 padd/src/main.rs），键名按手柄上印的字。
-// 虚拟手柄：网页发整帧、实体手柄连着就让位，代码是自己写的。
+// All data comes from {t:'pad', …} pushed by the backend studio/pad.py (10 Hz while this section is on screen, 1 Hz otherwise).
+// Commands sent by the page are all link.cmd('pad.op', {op, …}):
+//   watch                 I am looking at the gamepad section (once it has been on screen for 0.3 s, every 2 s; if the backend hears nothing for 6 s it closes the padd side channel and slows polling)
+//   refresh / scan {seconds} / pair {mac?} / cancel / forget {mac} / keys_done / wizard_reset   pairing wizard
+//   estop_test {action}   e-stop test: start / cancel
+//   drive {open, seq}     entered the gamepad section (only clears "left", does not take the wheel); drive {on:false, seq} leave; drive {on:true, force} take over
+//                         "in the gamepad section" = route is / or /pad ∧ page visible ∧ this section in the viewport (review O1, see padActivity below)
+//   sticks {mode,lx,ly,rx,ry,seq}  web gamepad sticks (the two on the picture): -1..1, x positive right, y positive down; the backend uses padd's formulas
+//                         to convert them into robot.move / head / pose; sent only while held (10 Hz), seq is the page's incrementing sequence number
+//   stop {seq}            released: in walk mode send 0 once, in head mode the head recenters, in body mode the body recenters. The backend drops any frame older than the stop
+//   mode {mode, seq}      Y / B on the picture: drive / head / body
+//   mode {mode, hb:true}  in head and body modes report "still here" every second (the backend exits after 3 s of silence); renew only, never enter: if the backend has already exited it replies dropped
+//   keys {held, down, seq}   held keys LT / RT / X: sent on press and release, reported every 0.15 s while held (the backend treats 0.45 s of silence, 0.3 s for X, as released)
+//   key {key, src:'svg'}  the moment A / X / LB / RB / D-pad down on the picture is pressed (handled per pad.bindings)
+//   start {expect, src:'svg'}   Start on the picture: the backend rejects it if its choice differs from expect (the state just changed)
+//   reboot {src:'svg'}    D-pad right on the picture: reboot all servos (as in the official version: sent on one press, no confirmation; the main program relaxes the whole body first)
+//   drive_mode {expect, src:'svg'}   D-pad up on the picture held for 3 s (timed in the page): switch walking / roller skating, expect is the mode to switch to
+//   stand / walk / walk_stop / sit         stand up / start walking / stop (stand still) / sit down (the backend re-checks by posture)
+//   skill {name} / sound {tag}             official skills (robot.do) / make a sound (robot.sound)
+//   action_start {id, press} / action_hold {press} / action_stop   actions and combo actions: only performed while held (say "still holding" every 0.15 s), stop on release;
+//                         press is the sequence number of this press; the backend only accepts keepalives from the same press (code review C7)
+// Select on the picture takes the same path as Relax at the top: link.cmd('relax'), sent on press, can be pressed at any time (review 3 V3).
+// Key functions follow the fork's padd on the duck (fork firmware padd/src/main.rs); key names follow what is printed on the gamepad.
+// Virtual gamepad: the web page sends whole frames and yields when a physical gamepad is connected; the code is our own.
 import { html, useState, useEffect, useRef, useCallback } from './vendor/preact-htm.module.js';
 import { Duck3D } from './duck3d.js';
 import { InlineCamera } from './sensors.js';
 import { MotionStudio } from './motion-studio.js';
 import { AudioInteraction } from './audio-interaction.js';
 
-const SEND_MS = 100;        // 摇杆按住时每秒发 10 次；松手发一次 0，鸭子 0.5 秒收不到也会自己停（robotd 的 deadman）
+const SEND_MS = 100;        // while a stick is held send 10 times per second; send 0 once on release, and the duck stops on its own if it gets nothing for 0.5 s (robotd's deadman)
 const WATCH_MS = 2000;
-const HOLD_MS = 150;        // 动作 / 按住的键每 0.15 秒说一次「还按着」；后端 0.45 秒没听到就停
-const MODE_HB_MS = 1000;    // 头 / 身体模式每秒报一次「还在」
-const MODE_GRACE_MS = 800;  // 刚按了 Y / B：这么久以内以页面自己的为准（后端的快照还没跟上）
-const DRIVE_HOLD_MS = 3000; // 十字上按住这么久才切走路 / 轮滑（官方 padd:247-252：走着走着容易靠上去，所以要按住）
-const KEY_STALE_MS = 1000;  // 键盘按住时浏览器会一直重复发按下；超过 1 秒没收到当作松开（卡键：审查 12）
-const BUSY_MS = 3000;       // 站 / 走 / 坐按下后按钮先变灰，直到姿势变了或 3 秒
-const DZ = 0.1;             // 摇杆死区（跟 padd 一样，padd:184-187）：每个轴小于这个当 0
-const STICK_TRAVEL = 40;    // 图上的摇杆：手指拖开这么多（图的坐标，图宽 400）算满杆
-const WATCH_SETTLE_MS = 300;   // 手柄这一块连续在屏幕上这么久才发 watch（一划而过别开 padd 旁路：审查 O1）
-const TAP_MS = 120;         // 触屏：按下这么久没动、也没被浏览器取消（开始滚页面），才算按下（审查 O2）
-const TAP_MOVE_PX = 8;      // 触屏：按下以后动了这么多就当是在滚页面
-const SCROLL_GUARD_MS = 500;   // 触屏：页面滚动后这么久以内的按下不认（惯性滑动里手指一碰就是这种：审查 O2）
-const STICK_GRAB = 30;      // 图上的摇杆：触屏起手区（半径，图的坐标；帽 17）。放大到 30 也不碰旁边的键 / 十字键
+const HOLD_MS = 150;        // actions / held keys say "still holding" every 0.15 s; the backend stops after 0.45 s of silence
+const MODE_HB_MS = 1000;    // head / body mode reports "still here" every second
+const MODE_GRACE_MS = 800;  // Y / B just pressed: within this long the page's own state wins (the backend snapshot has not caught up yet)
+const DRIVE_HOLD_MS = 3000; // D-pad up must be held this long to switch walking / roller skating (official padd:247-252: easy to brush while walking, hence the hold)
+const KEY_STALE_MS = 1000;  // while a keyboard key is held the browser keeps repeating keydown; no keydown for over 1 s is treated as released (stuck key: review 12)
+const BUSY_MS = 3000;       // after stand / walk / sit is pressed, the buttons gray out until the posture changes or 3 s pass
+const DZ = 0.1;             // stick dead zone (same as padd, padd:184-187): any axis below this counts as 0
+const STICK_TRAVEL = 40;    // sticks on the picture: dragging the finger this far (picture coordinates, picture width 400) counts as full deflection
+const WATCH_SETTLE_MS = 300;   // only send watch once the gamepad section has been on screen continuously this long (do not open the padd side channel on a quick scroll past: review O1)
+const TAP_MS = 120;         // touch: only counts as pressed after being held this long without moving and without the browser canceling it (starting a page scroll) (review O2)
+const TAP_MOVE_PX = 8;      // touch: moving this much after pressing is treated as scrolling the page
+const SCROLL_GUARD_MS = 500;   // touch: presses within this long after the page scrolls are ignored (that is what a finger touch during inertial scrolling looks like: review O2)
+const STICK_GRAB = 30;      // sticks on the picture: touch grab area (radius, picture coordinates; the cap is 17). Enlarging it to 30 still does not touch the neighboring keys / D-pad
 let SEQ = 0;
 const nextSeq = () => ++SEQ;
 
-// ---------------- 「在手柄区」：旧总览 /pad 或独立 /remote/* ∧ 页面可见 ∧ 控制块在视口里 ----------------
-// 手柄并进总览以后这一块一直挂着（总览只是藏起来、不卸载），以前挂在「挂上 / 卸载」上的清理（全部松开、drive off、
-// HoldButton 停、模式心跳）永远不会跑。所以这些都挂在 active 上：由真变假的那一刻全部松开、发 drive {on:false}、
-// 马上发一次心跳（pad_visible:false）；由假变真发 drive {open}。路由一变，app.js 在 hashchange 里同步先调 setRoute，
-// 不等 IntersectionObserver（藏起来以后 IO 晚一帧才报「不相交」，安全不能押在它上面）。
+// ---------------- "In the gamepad section": old overview /pad or standalone /remote/* ∧ page visible ∧ control section in the viewport ----------------
+// Since the gamepad was merged into the overview this section stays mounted (the overview is only hidden, not unmounted), so the cleanup that used to hang on "mount / unmount" (release everything, drive off,
+// stop HoldButton, mode heartbeat) would never run. So all of it hangs on active: the moment it goes from true to false, release everything, send drive {on:false},
+// and send a heartbeat right away (pad_visible:false); from false to true send drive {open}. When the route changes, app.js synchronously calls setRoute first in hashchange,
+// without waiting for the IntersectionObserver (after hiding, IO reports "not intersecting" one frame late, and safety must not depend on it).
 const ACT = { route: location.hash.replace(/^#/, '') || '/', visible: document.visibilityState === 'visible',
   inView: false, active: false, standalone: false, subs: new Set(), link: null };
 function actRecompute(why, routeChanged = false) {
@@ -65,7 +65,7 @@ function actRecompute(why, routeChanged = false) {
   for (const fn of ACT.subs) {
     try { fn({ active: a, inView: ACT.inView, changed, routeChanged }, why); } catch (e) { console.error('手柄区的订阅出错', e); }
   }
-  if (changed && ACT.link) ACT.link.heartbeat();   // 后端马上知道：10 Hz ↔ 1 Hz（app.py sender 只看 pad_visible）
+  if (changed && ACT.link) ACT.link.heartbeat();   // the backend learns right away: 10 Hz ↔ 1 Hz (the app.py sender only looks at pad_visible)
 }
 export const padActivity = {
   get active() { return ACT.active; },
@@ -77,20 +77,20 @@ export const padActivity = {
   subscribe(fn) { ACT.subs.add(fn); return () => ACT.subs.delete(fn); },
 };
 document.addEventListener('visibilitychange', () => { ACT.visible = document.visibilityState === 'visible'; actRecompute('页面转到后台'); });
-window.__pad = padActivity;          // 排查用（e2e 也看它）：现在算不算「在手柄区」
+window.__pad = padActivity;          // for troubleshooting (the e2e tests look at it too): whether we currently count as "in the gamepad section"
 
-// 上手清单的「去做」要直接到位（审查 O17）：配对向导、测急停、配过的手柄、遥控在这一块里面，清单在外面，靠这个小事件
+// The getting-started checklist's "Do it" must land right on target (review O17): the pairing wizard, e-stop test, paired gamepads and remote control live in this section while the checklist is outside, so a small event does it
 const GO = new Set();
 export function padGo(what) { for (const fn of GO) fn(what); }
 
-// 触屏防误触（审查 O2）：总览是往下刷的首页，刷的路上全是一碰就生效的控件
+// Touch mis-tap protection (review O2): the overview is a scroll-down home page, and the way down is full of controls that act on a single touch
 let lastScrollAt = -1e9;
 window.addEventListener('scroll', () => { lastScrollAt = performance.now(); }, { passive: true, capture: true });
 const scrolledRecently = () => performance.now() - lastScrollAt < SCROLL_GUARD_MS;
 const isTouch = (e) => e.pointerType === 'touch' || e.pointerType === 'pen';
-// 触屏上的一次按下：TAP_MS 内没动（< TAP_MOVE_PX）、没被浏览器取消才算按下（press），之后松手 / 被取消 = release；
-// TAP_MS 以内就松手 = 点一下（tap，没给就什么都不做）；动了、被取消 = 什么都不做（是在滚页面）。
-// 不 preventDefault：浏览器照样能拿这一下去滚页面（它一滚就发 pointercancel）。回一个「作废」函数
+// One press on a touch screen: only counts as a press if it has not moved (< TAP_MOVE_PX) within TAP_MS and has not been canceled by the browser; releasing / being canceled afterwards = release;
+// releasing within TAP_MS = a tap (does nothing if no tap handler is given); moved or canceled = do nothing (it is a page scroll).
+// No preventDefault: the browser can still use this touch to scroll the page (as soon as it scrolls it fires pointercancel). Returns a "cancel" function
 function touchHold(e, { press, release, tap }) {
   const pid = e.pointerId, x0 = e.clientX, y0 = e.clientY;
   let phase = 'pending';
@@ -121,7 +121,7 @@ function touchHold(e, { press, release, tap }) {
   return () => { if (phase === 'held' && release) release(); phase = 'gone'; off(); };
 }
 
-// ---------------- 各型号：键名、外形、怎么进配对状态 ----------------
+// ---------------- Per model: key names, shape, how to enter pairing mode ----------------
 
 const KINDS = {
   xbox: {
@@ -147,8 +147,8 @@ const KINDS = {
 };
 const kindOf = (k) => KINDS[k] || KINDS.generic;
 
-// 按键作用：照鸭子上 fork 的 padd（审查三 附 1）。role 是位置：south = 右边四个键最下面那个。
-// does = 实体手柄；web = 网页手柄图上按的跟实体不一样的地方（没写就是一样）；off = 网页图上这颗键灰着的原因
+// Key functions: follow the fork's padd on the duck (review 3, appendix 1). role is the position: south = the bottom one of the four right-hand keys.
+// does = physical gamepad; web = where pressing on the web gamepad picture differs from the physical one (same if not given); off = why this key is grayed out on the web picture
 const ROLLER_NOTE = '（轮滑模式另有作用）';
 const FUNCS = [
   { role: 'ls', group: 'main', name: () => '左摇杆', does: '走路：前后、左右平移 · 头模式：头转向、抬低头 · 身体模式：起伏下蹲',
@@ -177,13 +177,13 @@ const FUNCS = [
   { role: 'r3', group: 'other', does: '没有作用', off: '没有作用' },
 ];
 const FUNC = Object.fromEntries(FUNCS.map((f) => [f.role, f]));
-// 图上按位置的键 → 后端的名字
+// Keys on the picture by position → backend names
 const ROLE_BIND = { south: 'a', west: 'x', lb: 'lb', rb: 'rb', dd: 'dpad_down' };
 const ROLE_HELD = { lt: 'lt', rt: 'rt', west: 'x' };
 const MODE_CN = { drive: '走路', head: '头模式', body: '身体模式' };
 const DRIVE_CN = { walk: '走路', roller: '轮滑' };
 const SKILL_CN = { ground_pick: '低头捡', roulade: '前滚翻', kick_left: '左脚踢', kick_right: '右脚踢', sit_toggle: '坐下 ↔ 站起', roller_stand: '轮滑起身' };
-// 官方默认的按键绑定（fork robotd-params lib.rs:175-215，后端 pad_drive.DEFAULT_BIND 同一份）；robotd 的 pad.bindings 改过的以它为准
+// Official default key bindings (fork robotd-params lib.rs:175-215, same as the backend's pad_drive.DEFAULT_BIND); robotd's pad.bindings wins if it has been changed
 const DEFAULT_BIND = { a: 'ground_pick', x: 'roulade', lb: 'kick_left', rb: 'kick_right', dpad_down: 'sit_toggle' };
 const BIND_ROLE = { a: 'south', x: 'west', lb: 'lb', rb: 'rb', dpad_down: 'dd' };
 
@@ -192,30 +192,30 @@ const fmtMs = (ms) => (ms == null ? '—' : ms < 1000 ? `${ms} ms` : `${(ms / 10
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 
-// ---------------- 手柄示意图（自己画的） ----------------
+// ---------------- Gamepad diagram (our own drawing) ----------------
 
-// Start / Select 在图上拉开一点（审查三 V3：挨着的话点 Start 容易点成卸力），点击区比画出来的大（pd-hit）
+// Start / Select are spread a bit apart on the picture (review 3 V3: when adjacent, tapping Start easily hits Relax), and the click area is larger than what is drawn (pd-hit)
 const LAYOUT = {
   xbox: { ls: [120, 100], dpad: [158, 152], face: [282, 100], rs: [243, 152], select: [172, 98], start: [228, 98], home: [200, 70] },
   switch: { ls: [120, 100], dpad: [158, 152], face: [282, 100], rs: [243, 152], select: [170, 82], start: [230, 82], home: [214, 112] },
   ps: { ls: [158, 156], dpad: [118, 100], face: [282, 100], rs: [242, 156], select: [150, 64], start: [250, 64], home: [200, 118], touch: true },
 };
-// 图上每个键外侧的小字：[x, y, text-anchor]。三种外形分开排，避免字压到键或别的字（十字上「按住 3 秒·轮滑」不写：只有装轮子才用、又挤，按键表里有）；
-// 手机宽度只留 Start / Select（CSS 隐藏其余），这两个也在这里定位。
+// Small labels outside each key on the picture: [x, y, text-anchor]. The three shapes are laid out separately so labels do not cover keys or other labels ("hold 3 s · roller skating" on D-pad up is left out: only used with wheels fitted, it is crowded, and the key table has it);
+// at phone width only Start / Select are kept (CSS hides the rest), and these two are positioned here as well.
 const NOTES = {
   xbox: { select: [170, 119], start: [236, 119], x: [253, 85], dr: [185, 137, 'start'], dd: [158, 190] },
   switch: { select: [170, 64], start: [230, 64], x: [256, 85], dr: [185, 137, 'start'], dd: [158, 190] },
   ps: { select: [135, 68, 'end'], start: [250, 52], x: [250, 85], dr: [147, 104, 'start'], dd: [104, 134] },
 };
-const HIT_W = 34, HIT_H = 28;      // Start / Select 的点击区（图的坐标）
+const HIT_W = 34, HIT_H = 28;      // click area of Start / Select (picture coordinates)
 const BODY = 'M128 44C96 44 70 52 56 74C40 100 26 150 22 190C19 222 38 240 60 240C80 240 92 226 104 206C114 190 124 180 144 180L256 180C276 180 286 190 296 206C308 226 320 240 340 240C362 240 381 222 378 190C374 150 360 100 344 74C330 52 304 44 272 44C240 44 226 52 200 52C174 52 160 44 128 44Z';
-// 手柄顶上每边两颗：前面一排是肩键（LB / RB，贴着外壳上沿），后面一排是扳机（LT / RT，更高、更靠外），中间留空隙
-const SHOULDER = { l: { x: 80, w: 72 }, r: { x: 248, w: 72 } };            // y 26–50，下半截被外壳盖住
+// Two on each side at the top of the gamepad: the front row are shoulder buttons (LB / RB, against the top edge of the shell), the back row are triggers (LT / RT, higher and further out), with a gap in between
+const SHOULDER = { l: { x: 80, w: 72 }, r: { x: 248, w: 72 } };            // y 26–50, the lower half is covered by the shell
 const TRIGGER = { l: { x: 62, w: 62 }, r: { x: 276, w: 62 } };             // y -10–18
 const SH_Y = 26, SH_H = 24, TR_Y = -10, TR_H = 28;
 
-// ctl：网页手柄控制器（useVpad 给的）。有它，图上的键就能按（跟实体手柄干一样的活）；没有就只是示意图。
-// 镜像（实体手柄连着）时 live 是实体手柄的按键，图只跟着它显示；不镜像时 live 是网页上按着的。
+// ctl: web gamepad controller (from useVpad). With it, keys on the picture can be pressed (doing the same job as the physical gamepad); without it this is only a diagram.
+// When mirroring (physical gamepad connected) live holds the physical gamepad's keys and the picture just follows it; when not mirroring, live holds what is pressed on the web page.
 function GamepadSvg({ kind, live, seen, ctl, keys }) {
   const k = kindOf(kind);
   const L = LAYOUT[k.layout] || LAYOUT.xbox;
@@ -224,7 +224,7 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
   const on = (r) => !!b[r];
   const was = (r) => !!(seen && seen.includes(r));
   const N = NOTES[k.layout] || NOTES.xbox;
-  // 能改绑的键：以后端 motion.keys 推来的 does 为准（A / X / LB / RB / 十字下）；没有就按官方默认
+  // Remappable keys: go by the does pushed in the backend's motion.keys (A / X / LB / RB / D-pad down); fall back to the official defaults if absent
   const does = (role) => {
     const row = keys?.[ROLE_BIND[role]];
     if (row && typeof row.does === 'string' && row.does) return row.does;
@@ -232,7 +232,7 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
     return SKILL_CN[skill] || skill || '';
   };
   const noteAt = (text, [x, y, anchor = 'middle'], extra) => html`<text class=${cx('pd-key-note', extra)} x=${x} y=${y} text-anchor=${anchor} aria-hidden="true">${text}</text>`;
-  // 能按的键：role=button + aria-label（键名 + 作用），按下 / 松开交给 ctl；不能按的加 pd-key-off，<title> 写原因（鼠标放上去就看到）
+  // Pressable keys: role=button + aria-label (key name + function), press / release handed to ctl; unpressable ones get pd-key-off, with the reason in <title> (visible on mouse hover)
   const act = (r) => {
     if (!ctl) return { info: null, props: {} };
     const info = ctl.info(r);
@@ -246,7 +246,7 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
     } };
   };
   const tip = (a) => (a.info ? html`<title>${a.say}</title>` : null);
-  // 镜像时图在显示实体手柄：不画成灰的（只是网页上按了不收，title 里写着）
+  // When mirroring, the picture shows the physical gamepad: do not draw it gray (presses on the web page are just not accepted, as the title says)
   const offc = (a) => a.info && !a.info.ok && !ctl.mirror && 'pd-key-off';
   const cls = (r, a, extra) => cx('pd-key', on(r) && 'pd-on', was(r) && 'pd-seen', r === 'select' && 'pd-estop',
     a.info && 'pd-press', offc(a), extra);
@@ -255,7 +255,7 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
     const t = 12;
     const a = act(r);
     const side = r === 'ls' ? 'l' : 'r';
-    // 图上的摇杆底座：鼠标从哪儿按都行；触屏只认中间圆帽上那块透明的 HTML（pd-ov，下面），底座上起手的是在滚页面（审查 O2）
+    // Stick bases on the picture: a mouse can press anywhere; touch only accepts the transparent HTML over the center cap (pd-ov, below), since touches starting on the base are page scrolls (review O2)
     const sp = ctl ? { role: 'button', 'aria-label': a.say, 'data-role': r, onContextMenu: (e) => e.preventDefault(),
       onPointerDown: (e) => ctl.stickDown(side, e, scale(e) * STICK_TRAVEL, false), onPointerMove: (e) => ctl.stickMove(side, e),
       onPointerUp: (e) => ctl.stickUp(side, e), onPointerCancel: (e) => ctl.stickUp(side, e),
@@ -281,13 +281,13 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
     ${dkey('du', x0 - 7, y0 - 25, 14, 18)}${dkey('dd', x0 - 7, y0 + 7, 14, 18)}
     ${dkey('dl', x0 - 25, y0 - 7, 18, 14)}${dkey('dr', x0 + 7, y0 - 7, 18, 14)}
     <rect class="pd-dpad-mid" x=${x0 - 7} y=${y0 - 7} width="14" height="14"></rect></g>`;
-  // 扳机：按多深就从下往上填多深；数字扳机（Switch 的 ZL / ZR）按下就是满的
+  // Triggers: fill from the bottom up as deep as pressed; digital triggers (Switch ZL / ZR) are full when pressed
   const trig = (r, side) => {
     const { x, w } = TRIGGER[side];
     const v = clamp(ax[r] ?? (on(r) ? 1 : 0), 0, 1);
     const pressed = on(r) || v > 0.5;
     const a = act(r);
-    // 字：没按满时是黑字带白边（一半黑一半白的底上都看得清），按满了换白字
+    // Labels: black text with a white outline when not fully pressed (readable on a half-black, half-white background), switching to white text when fully pressed
     return html`<g class=${cx('pd-key', 'pd-trig', pressed && 'pd-on', was(r) && 'pd-seen', v > 0.95 && 'pd-trig-hi', a.info && 'pd-press', offc(a))} ...${a.props}>
       <rect x=${x} y=${TR_Y} width=${w} height=${TR_H} rx="9"></rect>
       ${v > 0.02 ? html`<rect class="pd-fill" x=${x} y=${TR_Y + TR_H * (1 - v)} width=${w} height=${TR_H * v} rx=${v > 0.3 ? 9 : 3}></rect>` : null}
@@ -311,9 +311,9 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
     return html`<g class=${cls('home', a)} ...${a.props}><circle cx=${L.home[0]} cy=${L.home[1]} r="10"></circle>${tip(a)}</g>`;
   };
   const mode = ctl?.mode && ctl.mode !== 'drive' ? MODE_CN[ctl.mode] : null;
-  // 盖在图上的透明 HTML 块（审查 O2）：整张图在手机上能用来滚页面（touch-action: pan-y），只有两个摇杆的圆帽和 Select
-  // 的点击区不让滚（touch-action: none）。SVG 子元素上的 touch-action 各浏览器认不认没核实，所以用 HTML 块接触摸。
-  // 位置按图的坐标（viewBox 0 -16 400 266）换成百分比；鼠标点到这里也一样管用
+  // Transparent HTML blocks over the picture (review O2): on a phone the whole picture can be used to scroll the page (touch-action: pan-y); only the two stick caps and Select's
+  // click area block scrolling (touch-action: none). Whether browsers honor touch-action on SVG child elements has not been verified, so HTML blocks take the touches.
+  // Positions are picture coordinates (viewBox 0 -16 400 266) converted to percentages; mouse clicks here work the same
   const pct = (x, y, w, h) => ({ left: `${(x / 400) * 100}%`, top: `${((y + 16) / 266) * 100}%`, width: `${(w / 400) * 100}%`, height: `${(h / 266) * 100}%` });
   const travel = (e) => (e.currentTarget.parentElement.getBoundingClientRect().width / 400) * STICK_TRAVEL;
   const ovStick = (r, [x0, y0]) => {
@@ -360,7 +360,7 @@ function GamepadSvg({ kind, live, seen, ctl, keys }) {
   </div>`;
 }
 
-// ---------------- 按键表（按这款手柄印的字） ----------------
+// ---------------- Key table (by what is printed on this gamepad) ----------------
 
 function KeyName({ f, k }) {
   const n = f.name ? f.name() : k.names[f.role];
@@ -378,8 +378,8 @@ function Legend({ kind, live, bindings, imuHead }) {
     if (!x || !x.overridden) return null;
     return x.skill ? `改成了：${SKILL_CN[x.skill] || x.skill}${x.error ? `（${x.error}）` : ''}` : '这个键被关掉了';
   };
-  // Y：鸭子上 robotd.toml 开了 [pad_imu_head_control]、手柄又有陀螺仪时，实体手柄的 Y 是「头跟着手柄的姿态走」（fork padd:1044-1093）。
-  // 浏览器没有手柄的姿态：网页上的 Y 一直是「摇杆管头」（审查三 V18）
+  // Y: when robotd.toml on the duck enables [pad_imu_head_control] and the gamepad has a gyro, the physical gamepad's Y means "the head follows the gamepad's orientation" (fork padd:1044-1093).
+  // The browser does not have the gamepad's orientation: Y on the web page is always "stick controls the head" (review 3 V18)
   const does = (f) => {
     if (f.imu && imuHead) return '实体手柄：头跟着手柄的姿态走（手柄要有陀螺仪），摇杆照常走路；再按一下头停在那里';
     return bound(f) || f.does;
@@ -403,7 +403,7 @@ function Legend({ kind, live, bindings, imuHead }) {
   </div>`;
 }
 
-// ---------------- 页头：型号 · 已连 · 急停有效 ----------------
+// ---------------- Page header: model · connected · e-stop active ----------------
 
 function Summary({ pad }) {
   const s = pad?.status || {};
@@ -413,7 +413,7 @@ function Summary({ pad }) {
   const name = act ? act.name || '手柄' : live.state === 'attached' ? live.device?.name || '手柄' : null;
   const mark = es.state === 'ok' ? html`<span class="pd-ok">有效 ✓</span>`
     : es.state === 'unknown' ? html`<span class="pd-unk">没核对完 ?</span>` : html`<span class="pd-bad">无效 ×</span>`;
-  // 写「手柄急停」，跟顶栏的「卸力」分开（审查 O7）；跟仪表带的手柄格、上手清单第 3、4 步用同一份 status / estop
+  // Say "gamepad e-stop", kept separate from the top bar's "Relax" (review O7); uses the same status / estop as the gamepad cell in the instrument strip and steps 3 and 4 of the getting-started checklist
   if (!s.known && live.state !== 'attached') return html`<span class="pd-sum">${s.error ? '读不到手柄状态' : '正在读手柄状态…'}${' · 手柄急停'}${mark}</span>`;
   const tail = name ? ' · 已连' : (s.pads || []).length ? ` · 配过 ${(s.pads || []).length} 个，都没连着` : '';
   return html`<span class="pd-sum"><b>${name || '没连手柄'}</b>${tail}${' · 手柄急停'}${mark}</span>`;
@@ -429,14 +429,14 @@ function EStopChecks({ pad }) {
   })}</ul>`;
 }
 
-// ---------------- 测急停：按着的时候扭矩是开的 + 松开之后回读扭矩关了，两样都有才算 ✓ ----------------
+// ---------------- E-stop test: torque on while held + torque read back as off after release; only both together count as ✓ ----------------
 
 const TEST_STEPS = [
   ['torque', '托着鸭子（或者放在架子上），按手柄 Start 让它站起来'],
   ['press', '短按一下 Select（别按住：按住 2 秒会坐下并关机）'],
   ['readback', '等主程序回读：扭矩关了'],
 ];
-const TEST_AT = { need_torque: 0, armed: 1, pressed: 1, released: 2 };              // 现在在哪一步
+const TEST_AT = { need_torque: 0, armed: 1, pressed: 1, released: 2 };              // which step we are on now
 const FAIL_AT = { torque: 0, press: 1, early_off: 1, long: 1, pressed_off: 1, pressed_unknown: 1, readback: 2, relax: 2, studio: 2 };
 function testStepState(t, i) {
   if (t.state === 'passed') return 'ok';
@@ -446,7 +446,7 @@ function testStepState(t, i) {
   }
   const at = TEST_AT[t.state];
   if (at === undefined) return 'todo';
-  return i < at ? 'ok' : i === at ? 'doing' : 'todo';            // Select 还按着时第 2 步还在「进行中」（审查 18b）
+  return i < at ? 'ok' : i === at ? 'doing' : 'todo';            // while Select is still held, step 2 is still "in progress" (review 18b)
 }
 
 function EStopTest({ pad, op }) {
@@ -476,7 +476,7 @@ function EStopTest({ pad, op }) {
   </section>`;
 }
 
-// ---------------- 配对向导 ----------------
+// ---------------- Pairing wizard ----------------
 
 function bars(rssi) {
   if (typeof rssi !== 'number') return html`<span class="pd-bars" title="这次搜索没看到它的信号（以前配过、记在鸭子上）">—</span>`;
@@ -552,7 +552,7 @@ function Wizard({ w, op, kind, setKind, onClose }) {
   </section>`;
 }
 
-// ---------------- 配过的手柄 ----------------
+// ---------------- Paired gamepads ----------------
 
 function KnownPads({ pad, op }) {
   const pads = pad?.status?.pads || [];
@@ -579,19 +579,19 @@ function KnownPads({ pad, op }) {
   </section>`;
 }
 
-// ---------------- 网页手柄：图上的键、两处摇杆、键盘共用的一个控制器 ----------------
+// ---------------- Web gamepad: one controller shared by the keys on the picture, the two stick areas and the keyboard ----------------
 
 const TEXT_TYPES = ['text', 'password', 'search', 'email', 'number', 'tel', 'url'];
 const typing = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
   || (el.tagName === 'INPUT' && TEXT_TYPES.includes((el.type || 'text').toLowerCase())));
-// 键盘只管走路（头 / 身体模式不响应：头满杆默认 2.5 rad，按一下 W 头就打到底，审查三 V2）。方向键不要了：
-// 没开关以后，人按方向键想滚页面，鸭子就会走
+// The keyboard only drives walking (head / body modes do not respond: full head deflection is 2.5 rad by default, so one press of W would slam the head to its limit, review 3 V2). Arrow keys were dropped:
+// without a toggle, someone pressing the arrow keys to scroll the page would make the duck walk
 const KEYMAP = { KeyW: ['ly', -1], KeyS: ['ly', 1], KeyA: ['lx', -1], KeyD: ['lx', 1], KeyQ: ['rx', -1], KeyE: ['rx', 1] };
 const ZERO = { lx: 0, ly: 0, rx: 0, ry: 0 };
 const dz = (v) => (Math.abs(v) < DZ ? 0 : v);
 const MIRROR_WHY = '实体手柄连着：图只跟着它显示，网页上按的不收（Select 照样能卸力）';
 
-// 读数：跟后端 pad_drive.sticks_to_intent 同一套公式（后端为准，这里只是让人看见现在在发什么）
+// Readout: the same formulas as the backend's pad_drive.sticks_to_intent (the backend is authoritative; this only shows people what is being sent now)
 function readout(mode, f, lim, head) {
   const LX = dz(f.lx), LY = -dz(f.ly), RX = dz(f.rx), RY = -dz(f.ry);
   if (mode === 'head') return [['脖子', RY * head, 'rad'], ['低抬头', -LY * head, 'rad'], ['转头', -LX * head, 'rad'], ['歪头', RX * head, 'rad']];
@@ -602,15 +602,15 @@ function readout(mode, f, lim, head) {
   return [['前后', LY * lim.v, 'm/s'], ['平移', -LX * lim.v, 'm/s'], ['转弯', -RX * lim.w, 'rad/s']];
 }
 
-// 网页手柄的状态都在这里：摇杆（按 pointerId 分开记，两个能同时拖）、键盘、按住的键（LT / RT / X）、模式（走路 / 头 / 身体）。
-// 图上的键（GamepadSvg）、图上的两个摇杆、键盘都走它，谁动都一样。规矩（审查三）：
-// - 摇杆相对：以按下的那一点为中心（V2），0.1 死区；按住才发（10 Hz），回到中间发一次 stop。
-// - 键盘只在遥控区（手柄图）有焦点时管用，失焦松开（V2）。
-// - 切页、窗口失焦、页面转后台、滚出手柄这一块、实体手柄连上、别人接管：全部松开（摇杆回 0、键松开、退出头 / 身体模式）。
-//   离开手柄区（padActivity.active 由真变假）还发 drive {on:false}，回来发 drive {open}（总览重排审查 O1）。
-// - 触屏防误触（审查 O2）：摇杆只认从图上圆帽附近的起手区按下；页面刚滚过 0.5 秒内的按下不认；图上的键按下 0.12 秒没动才算按下。
-//   Select 例外：按下就卸力，什么时候都能按（三 V3）。
-// - 模式以后端为准（V6）：后端替这个页面退出了模式（卸力、策略停了、超时……），页面跟着回到走路，按着的摇杆要松开重按。
+// All web gamepad state lives here: sticks (tracked separately by pointerId so two can be dragged at once), keyboard, held keys (LT / RT / X), mode (walk / head / body).
+// The keys on the picture (GamepadSvg), the two sticks on the picture and the keyboard all go through it, and behave the same whichever is used. Rules (review 3):
+// - Sticks are relative: centered on the point where pressed (V2), 0.1 dead zone; sent only while held (10 Hz), and one stop is sent on returning to center.
+// - The keyboard only works while the remote-control area (gamepad picture) has focus; losing focus releases everything (V2).
+// - Switching pages, window losing focus, page going to the background, scrolling out of the gamepad section, a physical gamepad connecting, someone else taking over: release everything (sticks to 0, keys released, exit head / body mode).
+//   Leaving the gamepad section (padActivity.active going from true to false) also sends drive {on:false}, and coming back sends drive {open} (overview re-layout review O1).
+// - Touch mis-tap protection (review O2): sticks only accept presses that start in the grab area near the cap on the picture; presses within 0.5 s of a page scroll are ignored; keys on the picture only count as pressed after 0.12 s without moving.
+//   Select is the exception: it relaxes on press and can be pressed at any time (3 V3).
+// - The backend is authoritative for the mode (V6): when the backend exits the mode on this page's behalf (relax, policy stopped, timeout…), the page goes back to walking, and a held stick must be released and pressed again.
 function useVpad({ pad, st, link }) {
   const v = pad?.virtual || {};
   const m = pad?.motion || {};
@@ -639,7 +639,7 @@ function useVpad({ pad, st, link }) {
   const press = (role) => { S.pressed.add(role); setPressedView(new Set(S.pressed)); };
   const unpress = (role) => { if (S.pressed.delete(role)) setPressedView(new Set(S.pressed)); };
 
-  // ---- 摇杆 ----
+  // ---- Sticks ----
   const frame = () => {
     const f = { lx: S.sticks.l.x, ly: S.sticks.l.y, rx: S.sticks.r.x, ry: S.sticks.r.y };
     if (S.mode === 'drive') for (const code of S.kb.keys()) { const [axis, val] = KEYMAP[code]; f[axis] = val; }
@@ -659,7 +659,7 @@ function useVpad({ pad, st, link }) {
     if (dd.dropped && dd.mode && dd.mode !== S.mode && sentMode === S.mode && performance.now() - S.modeAt > MODE_GRACE_MS) adopt(dd.mode, dd.dropped);
     else if (dd.dropped && S.mode !== 'drive') say(dd.dropped, false);
   };
-  // 有输入：马上发一帧，之后每 100 ms 一帧（拖动时不按 pointermove 的频率发）；回到中间那一下发一次 stop
+  // With input: send a frame immediately, then one every 100 ms (not at the pointermove rate while dragging); send one stop at the moment it returns to center
   function kick() {
     const f = frame();
     setAxes(f);
@@ -681,12 +681,12 @@ function useVpad({ pad, st, link }) {
   };
   const stickDown = (side, e, k, center = true) => {
     if (e.button > 0) return;
-    // 触屏：只认从中间圆帽起手的（底座上起手的多半是在滚页面），页面刚滚过的不认（审查 O2）。不 preventDefault：让它滚
+    // Touch: only accept presses starting at the center cap (presses starting on the base are mostly page scrolls), and ignore presses right after a page scroll (review O2). No preventDefault: let it scroll
     if (isTouch(e) && (!center || scrolledRecently())) return;
-    if (!ACT.active) return;                      // 手柄这一块不在屏幕上（切走了、滚走了）：不收
+    if (!ACT.active) return;                      // the gamepad section is not on screen (switched away, scrolled away): ignore
     e.preventDefault(); focusZone(e);
     if (!S.usable) { say(whyNot(), false); return; }
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 有的浏览器没有 */ }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* some browsers lack it */ }
     S.sticks[side] = { pid: e.pointerId, ox: e.clientX, oy: e.clientY, k: Math.max(8, k), x: 0, y: 0, void: false };
   };
   const stickMove = (side, e) => {
@@ -704,7 +704,7 @@ function useVpad({ pad, st, link }) {
     kick();
   };
 
-  // ---- 按住的键：LT / RT / X（keys 通道，审查三 V4） ----
+  // ---- Held keys: LT / RT / X (keys channel, review 3 V4) ----
   const sendKeys = async (down = []) => {
     const r = await cmd({ op: 'keys', held: [...S.held], down, seq: nextSeq() });
     if (!S.alive) return;
@@ -722,19 +722,19 @@ function useVpad({ pad, st, link }) {
   };
   const releaseKey = (k) => { if (!S.held.delete(k)) return; setHeldView(new Set(S.held)); sendKeys(); };
 
-  // ---- 模式：Y / B ----
+  // ---- Mode: Y / B ----
   function adopt(serverMode, why) {
     S.mode = serverMode; S.modeAt = performance.now(); setModeView(serverMode);
     voidSticks();
     if (why) say(why, false);
-    // 跟着后端回到走路：回一句「走路」，后端就知道页面看到了，之后再按 Y / B 才进得去（审查 R3：没回之前来的「进模式」
-    // 后端当成没看到退出的心跳，不收）
+    // Follow the backend back to walking: reply "walking" so the backend knows the page saw it, and only then can Y / B enter again (review R3: an "enter mode" arriving before that reply
+    // is treated by the backend as a heartbeat that has not seen the exit, and is not accepted)
     if (serverMode === 'drive') cmd({ op: 'mode', mode: 'drive', seq: nextSeq() });
   }
   const setMode = async (next, why) => {
     if (next === S.mode) return;
     S.mode = next; S.modeAt = performance.now(); setModeView(next);
-    voidSticks();                                   // 换模式：按着的摇杆作废，要松开重按（不然推着头的手一换模式就变成走路）
+    voidSticks();                                   // mode change: held sticks are voided and must be released and pressed again (otherwise a hand pushing the head would turn into walking on a mode change)
     const r = await cmd({ op: 'mode', mode: next, seq: nextSeq() });
     if (!S.alive) return;
     if (!r.ok) { say(r.reason || r.error || '没切过去'); if (S.mode === next && next !== 'drive') adopt('drive'); return; }
@@ -742,28 +742,28 @@ function useVpad({ pad, st, link }) {
     if (r.data?.note) say(r.data.note, false);
     else if (why) say(`回到走路（${why}）`, false);
   };
-  // 心跳带 hb:true：后端只续「还在」，不会把它已经替页面退出的模式（卸力、策略停了、超时……）再打开；不一样就跟着后端回到走路（审查 R3）
+  // Heartbeats carry hb:true: the backend only renews "still here" and will not reopen a mode it already exited on the page's behalf (relax, policy stopped, timeout…); if they differ, follow the backend back to walking (review R3)
   const beatMode = async () => {
     const r = await cmd({ op: 'mode', mode: S.mode, hb: true });
     if (S.alive && r.ok && r.data?.mode && r.data.mode !== S.mode && performance.now() - S.modeAt > MODE_GRACE_MS) adopt(r.data.mode, r.data.dropped);
   };
 
-  // ---- 全部松开 ----
+  // ---- Release everything ----
   function releaseAll(why, keep) {
-    if (S.touchOff) { const f = S.touchOff; S.touchOff = null; f(); }     // 触屏上还没算按下的那一下：作废
-    if (S.driveTimer) { clearTimeout(S.driveTimer); S.driveTimer = null; }  // 十字上还没按够 3 秒：不切
+    if (S.touchOff) { const f = S.touchOff; S.touchOff = null; f(); }     // a touch that has not yet counted as a press: void it
+    if (S.driveTimer) { clearTimeout(S.driveTimer); S.driveTimer = null; }  // D-pad up not yet held for 3 s: do not switch
     S.kb.clear();
     for (const side of ['l', 'r']) { const s = S.sticks[side]; if (s.pid != null) s.void = true; s.x = 0; s.y = 0; }
     if (S.held.size) { S.held.clear(); setHeldView(new Set()); sendKeys(); }
     S.pressed.clear(); if (keep) S.pressed.add(keep); setPressedView(new Set(S.pressed));
-    if (S.mode !== 'drive') setMode('drive', why);   // 后端清掉头 / 身体（三 V1 第 2 条）
+    if (S.mode !== 'drive') setMode('drive', why);   // the backend clears head / body (3 V1, item 2)
     kick();
   }
 
-  // ---- 图上的键按下 / 松开 ----
+  // ---- Keys on the picture pressed / released ----
   const estop = (fromCard) => {
-    // 图上的 Select = 急停：按下就发（不等松手：触屏上手指一动浏览器发的是 pointercancel），跟顶上「卸力」同一条路（审查三 V3）。
-    // 遥控卡顶上的「卸力」按钮（审查 O3）也走这里
+    // Select on the picture = e-stop: sent on press (do not wait for release: on touch, the browser fires pointercancel as soon as the finger moves), same path as "Relax" at the top (review 3 V3).
+    // The "Relax" button at the top of the remote-control card (review O3) also goes through here
     const p = link.cmd('relax', {}, 7000);
     if (fromCard === true) releaseAll('按了遥控卡上的「卸力」');
     else releaseAll('按了图上的 Select（卸力）', 'select');
@@ -778,13 +778,13 @@ function useVpad({ pad, st, link }) {
     const r = await cmd({ op: 'start', expect: s.op, src: 'svg' }, 10000);
     if (S.alive) say(r.ok ? `✓ Start → ${s.label}${r.data?.reason ? `：${r.data.reason}` : ''}` : (r.reason || r.error || '没成功'), !r.ok);
   };
-  // 十字右：照官方按一下就发（主程序先全身卸力），这边跟 Select 一样先全部松开
+  // D-pad right: as in the official version, sent on one press (the main program relaxes the whole body first); like Select, release everything here first
   const rebootKey = async () => {
     releaseAll('按了十字右（重启舵机：主程序会先卸力）', 'dr');
     const r = await cmd({ op: 'reboot', src: 'svg' }, 7000);
     if (S.alive) say(r.ok ? '✓ 重启舵机发出去了：鸭子会先软下来，扶住；好了按 Start 站回来' : (r.reason || r.error || '没成功'), !r.ok);
   };
-  // 十字上：按住 3 秒才发；没到 3 秒松手（up）、或者全部松开（releaseAll）就不切
+  // D-pad up: sent only after being held for 3 s; releasing before 3 s (up) or releasing everything (releaseAll) means no switch
   const driveHold = () => {
     const target = S.pad?.motion?.drive_mode?.target;
     clearTimeout(S.driveTimer);
@@ -810,7 +810,7 @@ function useVpad({ pad, st, link }) {
     const f = FUNC[role];
     if (f?.off) return { ok: false, why: f.off };
     const mm = S.pad?.motion || {};
-    if (role === 'dr') {                          // 跟 Select 一样别人在遥控时也能按（救急：后端不看方向盘）
+    if (role === 'dr') {                          // like Select, can be pressed even while someone else is remote controlling (emergency: the backend ignores who has the wheel)
       const x = mm.reboot;
       if (!x || S.mirror) return { ok: false, why: whyNot() };
       return x.ok ? { ok: true, does: x.does } : { ok: false, why: x.why };
@@ -818,7 +818,7 @@ function useVpad({ pad, st, link }) {
     if (role === 'start') {
       const s = mm.start;
       if (!s || S.mirror) return { ok: false, why: whyNot() };
-      if (S.locked && s.op !== 'walk_stop') return { ok: false, why: whyNot() };   // 「停下（站好）」谁都能按
+      if (S.locked && s.op !== 'walk_stop') return { ok: false, why: whyNot() };   // anyone can press "Stop (stand still)"
       return s.ok ? { ok: true, does: `现在按：${s.label}` } : { ok: false, why: s.why };
     }
     if (!S.usable) return { ok: false, why: whyNot() };
@@ -847,7 +847,7 @@ function useVpad({ pad, st, link }) {
     return { ok: false, why: '没有作用' };
   };
   const fire = (role) => {
-    if (!ACT.active) return;                      // 手柄这一块不在屏幕上：不收（Select 不走这里）
+    if (!ACT.active) return;                      // the gamepad section is not on screen: ignore (Select does not come through here)
     const x = info(role);
     if (!x.ok) { say(x.why, false); return; }
     press(role);
@@ -861,20 +861,20 @@ function useVpad({ pad, st, link }) {
   const down = (role, e) => {
     if (e.button > 0) return;
     if (role === 'select') {
-      // 图上的 Select = 急停：按下就卸力，什么时候都能按（三 V3）；它的点击区单独 touch-action:none（审查 O2）
+      // Select on the picture = e-stop: relaxes on press, can be pressed at any time (3 V3); its click area has its own touch-action:none (review O2)
       e.preventDefault();
-      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 有的浏览器没有 */ }
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* some browsers lack it */ }
       estop(); return;
     }
     if (isTouch(e)) {
-      // 触屏：按下 0.12 秒没动、没被浏览器取消才算按下；0.12 秒内松手 = 点一下（按下再松开）。页面刚滚过不认（审查 O2）
+      // Touch: only counts as pressed after 0.12 s without moving and without the browser canceling; releasing within 0.12 s = a tap (press then release). Ignored right after a page scroll (review O2)
       if (scrolledRecently() || !ACT.active) return;
       if (S.touchOff) S.touchOff();
       S.touchOff = touchHold(e, { press: () => fire(role), release: () => up(role), tap: () => { fire(role); up(role); } });
       return;
     }
     e.preventDefault(); focusZone(e);
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 有的浏览器没有 */ }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* some browsers lack it */ }
     fire(role);
   };
   const up = (role) => {
@@ -884,17 +884,17 @@ function useVpad({ pad, st, link }) {
     if (role === 'du' && S.driveTimer) { clearTimeout(S.driveTimer); S.driveTimer = null; say('没按够 3 秒：没切（官方要按住 3 秒，防止误按）', false); }
   };
 
-  // ---- 键盘：只在遥控区有焦点时（审查三 V2） ----
+  // ---- Keyboard: only while the remote-control area has focus (review 3 V2) ----
   const zoneProps = {
     tabIndex: 0,
     onKeyDown: (e) => {
       const km = KEYMAP[e.code];
       if (!km || typing(e.target) || e.ctrlKey || e.altKey || e.metaKey) return;
-      // 用滚轮把遥控区滚出去以后焦点还留在里面：那时按着的键早就松开了（离开手柄区），按住重复来的按下也不收（审查 O1）
+      // Focus stays inside after the remote-control area is scrolled out with the wheel: keys held then were released long ago (left the gamepad section), and repeated keydowns from holding are not accepted either (review O1)
       if (!ACT.active) return;
       e.preventDefault();
-      // 浏览器的自动重复只续「已经按着的」：任何「全部松开」（滚出手柄区、失焦、卸力……）之后都要真按一次，
-      // 滚回来、切回窗口时手还按着 W，重复来的按下不能让鸭子接着走（代码审查 C3；摇杆也是松开重按）
+      // The browser's auto-repeat only renews "already held" keys: after any "release everything" (scrolling out of the gamepad section, losing focus, relax…) a real press is required;
+      // if the hand is still holding W when scrolling back or switching back to the window, repeated keydowns must not keep the duck walking (code review C3; sticks also require release and re-press)
       if (e.repeat && !S.kb.has(e.code)) return;
       if (S.mode !== 'drive') { say('头 / 身体模式下键盘不管用，用摇杆（按一下 W 头就会打到底）', false); return; }
       if (!S.usable) { say(whyNot(), false); return; }
@@ -906,7 +906,7 @@ function useVpad({ pad, st, link }) {
     onFocus: () => setKbOn(true),
     onBlur: (e) => {
       const to = e.relatedTarget;
-      if (to && to.closest && to.closest('.pd-zone')) return;        // 在两个遥控区之间换：不算失焦
+      if (to && to.closest && to.closest('.pd-zone')) return;        // moving between the two remote-control areas: not a loss of focus
       setKbOn(false);
       if (S.kb.size) { S.kb.clear(); kick(); }
     },
@@ -914,9 +914,9 @@ function useVpad({ pad, st, link }) {
 
   useEffect(() => {
     S.alive = true;
-    // 进手柄区（这一块到了屏幕上）：只解开「离开了」，不拿方向盘（审查三 V5）。等连接建好再发；发之前再看一眼还在不在
+    // Entering the gamepad section (this section came on screen): only clears "left", does not take the wheel (review 3 V5). Send once the connection is up; check again right before sending that we are still here
     const open = () => link.whenOpen().then(() => { if (S.alive && ACT.active) cmd({ op: 'drive', open: true, seq: nextSeq() }, 3000); });
-    // 离开手柄区（切页、滚走、转后台）：全部松开，后端记「离开了」，晚到的帧都丢（审查 O1）
+    // Leaving the gamepad section (switching pages, scrolling away, going to the background): release everything, the backend records "left", and late frames are all dropped (review O1)
     const leave = (why) => {
       releaseAll(why);
       link.cmd('pad.op', { op: 'drive', on: false, seq: nextSeq(), why }, 3000);
@@ -928,13 +928,13 @@ function useVpad({ pad, st, link }) {
       if (active) open(); else leave(why);
     });
     if (ACT.active) open();
-    // 断线重连以后是新的连接，后端默认它「不在手柄区」（审查 O1）：还在就再 open 一次
+    // After a reconnect it is a new connection, which the backend assumes is "not in the gamepad section" (review O1): if still here, open again
     const offLink = link.on((m) => { if (m.t === '_status' && m.status === 'open' && ACT.active) open(); });
     const blur = () => releaseAll('窗口失焦');
     const vis = () => { if (document.visibilityState !== 'visible') releaseAll('页面转到后台'); };
-    // 空格是顶上的卸力（app.js 在捕获阶段截住）、Esc：顺手全部松开
+    // Space is Relax at the top (intercepted by app.js in the capture phase), Esc: release everything while at it
     const keyCap = (e) => { if (e.code === 'Space' || e.code === 'Escape') releaseAll(e.code === 'Space' ? '按了空格（卸力）' : '按了 Esc'); };
-    // 卡键：Mac 上按住 Cmd 时先松开的 W 收不到松开；弹框期间也可能丢。按住时浏览器会一直重复发按下，1 秒没收到就当松开
+    // Stuck keys: on a Mac, a W released while Cmd is held never gets its keyup; it can also be lost while a dialog is open. While held the browser keeps repeating keydown, so 1 s without one counts as released
     const stale = setInterval(() => {
       const now = performance.now();
       let changed = false;
@@ -954,12 +954,12 @@ function useVpad({ pad, st, link }) {
       window.removeEventListener('blur', blur);
       document.removeEventListener('visibilitychange', vis);
       window.removeEventListener('keydown', keyCap, true);
-      link.cmd('pad.op', { op: 'drive', on: false, seq: nextSeq() }, 3000);   // 离开：后端记「离开了」，晚到的帧都丢
+      link.cmd('pad.op', { op: 'drive', on: false, seq: nextSeq() }, 3000);   // leaving: the backend records "left" and drops all late frames
     };
   }, []);
-  // 实体手柄连上、别人拿走了方向盘、读不到状态：全部松开
+  // A physical gamepad connected, someone else took the wheel, state cannot be read: release everything
   useEffect(() => { if (!usable) releaseAll(mirror ? '实体手柄连上了' : locked ? '别的页面在遥控' : '读不到状态'); }, [usable]);
-  // 模式以后端为准：后端替这个页面退出了（卸力、策略停了、心跳超时……），页面跟着回到走路
+  // The backend is authoritative for the mode: when the backend exits on this page's behalf (relax, policy stopped, heartbeat timeout…), the page goes back to walking
   useEffect(() => {
     const sm = v.mode;
     if (!sm || sm === S.mode || performance.now() - S.modeAt < MODE_GRACE_MS) return;
@@ -979,9 +979,9 @@ function useVpad({ pad, st, link }) {
     estop: () => estop(true) };
 }
 
-// 按住才做的按钮：按下发 action_start，按着每 0.15 秒 action_hold，松手 / 移开 / 失焦 / 页面转后台 / 滚出手柄这一块
-// 都发 action_stop。触屏上按下 0.12 秒没动、没被浏览器取消（开始滚页面）才算按下，页面刚滚过不认（审查 O2：
-// 「左右各踢一脚」第一步就是 robot.do，手指从这里起手往下刷页面，以前一碰就踢）；0.12 秒内就松手什么都不做（按住才做）
+// A hold-to-act button: send action_start on press, action_hold every 0.15 s while held, and on release / pointer leaving / losing focus / page going to the background / scrolling out of the gamepad section
+// send action_stop. On touch, it only counts as pressed after 0.12 s without moving and without the browser canceling (starting a page scroll), and is ignored right after a page scroll (review O2:
+// the first step of "kick once with each foot" is robot.do, and a finger starting here to scroll down the page used to trigger a kick on contact); releasing within 0.12 s does nothing (hold to act)
 function HoldButton({ item, link, onErr, lit, locked, quiet }) {
   const [held, setHeld] = useState(false);
   const timer = useRef(null);
@@ -1005,17 +1005,17 @@ function HoldButton({ item, link, onErr, lit, locked, quiet }) {
     }
     start(e);
   };
-  // 每次按下一个序号（press）：回执回来之前又松开、又按下了，第一次的回执就作废——不然会多设一个定时器、一直发
-  // action_hold 到页面关掉，后端「0.45 秒没续就停」的保险对这个页面就失效了（代码审查 C7）。后端也按这个序号认续命
+  // Each press gets a sequence number (press): if it is released and pressed again before the acknowledgment comes back, the first acknowledgment is void; otherwise an extra timer would be set and keep sending
+  // action_hold until the page closes, and the backend's "stop after 0.45 s without renewal" safeguard would no longer work for this page (code review C7). The backend also uses this number to accept keepalives
   const start = async (e) => {
-    if (e) { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 有的浏览器没有 */ } }
+    if (e) { e.preventDefault(); try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* some browsers lack it */ } }
     if (alive.current || !item.ok || locked || !ACT.active) return;
     const my = ++seq.current;
     alive.current = true; setHeld(true);
     const r = await link.cmd('pad.op', { op: 'action_start', id: item.id, press: my }, 4000);
-    if (my !== seq.current) return;                       // 等回执的时候又按了一次：交给新的那次，这里什么都不做
+    if (my !== seq.current) return;                       // pressed again while waiting for the acknowledgment: leave it to the newer press, do nothing here
     if (!r.ok) { onErr(r.reason || r.error || '没做成'); alive.current = false; setHeld(false); return; }
-    if (!alive.current) { link.cmd('pad.op', { op: 'action_stop' }, 3000); return; }      // 回执到之前就松手了
+    if (!alive.current) { link.cmd('pad.op', { op: 'action_stop' }, 3000); return; }      // released before the acknowledgment arrived
     clearInterval(timer.current);
     const iv = setInterval(async () => {
       if (my !== seq.current || !alive.current) { clearInterval(iv); return; }
@@ -1028,7 +1028,7 @@ function HoldButton({ item, link, onErr, lit, locked, quiet }) {
   };
   useEffect(() => {
     const vis = () => { if (document.visibilityState !== 'visible') stop(); };
-    // 滚出手柄这一块、切到别的页：马上停（总览一直挂着，不会卸载；藏起来也不会释放指针捕获：审查 O1）
+    // Scrolled out of the gamepad section or switched to another page: stop immediately (the overview stays mounted and is never unmounted; hiding does not release pointer capture either: review O1)
     const offAct = padActivity.subscribe(({ active, changed, routeChanged }) => { if (routeChanged || changed && !active) stop(); });
     window.addEventListener('blur', stop);
     document.addEventListener('visibilitychange', vis);
@@ -1042,7 +1042,7 @@ function HoldButton({ item, link, onErr, lit, locked, quiet }) {
     <b>${item.name}</b><small>${quiet ? '' : item.ok ? item.text : item.why}</small></button>`;
 }
 
-// 图下面一行：Start 现在会做什么、摇杆管什么、刚按的结果；再加一行完整说明
+// The line under the picture: what Start would do now, what the sticks control, the result of the last press; plus one line of full explanation
 function VpadBar({ vp, pad }) {
   const m = pad?.motion || {};
   const v = pad?.virtual || {};
@@ -1099,7 +1099,7 @@ function Remote({ st, pad, link, vp, section }) {
   const mainBtn = (b, extra) => {
     if (!b) return null;
     const lit = mirror && ((b.op === 'stand' || b.op === 'walk' || b.op === 'walk_stop') ? lb.start : b.op === 'sit' ? (bindOf('dpad_down') === 'sit_toggle' && lb.dd) : false);
-    // 「停下（站好）」谁都能点、不排队（审查二 I1）；别的按钮在别人推摇杆时、上一个还没回话时先灰
+    // Anyone can click "Stop (stand still)", without queueing (review 2 I1); the other buttons gray out while someone else is pushing the sticks or the previous one has not replied yet
     const off = !b.ok || (b.op !== 'walk_stop' && (locked || busy));
     return html`<button class=${cx('pd-big', extra, lit && 'pd-lit')} disabled=${off} onClick=${() => press(b)}
       title=${b.ok ? (b.call ? `发给主程序：${b.call}` : '') : b.why}>
@@ -1107,7 +1107,7 @@ function Remote({ st, pad, link, vp, section }) {
   };
   const last = m.last;
   const la = m.last_action;
-  // 一组按钮都因为同一个原因不能按：原因只写一次，不在每个按钮上重复
+  // When a whole group of buttons is disabled for the same reason: state the reason once instead of repeating it on every button
   const common = (items) => {
     const xs = items || [];
     return xs.length && xs.every((x) => !x.ok && x.why === xs[0].why) ? xs[0].why : null;
@@ -1174,11 +1174,11 @@ function Remote({ st, pad, link, vp, section }) {
   </section>`;
 }
 
-// ---------------- 手柄区的 3D 鸭子（用户 10-18：「摇杆的左边应该是 3D 视图、右边是摇杆控制，这样控制着也能看见鸭子的状态」） ----------------
-// 宽屏左侧是 3D 与摄像头上下两张卡，空间够时整体吸在仪表带下面；窄屏按顺序放在遥控上面。
-// 跟总览舞台一样：实时关节、不缩放、单指滚页面两指转（duck3d 的 pageScroll，touch-action 也写在 CSS 里），不在视口就不画（duck3d 的 IO）；
-// 模型几何体是 duck3d 模块里共用的缓存，不会加载两次。数据旧了去色（class，不用 style 字符串：代码审查 C6）。
-// 下面一行小字：姿势 · 电量 · 现在的前后 / 平移 / 转弯（跟遥控卡的读数同一套公式、同一份摇杆状态）
+// ---------------- 3D duck in the gamepad section (user, 10-18: "left of the sticks there should be a 3D view and on the right the stick controls, so you can see the duck's state while controlling it") ----------------
+// On wide screens the left side has two cards, 3D and camera, stacked, and the whole column sticks below the instrument strip when there is room; on narrow screens they come in order above the remote control.
+// Same as the overview stage: live joints, no zoom, one finger scrolls the page and two fingers rotate (duck3d's pageScroll, touch-action is also set in CSS), no drawing when out of the viewport (duck3d's IO);
+// the model geometry is a cache shared within the duck3d module and is never loaded twice. Stale data is desaturated (via class, not a style string: code review C6).
+// A line of small text below: posture · battery · current forward-back / strafe / turn (same formulas and same stick state as the remote-control card's readout)
 function PadDuck({ st, pad, vp, live }) {
   const canvasRef = useRef(null);
   const duckRef = useRef(null);
@@ -1209,10 +1209,10 @@ function PadDuck({ st, pad, vp, live }) {
   </section>`;
 }
 
-// ---------------- 手柄区块（在总览里，往下一刷就是） ----------------
+// ---------------- Gamepad section (inside the overview, just scroll down) ----------------
 
-const TOPBAR_PX = 56;       // 吸顶的顶栏（styles.css .topbar）：看「在不在屏幕上」时扣掉它（审查 O1、O3）
-const TABBAR_PX = 83;       // 手机底栏（styles.css .tabbar）
+const TOPBAR_PX = 56;       // sticky top bar (styles.css .topbar): subtracted when checking "is it on screen" (review O1, O3)
+const TABBAR_PX = 83;       // phone bottom tab bar (styles.css .tabbar)
 
 function ConsoleSticks({ vp, pad, shown, kind }) {
   const axes = shown?.axes || vp.axes;
@@ -1230,9 +1230,9 @@ function ConsoleSticks({ vp, pad, shown, kind }) {
   </div>`;
 }
 
-// 总览重排（方案 §1.2、审查 O11）：顺序是 页头 → 手柄图（按键表默认折起）+ 遥控 → 配对向导 / 测急停 / 配过的手柄。
-// 不再有单独的手柄页：#/pad 是总览上的锚点（app.js 打开就滚到这里，id="pad-block"）。
-// 这一块一直挂着，「在不在」看 padActivity（路由 + 页面可见 + 这一块在视口里）：watch、drive open / off、全部松开都挂在它上面
+// Overview re-layout (plan §1.2, review O11): the order is page header → gamepad picture (key table collapsed by default) + remote control → pairing wizard / e-stop test / paired gamepads.
+// There is no separate gamepad page anymore: #/pad is an anchor on the overview (app.js scrolls here on open, id="pad-block").
+// This section stays mounted, and "present or not" comes from padActivity (route + page visible + this section in the viewport): watch, drive open / off and release-everything all hang on it
 export function PadPage({ st, pad, link, api, previewActive = false, live: duckLive = true, section = null }) {
   const [msg, setMsg] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -1243,13 +1243,13 @@ export function PadPage({ st, pad, link, api, previewActive = false, live: duckL
   const live = pad?.live || {};
   const w = pad?.wizard || { state: 'idle' };
   const showWizard = wizardOpen || w.state !== 'idle';
-  // 认出来的型号优先；还没连手柄时按向导里选的型号画（默认 Xbox）
+  // A recognized model takes priority; with no gamepad connected yet, draw the model chosen in the wizard (Xbox by default)
   const activeKind = live.device?.kind || s.active?.kind || kind;
   const vp = useVpad({ pad, st, link });
-  // 图上显示什么：实体手柄连着（镜像）或者在配对的按键测试 → 实体手柄的；否则 → 网页上按着的
+  // What the picture shows: physical gamepad connected (mirroring) or the key test during pairing → the physical gamepad's; otherwise → what is pressed on the web page
   const shown = vp.mirror || live.state === 'attached' ? live : vp.liveWeb;
 
-  // 顶部提示换行时也按实际高度判断；放不下就随页面滚，不能把摄像头固定在屏幕外。
+  // When the top hint wraps, judge by its actual height too; if it does not fit, scroll with the page rather than pinning the camera off screen.
   useEffect(() => {
     const left = rootRef.current?.querySelector('.pd-left');
     if (!left) return;
@@ -1276,9 +1276,9 @@ export function PadPage({ st, pad, link, api, previewActive = false, live: duckL
     return r;
   }, []);
 
-  // 这一块在不在视口里（扣掉吸顶的顶栏、手机底栏）。藏起来（切到别的页）时 IO 也报「不相交」，但晚一帧：
-  // 路由那边 app.js 在 hashchange 里同步先算过了（padActivity.setRoute）
-  // 看的是原来那几块：页头、手柄图、遥控、下面的配对 / 测急停卡——3D 卡不算（只看着鸭子不算在手柄区：用户 10-18 第三条）
+  // Whether this section is in the viewport (minus the sticky top bar and the phone bottom bar). When hidden (switched to another page) IO also reports "not intersecting", but one frame late:
+  // on the route side, app.js has already computed it synchronously in hashchange (padActivity.setRoute)
+  // Watch the original blocks: page header, gamepad picture, remote control, and the pairing / e-stop test cards below; the 3D card does not count (just watching the duck is not being in the gamepad section: user 10-18, item three)
   useEffect(() => {
     let io = null;
     const mq = window.matchMedia('(max-width: 700px)');
@@ -1302,8 +1302,8 @@ export function PadPage({ st, pad, link, api, previewActive = false, live: duckL
     };
   }, []);
 
-  // 告诉后端「有人在看手柄这一块」：后端这时才订阅 padd 旁路（订阅了 padd 才打开手柄设备，平时不花钱）。
-  // 要连续在屏幕上 0.3 秒才开（一划而过别开旁路：审查 O1）；断线重连后马上补一次
+  // Tell the backend "someone is looking at the gamepad section": only then does the backend subscribe to the padd side channel (padd only opens the gamepad device once subscribed, so it costs nothing normally).
+  // Only opened after 0.3 s continuously on screen (do not open the side channel on a quick scroll past: review O1); resent immediately after a reconnect
   useEffect(() => {
     let since = ACT.active ? performance.now() : null;
     let t0 = null;
@@ -1321,17 +1321,17 @@ export function PadPage({ st, pad, link, api, previewActive = false, live: duckL
     return () => { offAct(); offLink(); clearInterval(iv); clearTimeout(t0); };
   }, []);
 
-  // 上手清单的「去做」（审查 O17）：打开配对向导、滚到测急停并让「测一次急停」拿到焦点、滚到配过的手柄 / 遥控
+  // The getting-started checklist's "Do it" (review O17): open the pairing wizard, scroll to the e-stop test and focus "Test the e-stop once", scroll to paired gamepads / remote control
   useEffect(() => {
     const fn = (what) => {
       if (what === 'wizard') setWizardOpen(true);
-      // 等向导画出来（两帧）再滚
+      // Wait for the wizard to render (two frames) before scrolling
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const el = document.getElementById({ wizard: 'pd-wizard', estop: 'pd-estop', known: 'pd-known', remote: 'pd-remote' }[what]);
         if (!el) return;
         el.scrollIntoView({ block: 'center' });
         const btn = what === 'estop' ? document.getElementById('pd-estop-btn') : null;
-        try { (btn && !btn.disabled ? btn : el).focus({ preventScroll: true }); } catch { /* 老浏览器 */ }
+        try { (btn && !btn.disabled ? btn : el).focus({ preventScroll: true }); } catch { /* old browsers */ }
       }));
     };
     GO.add(fn);

@@ -46,11 +46,11 @@ class Link {
       this._hb = setInterval(() => this.heartbeat(), 1000);
     };
     ws.onmessage = (ev) => {
-      if (this.ws !== ws) return;            // 已经换掉的旧连接：它推的东西不要
+      if (this.ws !== ws) return;            // an old connection that has already been replaced: ignore what it pushes
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       this.lastAt = performance.now();
-      // 后台标签页里 setInterval 一分钟才跑一次，收消息不受限：服务端的心跳来了就回一个，免得被当成断线
+      // In a background tab setInterval only runs once a minute, but receiving messages is not throttled: answer each server heartbeat right away so we are not taken for disconnected
       if (m.t === 'hb') this.heartbeat();
       if (m.t === 'result' && this.pending.has(m.id)) {
         this.pending.get(m.id)(m);
@@ -59,15 +59,15 @@ class Link {
       this.emit(m);
     };
     ws.onclose = async (ev) => {
-      if (this.ws !== ws) return;            // 旧连接（reconnect 换掉的）：别动新连接的心跳
+      if (this.ws !== ws) return;            // old connection (replaced by reconnect): do not touch the new connection's heartbeat
       clearInterval(this._hb);
       for (const done of this.pending.values()) done({ ok: false, error: '和 Studio 的连接断了' });
       this.pending.clear();
-      if (ev.code === 4401) { this.setStatus('auth'); return; }   // 登录过期
+      if (ev.code === 4401) { this.setStatus('auth'); return; }   // login expired
       if (!opened) {
-        // 握手就没成：可能是登录过期（老版本 Studio 在握手阶段就拒绝，浏览器只看到 1006）
-        try { if ((await api('/api/session', undefined, 2000)).status === 401) { this.setStatus('auth'); return; } } catch { /* Studio 不在 */ }
-        if (this.ws !== ws) return;          // 等的这会儿用户点了「重新连接」：交给新连接
+        // The handshake never succeeded: the login may have expired (older Studio versions reject during the handshake, and the browser only sees 1006)
+        try { if ((await api('/api/session', undefined, 2000)).status === 401) { this.setStatus('auth'); return; } } catch { /* Studio not running */ }
+        if (this.ws !== ws) return;          // the user clicked "reconnect" while we were waiting: leave it to the new connection
       }
       this.setStatus('closed');
       this._retry = setTimeout(() => this.connect(), this.backoff);
@@ -75,27 +75,27 @@ class Link {
     };
   }
 
-  /** 等跟 Studio 的连接建好（刷新时页面先出来、连接后到：别在连上之前就发命令） */
+  /** Wait until the connection to Studio is up (on refresh the page appears first and the connection comes later: do not send commands before it is connected) */
   whenOpen() {
     if (this.status === 'open') return Promise.resolve();
     return new Promise((resolve) => { const off = this.on((m) => { if (m.t === '_status' && m.status === 'open') { off(); resolve(); } }); });
   }
 
-  reconnect() { this.backoff = 1000; try { this.ws && this.ws.close(); } catch { /* 已经关了 */ } this.connect(); }
+  reconnect() { this.backoff = 1000; try { this.ws && this.ws.close(); } catch { /* already closed */ } this.connect(); }
 
   send(obj) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) { this.ws.send(JSON.stringify(obj)); return true; }
     return false;
   }
 
-  // pad_visible：手柄那一块现在在不在屏幕上（总览重排审查 O1）。后端只看它决定手柄快照 10 Hz 还是 1 Hz；
-  // #/pad 现在是总览上的锚点，地址是它不代表看得到（往上滑回舞台，地址栏还是 #/pad）
+  // pad_visible: whether the gamepad section is on screen right now (overview re-layout review O1). The backend uses only this to decide 10 Hz or 1 Hz gamepad snapshots;
+  // #/pad is now an anchor on the overview, so the address does not mean it is visible (scroll back up to the stage and the address bar still says #/pad)
   heartbeat() {
     this.send({ t: 'hb', seq: ++this.seq, visible: document.visibilityState === 'visible', route: serverRoute(location.hash),
       pad_visible: padActivity.active || this.padCapture });
   }
 
-  // 模型改键只读旁路：请求快照，不改变 padActivity，也不接管网页遥控。
+  // Read-only side channel for model key remapping: request snapshots without changing padActivity and without taking over web remote control.
   setPadCapture(active) { this.padCapture = Boolean(active); this.heartbeat(); }
 
   cmd(name, args = {}, timeoutMs = 15000) {
@@ -111,9 +111,9 @@ class Link {
 }
 
 const link = new Link();
-padActivity.bind(link);                  // 手柄区进出的那一刻马上发一次心跳
+padActivity.bind(link);                  // send a heartbeat the moment the gamepad section is entered or left
 
-let csrf = '';   // /api/session 给的；改动类 POST 要带上（X-CSRF），配合后端的 Origin 校验
+let csrf = '';   // from /api/session; state-changing POSTs must carry it (X-CSRF), alongside the backend's Origin check
 async function api(path, body, timeoutMs = 10000, signal) {
   const opt = body === undefined ? { credentials: 'same-origin' }
     : { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF': csrf }, body: JSON.stringify(body) };
@@ -121,7 +121,7 @@ async function api(path, body, timeoutMs = 10000, signal) {
   const abort = () => ctl.abort();
   if (signal?.aborted) ctl.abort();
   signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);   // 手机 WiFi 抖的时候请求可能挂几十秒
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);   // when phone Wi-Fi is flaky a request can hang for tens of seconds
   let r;
   let data = {};
   try {
@@ -142,16 +142,16 @@ function useNow(ms = 250) {
 const TEXT_TYPES = ['text', 'password', 'search', 'email', 'number', 'tel', 'url'];
 const typing = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA'
   || (el.tagName === 'INPUT' && TEXT_TYPES.includes((el.type || 'text').toLowerCase())));
-// Ctrl / Alt / Win + 空格是切输入法这类系统快捷键，不当成卸力
+// Ctrl / Alt / Win + Space are system shortcuts such as switching input methods; do not treat them as relax (torque off)
 const plainSpace = (e) => e.code === 'Space' && !e.ctrlKey && !e.altKey && !e.metaKey;
 
 function EStop({ st, live, open }) {
   const [sentAt, setSentAt] = useState(0);
   const [err, setErr] = useState(null);
   const fire = useCallback(async () => {
-    if (performance.now() - sentAt < 200) return;           // 按住空格自动重复：最多每秒 5 次
+    if (performance.now() - sentAt < 200) return;           // holding Space auto-repeats: at most 5 times per second
     setSentAt(performance.now()); setErr(null);
-    const r = await link.cmd('relax', {}, 7000);       // 后端最坏 3 + 0.1 + 3 秒
+    const r = await link.cmd('relax', {}, 7000);       // backend worst case 3 + 0.1 + 3 seconds
     if (!r.ok) setErr(r.reason || r.error || '没发出去');
   }, [sentAt]);
 
@@ -168,19 +168,19 @@ function EStop({ st, live, open }) {
   }, [fire]);
 
   const es = st?.estop || {};
-  // 确认卸力了，之前那句「没发出去 / 超时」就过时了
+  // Relax is confirmed, so the earlier "not sent / timed out" message is stale
   useEffect(() => { if (es.state === 'confirmed') setErr(null); }, [es.state]);
   const click = (e) => { e.currentTarget.blur(); fire(); };
   const note = (text) => (text ? html`<span class="why" role=${err ? 'alert' : undefined}>${text}</span>` : null);
   const fallback = st?.mode === 'commissioning' ? '只能关电源' : '用手柄 − 或关电源';
   if (!open) {
-    // 跟 Studio 的连接断了：按了也发不出去
+    // The connection to Studio is down: pressing it would not get sent anyway
     return html`<span class="estop-wrap">${note(fallback)}
       <button class="estop unavailable" disabled>卸力 · 不可用</button></span>`;
   }
   if (st?.servo_orphan) {
-    // 上次 Studio 退出时舵机会话开着、这次没接管上（审查 D1）：robotd 不在、总线没接管，这里按了也发不出去——带去舵机页接管
-    // （舵机页一进去就接管总线，接管以后卸力走总线）。空格照样发，后端回「先去舵机页接管」
+    // The servo session was open when Studio last exited and was not taken over this time (review D1): robotd is not running and the bus is not taken over, so pressing here cannot send anything; send the user to the servo page to take over
+    // (the servo page takes over the bus as soon as it opens, and after that relax goes over the bus). Space still sends, and the backend replies "take over on the servo page first"
     return html`<span class="estop-wrap">${note(err || '可能还有舵机保持着')}
       <button class="estop unavailable" onClick=${(e) => { e.currentTarget.blur(); location.hash = '#/devices/servos'; }}
         title="上次 Studio 退出时舵机会话开着、这次没接管上：先去舵机页接管总线，才能在总线上卸力">卸力 · 先去舵机页接管</button></span>`;
@@ -193,7 +193,7 @@ function EStop({ st, live, open }) {
     return html`<span class="estop-wrap">${note(err)}
       <button class="estop done" onClick=${click} title=${es.why}>全局卸力 · 已卸力</button></span>`;
   }
-  // 数据旧了（!live）也给红色按钮：按了照样发，Studio 那边的卸力专线可能是好的
+  // Stale data (!live) still gets the red button: pressing it still sends, since Studio's dedicated relax path may be fine
   return html`<span class="estop-wrap">${note(err || (!live ? '状态不明，仍可按' : ''))}
     <button class="estop" onClick=${click} title="让 15 颗舵机全部卸力。鸭子会软下来，扶住。">
       ${es.state === 'pending' ? '卸力中…' : '全局卸力'}<span class="kbd">空格</span></button></span>`;
@@ -211,18 +211,18 @@ function ServoBar({ st, onServos }) {
       <span class="more sb-more">${ss.restored ? 'Studio 重启过，接着上次的会话管着。' : ''}急停用顶上红按钮或空格（手柄 Select 这时不管用）；别手动起 robotd，先点「交还主程序」</span>
       ${st.servo_marker_error ? html`<span class="more sb-more">${st.servo_marker_error}</span>` : null}</div>`;
   }
-  // 会话期间主程序被手动起来了（审查 D9）：它起来就把舵机全部松开、还跟 Studio 抢串口；Studio 已经关了总线（没写舵机）
+  // The main program was started manually during the session (review D9): as soon as it starts it releases all servos and fights Studio for the serial port; Studio has already closed the bus (without writing to the servos)
   if (st?.servo_conflict_s != null) {
     return html`<div class="banner bad servo-bar" role="alert"><b>主程序被手动起来了：它会把舵机全部松开、跟 Studio 抢串口</b>
       <span class="more sb-more">Studio 已经关掉舵机总线（没写舵机）。下次别手动起 robotd：先在页面上点「交还主程序」</span></div>`;
   }
-  // 上次 Studio 退出时舵机会话开着、这次没接管上（审查 D1）
+  // The servo session was open when Studio last exited and was not taken over this time (review D1)
   if (st?.servo_orphan) {
     return html`<div class="banner bad servo-bar" role="alert"><b>上次退出时可能还有舵机保持着，去舵机页接管后才能卸力</b>
       ${onServos ? null : html`<a href="#/devices/servos">去舵机页接管</a>`}
       <span class="more sb-more">Studio 重启时没接管上${st.servo_orphan.why ? `（${st.servo_orphan.why}）` : ''}；急的话关电源</span></div>`;
   }
-  // 交还了、主程序还没连上：一直提示到主程序连上为止（后端连上后清掉，不再 10 分钟自己消失：审查 D12）
+  // Handed back, and the main program has not connected yet: keep showing the hint until it connects (the backend clears it once connected; it no longer disappears by itself after 10 minutes: review D12)
   if (st?.servo_handback_s != null) {
     if (st.servo_giveback_error) {
       return html`<div class="banner bad servo-bar" role="alert"><b>已交还，但主程序没起来</b>
@@ -248,10 +248,10 @@ function useRoute() {
       const guard = leaveGuards[cur.current];
       if (next !== cur.current && guard && !guard()) { history.replaceState(null, '', '#' + cur.current); return; }
       cur.current = next;
-      // 先同步算「在不在手柄区」（审查 O1）：切到别的页的这一刻就全部松开、发 drive off，不等重绘、不等 IntersectionObserver
+      // First compute "in the gamepad section or not" synchronously (review O1): the moment we switch to another page, release everything and send drive off, without waiting for a redraw or the IntersectionObserver
       padActivity.setRoute(next);
       setR(next);
-      link.heartbeat();                   // 马上告诉 Studio 换页了（交还 / 接管不用等下一次心跳）
+      link.heartbeat();                   // tell Studio right away that the page changed (hand back / take over need not wait for the next heartbeat)
     };
     window.addEventListener('hashchange', f);
     return () => window.removeEventListener('hashchange', f);
@@ -259,7 +259,7 @@ function useRoute() {
   return r;
 }
 
-// 换页、点导航时滚到哪：#/pad 滚到手柄那一块（scroll-margin-top 扣掉吸顶的顶栏），别的都回到顶上
+// Where to scroll when changing pages or clicking navigation: #/pad scrolls to the gamepad section (scroll-margin-top subtracts the sticky top bar), everything else goes back to the top
 
 const PAD_HEAVY = ['skills','actions','combos','sounds'];
 function Main({duck}) {
@@ -338,7 +338,7 @@ function App() {
   const [down, setDown] = useState(false);
   const load = () => api('/api/session')
     .then((r) => { setDown(false); csrf = r.csrf || ''; setNoPw(r.has_password === false); setSess(r.status === 200 ? r : null); })
-    .catch(() => { setDown(true); setTimeout(load, 2000); });   // Studio 正在重启：2 秒后再问
+    .catch(() => { setDown(true); setTimeout(load, 2000); });   // Studio is restarting: ask again in 2 seconds
   useEffect(() => { applyStage(loadStage()); load(); }, []);
   if (sess === undefined) {
     return down ? html`<div class="login board"><h1>Microduck Studio</h1><p>连不上鸭子上的 Studio，正在重试…</p></div>` : null;

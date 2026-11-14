@@ -1,17 +1,17 @@
-"""写进主程序：把舵机零位、方向、IMU 方向一次写进 robotd 的标定文件。
+"""Write to the main program: write servo zero positions, directions, and IMU orientation into robotd's calibration file in one go.
 
-为什么要有这一个文件：舵机页的中位校准只改舵机自己的 EEPROM，方向只存在 Studio 的
-servo-directions.json，IMU 方向只在页面里算出来。robotd 读的是另一个文件
-/etc/robot/feetech-ft5/hd1910-calibration.toml；运动模式下它没写好就会卡在 waiting_for_bus，鸭子站不起来。
+Why this file exists: center calibration on the servo page only changes each servo's own EEPROM, directions only live in Studio's
+servo-directions.json, and the IMU orientation is only computed in the page. robotd reads a different file,
+/etc/robot/feetech-ft5/hd1910-calibration.toml; in motion mode, if it isn't written correctly robotd gets stuck at waiting_for_bus and the duck can't stand up.
 
-这里做三件事：
-- 记下 Studio 这边做过什么（state 目录的 servo-centered.json、imu-pending.json）；
-- 算「准备情况」、拼要写的内容（跟 root 小助手共用同一套组 TOML / 校验的代码，小助手那边复制了一份）；
-- 接 calib.op：preview 给页面看要写什么，commit 调小助手（dry_run=False）真正写、重启主程序。
+This does three things:
+- record what was done on the Studio side (servo-centered.json and imu-pending.json in the state directory);
+- compute "readiness" and assemble the content to write (sharing the same TOML-building / validation code with the root helper, which keeps a copy);
+- handle calib.op: preview shows the page what will be written; commit calls the helper (dry_run=False) to really write it and restart the main program.
 
-小助手是独立的 root 脚本，不能 import Studio；所以 build_calibration / render_calibration /
-validate_calibration 这三个函数在 deploy/microduck-helper 里有一份逐字相同的副本，
-tests/test_commit.py 会拿同一份输入核对两边的输出完全一样。
+The helper is a standalone root script and can't import Studio; so build_calibration / render_calibration /
+validate_calibration have a verbatim copy in deploy/microduck-helper,
+and tests/test_commit.py feeds both the same input and checks that the outputs are exactly the same.
 """
 import json
 import math
@@ -30,15 +30,15 @@ JOINT_ID = {
     "neck_pitch": 30, "head_pitch": 31, "head_yaw": 32, "head_roll": 33, "mouth": 34,
     "right_hip_yaw": 10, "right_hip_roll": 11, "right_hip_pitch": 12, "right_knee": 13, "right_ankle": 14,
 }
-JOINT_IDS = JOINT_ID       # 旧名字（Studio 别的模块 / 测试在用）
-# fork robotd 的官方 HOME（deployment.rs 的 DEFAULT_POSITION），按 JOINT_ORDER
+JOINT_IDS = JOINT_ID       # old name (still used by other Studio modules / tests)
+# the official HOME of fork robotd (DEFAULT_POSITION in deployment.rs), in JOINT_ORDER
 HOME_RAD = {
     "left_hip_yaw": 0.0, "left_hip_roll": -0.0873, "left_hip_pitch": -0.4579, "left_knee": -0.0049,
     "left_ankle": 0.453, "neck_pitch": 0.3491, "head_pitch": 0.3491, "head_yaw": 0.0, "head_roll": 0.0,
     "mouth": 0.0, "right_hip_yaw": 0.0, "right_hip_roll": 0.0873, "right_hip_pitch": 0.4579,
     "right_knee": 0.0049, "right_ankle": -0.453,
 }
-# 真鸭子上用的标准限位（度）：左右髋偏航是镜像的
+# Standard limits (degrees) used on the real duck: left and right hip yaw are mirrored
 LIMITS_DEG = {
     "left_hip_yaw": (-25.0, 30.0), "left_hip_roll": (-22.0, 22.0), "left_hip_pitch": (-90.0, 90.0),
     "left_knee": (-90.0, 90.0), "left_ankle": (-70.0, 70.0),
@@ -50,11 +50,11 @@ LIMITS_DEG = {
 IMU_SOURCES = ("bus", "bno08x", "lsm6dsv16x")
 CHIP_CN = {"bus": "总线小板（ID 200）", "bno08x": "BNO085（I²C）", "lsm6dsv16x": "LSM6DSV16X（I²C）"}
 DEFAULT_BUS_QUAT = [math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0]     # fork imu.rs: SflpDecoder::DEFAULT_MOUNT
-# 第 2 步标了已完成 / 跳过、主程序里方向没确认、IMU 页也没校过时，第 3 步按这些「默认装法」写（任务 17，用户 10-21：
-# 「我一直跳过跳过，最后还是不进运动模式」）。总线小板用文件里现有的 imu_mount_quat（出厂就是上面的官方装法）
+# When step 2 is marked done / skipped, the direction isn't confirmed in the main program, and the IMU page hasn't calibrated either, step 3 writes these "default mountings" (task 17, user on 10-21:
+# "I kept skipping and skipping, and in the end it still won't enter motion mode"). The bus board uses the imu_mount_quat already in the file (from the factory that is the official mounting above)
 DEFAULT_MOUNTS = {
     "bno08x": [0.5, 0.5, 0.5, 0.5],                                  # fork duck-control/src/trunk_imu.rs: BNO08X_DEFAULT_MOUNT
-    # 复刻推荐装法：模块 x 朝下、z 朝前（二号鸭 10-17 实测）。fork 给的是单位四元数（「小板没有公认的朝上方向」），不用它
+    # Recommended mounting for the replica: module x pointing down, z pointing forward (measured on Duck #2 on 10-17). The fork gives a unit quaternion ("the board has no agreed-upon up direction"); not used
     "lsm6dsv16x": [0.7071067811865476, 0.0, 0.7071067811865476, 0.0],
 }
 DEFAULT_HOW = {"bus": "官方装法", "bno08x": "fork 的默认装法", "lsm6dsv16x": "复刻推荐装法，模块 x 朝下、z 朝前"}
@@ -68,14 +68,14 @@ COMMIT_WAIT_S = 180.0
 
 
 class CalibError(Exception):
-    """要写进主程序的这份标定没过 robotd 的校验。消息直接给页面 / 人看。"""
+    """The calibration to be written to the main program failed robotd's validation. The message goes straight to the page / person."""
 
 
 class Refused(Exception):
-    """现在不能做（准备没齐、读不到标定、小助手不在）。原因直接给页面看。"""
+    """Can't be done right now (not ready, calibration unreadable, helper missing). The reason goes straight to the page."""
 
 
-# ---------------- 组 TOML / 校验（小助手里有逐字相同的一份） ----------------
+# ---------------- TOML building / validation (the helper has a verbatim copy) ----------------
 
 def _is_int(v):
     return isinstance(v, int) and not isinstance(v, bool)
@@ -92,7 +92,7 @@ def _quat(q, what):
 
 
 def normalize_quat(q):
-    """单位化；零向量、nan、inf 都拒。误差 1e-6 之内才算数（跟 robotd 一样）。"""
+    """Normalize; reject zero vectors, nan, and inf. Only counts if within 1e-6 error (same as robotd)."""
     v = _quat(q, "四元数")
     n = math.sqrt(sum(x * x for x in v))
     if not math.isfinite(n) or n <= 1e-12:
@@ -109,11 +109,11 @@ def _bool_text(v):
 
 
 def build_calibration(current, joints, imu):
-    """按现在文件里的 name / id，加这次的方向和 IMU 方向，组一份完整的标定。
+    """From the name / id in the current file, plus this time's directions and IMU orientation, build a complete calibration.
 
-    current：现在文件的字典（calibration-status 里的 calibration，或者 tomllib 读出来的）；
-    joints：[{"id": int, "direction": 1|-1}, ... 15 个]；
-    imu：{"source": "bus"|"bno08x"|"lsm6dsv16x", "quat": [w,x,y,z]}。
+    current: the current file as a dict (the calibration in calibration-status, or read with tomllib);
+    joints: [{"id": int, "direction": 1|-1}, ... 15 entries];
+    imu: {"source": "bus"|"bno08x"|"lsm6dsv16x", "quat": [w,x,y,z]}.
     """
     if not isinstance(current, dict):
         raise CalibError("主程序现在的标定文件不是一个对象")
@@ -210,7 +210,7 @@ def _raw_position(zero_raw, radians, direction):
 
 
 def validate_calibration(cal, source=None):
-    """照 fork robotd 的 Calibration::validate 一条一条查。不过就抛 CalibError，说清哪颗、哪条。"""
+    """Check rule by rule following fork robotd's Calibration::validate. On failure raise CalibError, saying which servo and which rule."""
     if not isinstance(cal, dict):
         raise CalibError("标定不是一个对象")
     allowed = set(TOP_KEYS) | {"imu_mounts", "joints"}
@@ -317,7 +317,7 @@ def validate_calibration(cal, source=None):
 
 
 def render_calibration(cal):
-    """自己写 TOML：顶层键 → [imu_mounts.*] → [[joints]]。写完要再用 tomllib 读回来核对。"""
+    """Write the TOML ourselves: top-level keys → [imu_mounts.*] → [[joints]]. After writing, read it back with tomllib to check."""
     lines = [
         f"motion_enabled = {_bool_text(cal.get('motion_enabled'))}",
         f"imu_mount_verified = {_bool_text(cal.get('imu_mount_verified'))}",
@@ -356,14 +356,14 @@ def render_calibration(cal):
 
 
 def normalized_calibration(cal):
-    """读回来以后比对用：空的 [imu_mounts] 不写出来，读回来就没有这个键。"""
+    """For comparison after reading back: an empty [imu_mounts] isn't written out, so the key is absent when read back."""
     out = dict(cal)
     out["imu_mounts"] = dict(cal.get("imu_mounts") or {})
     return out
 
 
 def same_calibration(a, b):
-    """逐项严格比：TOML 用 repr 写浮点，读回来一定一模一样。"""
+    """Strict item-by-item comparison: TOML writes floats with repr, so they always read back exactly the same."""
     if isinstance(a, dict) and isinstance(b, dict):
         return set(a) == set(b) and all(same_calibration(a[k], b[k]) for k in a)
     if isinstance(a, list) and isinstance(b, list):
@@ -375,7 +375,7 @@ def same_calibration(a, b):
     return a == b
 
 
-# ---------------- Studio 这边的状态文件 ----------------
+# ---------------- Studio-side state files ----------------
 
 def _path(state_dir, name):
     return os.path.join(state_dir or ".", name)
@@ -409,7 +409,7 @@ def _write_json(path, obj):
 
 
 def record_centered(state_dir, ids, by, at=None):
-    """中位校准成功一颗记一颗：{id: {"at": 墙钟, "by": 谁}}。"""
+    """Record each servo as its center calibration succeeds: {id: {"at": wall clock, "by": who}}."""
     ids = [int(i) for i in ids]
     if not ids:
         return {}
@@ -436,7 +436,7 @@ def load_centered(state_dir):
 
 
 def save_pending(state_dir, source, quat, quality=None, by=None, at=None, *, imu_bus=None):
-    """IMU 页站着完整校完、结果 ok 的那一份：Studio 重启也不丢。"""
+    """The one from a complete standing calibration on the IMU page with an ok result: survives a Studio restart."""
     if source not in IMU_SOURCES:
         raise Refused(f"不认识的 IMU 来源：{source!r}")
     row = {"at": time.time() if at is None else at, "by": by, "source": source,
@@ -469,7 +469,7 @@ def clear_pending(state_dir):
 
 
 def pending_matches(pending, source, bus):
-    """旧站姿结果只兼容 Feetech；新结果要跟采数时的总线板卡完全相同。"""
+    """Old standing-pose results are only compatible with Feetech; new results must match the bus board used when sampling exactly."""
     from .imu import bus_imu_of, configured_profile, imu_bus_metadata
     if not pending or pending.get("source") != source:
         return False
@@ -491,7 +491,7 @@ def pending_matches(pending, source, bus):
 
 
 def forget_centered(state_dir, ids):
-    """撤销中位校准时，把那几颗从 servo-centered.json 里删掉。回删掉的 id。"""
+    """When undoing center calibration, remove those servos from servo-centered.json. Return the removed ids."""
     p = _path(state_dir, SERVO_CENTERED)
     data = _read_json(p) or {}
     gone = []
@@ -504,7 +504,7 @@ def forget_centered(state_dir, ids):
 
 
 def _load_directions(state_dir):
-    """servo-directions.json 里明确设过的那几颗（只有这些算「Studio 的方向」）；没有就空。"""
+    """The servos whose direction was explicitly set in servo-directions.json (only these count as "Studio's directions"); empty if none."""
     try:
         with open(_path(state_dir, "servo-directions.json"), encoding="utf-8") as f:
             raw = json.load(f)
@@ -519,7 +519,7 @@ def _load_directions(state_dir):
 
 
 def _file_directions(cal):
-    """主程序文件里 15 颗现有的方向 {id: ±1}；读不到的不放。"""
+    """The current directions {id: ±1} of the 15 servos in the main program's file; unreadable ones are left out."""
     out = {}
     for j in (cal or {}).get("joints") or []:
         if isinstance(j, dict) and isinstance(j.get("id"), int) and j.get("direction") in (1, -1):
@@ -527,7 +527,7 @@ def _file_directions(cal):
     return out
 
 
-# ---------------- 准备情况 / 预览 / 写入 ----------------
+# ---------------- Readiness / preview / write ----------------
 
 class CommitService:
     def __init__(self, robotd, log, state_dir, simulate=False):
@@ -539,13 +539,13 @@ class CommitService:
         self._file_calib_at = -1e9
         self.cal_from_file = False
         self.job = None
-        self.onboard = None                    # 上手清单（app 接上）：第 1 / 2 步用户标了「已完成」「跳过」，准备情况要知道
+        self.onboard = None                    # onboarding checklist (hooked up by app): readiness needs to know when the user marked step 1 / 2 "done" or "skip"
         self._writing = threading.Lock()
         self._reload_at = -1e9
         self.reload(force=True)
         self.job = self._job_from_last_result()
 
-    # ---- 状态文件：按修改时间缓存（state.summarize 每帧都会调 view，不能每帧读盘） ----
+    # ---- State files: cached by modification time (state.summarize calls view every frame, can't read the disk every frame) ----
 
     def _sig(self, path):
         try:
@@ -577,8 +577,8 @@ class CommitService:
                     self.directions = fn()
 
     def _calibration(self, rd=None):
-        """优先用这次 hello 之后的 calibration-status；拿不到时（运动模式卡在 waiting_for_bus）
-        调小助手 calib-read 读文件。文件兜底最多 5 秒问一次，页面每帧不跑 sudo。"""
+        """Prefer the calibration-status from after this hello; when unavailable (motion mode stuck at waiting_for_bus)
+        call the helper's calib-read to read the file. The file fallback asks at most once every 5 seconds, so the page doesn't run sudo every frame."""
         from .robotd import fresh_calib
         from . import helper
         rd = rd or self.rd
@@ -627,26 +627,26 @@ class CommitService:
         cm = self._mtime(SERVO_CENTERED)
         if cm is not None and cm > int(last.get("centered_mtime_ns") or -1):
             why.append("舵机零位记录比上次成功写入新")
-        # 只比舵机页里明确设过方向的那几颗：没设过的写的时候沿用文件里的，不算改动
+        # Only compare the servos whose direction was explicitly set on the servo page: ones not set keep the file's value when writing, so they aren't changes
         rows = {j.get("id"): j for j in (cal or {}).get("joints") or [] if isinstance(j, dict)}
         if rows and any(jid in rows and rows[jid].get("direction") != d for jid, d in self.directions.items()):
             why.append("舵机页设的方向和主程序文件不一样")
         return why
 
     def _user_mark(self, step):
-        """上手清单第 step 步是不是用户自己标的（done / skip / None）；没接上清单、出错都当没标。"""
+        """Whether onboarding checklist step `step` was marked by the user (done / skip / None); not hooked up to the checklist or an error counts as not marked."""
         ob = self.onboard
         if ob is None:
             return None
         try:
             return ob.user_mark(step)
-        except Exception:  # noqa: BLE001 —— 准备情况每帧都算，清单出错不能把它弄没
+        except Exception:  # noqa: BLE001 —— readiness is computed every frame; a checklist error must not make it disappear
             return None
 
     def _default_imu(self, source, mount, cal, mark=None):
-        """第 2 步标了「已完成」/「跳过」、主程序里正在用的那颗 IMU 方向没确认、也没有 imu-pending.json：
-        按默认装法写这颗、标成已确认（任务 17）。回 {source, quat, label, how, mark}；不该用默认的回 None。
-        有 pending（站着校过）照旧用 pending；方向已确认照旧用主程序的；芯片不知道的不猜。"""
+        """Step 2 is marked "done" / "skip", the orientation of the IMU the main program is using isn't confirmed, and there's no imu-pending.json:
+        write this IMU with the default mounting and mark it confirmed (task 17). Returns {source, quat, label, how, mark}; returns None when the default shouldn't be used.
+        If there is a pending one (calibrated standing), use pending as before; if the orientation is confirmed, use the main program's as before; don't guess when the chip is unknown."""
         if self.pending or source not in IMU_SOURCES or (mount or {}).get("verified") is True:
             return None
         if source == "bus" and (cal or {}).get("imu_bus_profile") == "qinmo":
@@ -698,7 +698,7 @@ class CommitService:
         if not online:
             mode_ok, mode_text = False, "连上主程序才判得出现在是什么模式"
         elif mode == "commissioning" and phase in STARTING_PHASES:
-            # 标定模式的启动报告（还没第一次读成功）：不是「last_sample 里只有 0 颗」。旧 fork 永远停在这里（10-20 真机验收）
+            # The commissioning-mode startup report (no successful read yet): this isn't "only 0 servos in last_sample". The old fork stays here forever (10-20 real-hardware acceptance check)
             mode_ok = False
             if wait:
                 mode_text = f"标定模式，{wait['text']}（phase={phase}）" + (f"：{err}" if err else "")
@@ -707,7 +707,7 @@ class CommitService:
             else:
                 mode_text = f"标定模式，主程序还在启动（phase={phase}）：起来以后才有舵机读数，等几秒"
         elif mode == "commissioning" and phase == "read_error":
-            # 起来了（实时快照），只是这一拍读舵机出错：照原样把主程序的原话带出来
+            # It's up (live snapshot), just that reading servos failed this tick: pass along the main program's original message as is
             mode_ok = False
             cycle_err = bus.get("last_cycle_error")
             mode_text = "标定模式，主程序起来了，但读舵机出错" + (f"：{cycle_err}" if cycle_err else "") + "。先看舵机电源和线"
@@ -739,7 +739,7 @@ class CommitService:
             if bus.get("policy_enabled") is True or native.get("torque_state_confirmed") is True:
                 safe_ok = False
         elif mode == "commissioning" and isinstance(bus.get("hold"), dict):
-            # 标定模式「站姿使能」站着：写进主程序会重启主程序，15 颗一下子全卸力，鸭子直接塌
+            # Standing in commissioning-mode "stance enable": writing to the main program restarts it, all 15 servos go limp at once, and the duck collapses
             safe_ok = False
             safe_text = "鸭子在标定模式站着（站姿使能）：先在 IMU 页点「失能」或者顶上「卸力」，扶好再写"
         items.append({"key": "safety", "label": "鸭子姿势", "ok": safe_ok,
@@ -752,7 +752,7 @@ class CommitService:
         if not missing:
             servo_text = "15 颗的零位都记在 servo-centered.json 里了"
         elif servo_mark:
-            # 用户说第 1 步以前做过 / 先不做（用户 10-20：二号鸭零位早校过，以前被逼着重校）：写的时候 15 颗照样按 2048 写
+            # The user says step 1 was done before / skipped for now (user on 10-20: Duck #2's zero positions were calibrated long ago, and they used to be forced to recalibrate): when writing, all 15 servos are still written as 2048
             servo_text = (("你标了第 1 步已完成" if servo_mark == "done" else "你跳过了第 1 步")
                           + "：15 颗按 2048 写零位（零位要是用 Studio 的舵机页校过的才对）")
         else:
@@ -762,7 +762,7 @@ class CommitService:
                       "action": {"do": "servos", "label": "去舵机页"} if not servo_ok else None,
                       "missing": missing, "done": 15 - len(missing), "by_mark": servo_mark if missing else None})
 
-        # 写的方向：舵机页明确设过的用舵机页的，其余沿用主程序文件里现有的（不拿默认 −1 去盖）
+        # Directions to write: those explicitly set on the servo page use the servo page's value, the rest keep the existing value in the main program's file (don't overwrite with the default −1)
         file_dirs = _file_directions(cal)
         final = {jid: self.directions.get(jid, file_dirs.get(jid, -1)) for jid in JOINT_ID.values()}
         changed = [{"id": jid, "name": name, "cn": JOINT_CN.get(name, name), "direction": final[jid]}
@@ -806,12 +806,12 @@ class CommitService:
             said = "你标了第 2 步已完成" if imu_mark == "done" else "你跳过了第 2 步"
             imu_default = self._default_imu(source, mount, cal, imu_mark)
             if imu_default:
-                # 用户 10-21：「我一直跳过跳过，最后还是不进运动模式」「我以前 IMU 已经校准过」：按默认装法写、标成已确认
+                # User on 10-21: "I kept skipping and skipping, and in the end it still won't enter motion mode", "I calibrated the IMU before": write with the default mounting and mark confirmed
                 imu_ok = True
                 imu_text = (f"{said}：IMU 按默认装法写（{imu_default['label']}：{imu_default['how']}）。"
                             "装得不一样的，站起来会往一边倒——写完以后在 IMU 页站着校一次，再写一次主程序")
             else:
-                # 芯片不知道、或者 IMU 页记下的是另一颗芯片的：没法按默认装法写
+                # Chip unknown, or the IMU page recorded a different chip: can't write with the default mounting
                 imu_text = f"{said}，但没法按默认装法写：{imu_text}"
         items.append({"key": "imu", "label": "IMU 方向", "ok": imu_ok, "text": imu_text,
                       "action": {"do": "imu", "label": "去 IMU 页"} if not imu_ok else None, "source": source,
@@ -834,7 +834,7 @@ class CommitService:
     def view(self, rd=None, servo=None):
         out = self.readiness(rd, servo)
         job = dict(self.job) if isinstance(self.job, dict) else None
-        # 写成功 2 分钟后收起进度（页面不再把第 3 步那张卡撑开）；失败的一直留着，等人看原因
+        # Collapse the progress 2 minutes after a successful write (the page no longer keeps step 3's card expanded); failures stay until someone looks at the reason
         if job and job.get("ok") and job.get("phase") == "done":
             finished = job.get("finished")
             if isinstance(finished, (int, float)) and time.time() - finished > 120:
@@ -845,8 +845,8 @@ class CommitService:
         return out
 
     def hold_directions(self, rd=None):
-        """标定模式「站姿使能」（fork hold-home）用的 15 颗方向，按 JOINT_ORDER：跟 _payload 写进主程序的同一套
-        （舵机页设过的用舵机页的，其余沿用主程序文件里的）。站起来的样子就是写进去以后运动模式的 HOME。"""
+        """The 15 servo directions used by commissioning-mode "stance enable" (fork hold-home), in JOINT_ORDER: the same set _payload writes into the main program
+        (those set on the servo page use the servo page's, the rest keep the main program file's). The standing pose is exactly motion mode's HOME after writing."""
         self.reload()
         cal, _calib = self._calibration(rd or self.rd)
         if not isinstance(cal, dict) or not isinstance(cal.get("joints"), list) or len(cal["joints"]) != 15:
@@ -885,8 +885,8 @@ class CommitService:
                 source = self.pending["source"]
             else:
                 raise Refused("主程序还没报用的是哪颗 IMU：等几秒再试")
-        # 用哪份 IMU 方向：IMU 页站着校过的（pending）> 主程序里已确认的 > 第 2 步标了时的默认装法（任务 17）> 主程序里没确认的
-        # （最后这种只有「先看看要写什么」走得到：准备情况不满足时写不了）
+        # Which IMU orientation to use: calibrated standing on the IMU page (pending) > confirmed in the main program > default mounting when step 2 is marked (task 17) > unconfirmed in the main program
+        # (that last one is only reachable via "preview what will be written": writing isn't possible when readiness isn't met)
         dflt = None
         if self.pending:
             if self.pending.get("source") != source:
@@ -904,7 +904,7 @@ class CommitService:
             raise Refused("IMU 方向还没读到：等主程序报上来，或者去 IMU 页校一次")
         out = {"joints": joints, "imu": {"source": source, "quat": list(quat)}}
         if dflt:
-            out["imu_default"] = dflt["how"]          # 只给预览 / 日志看；交给小助手的 imu 照旧只有 {source, quat}
+            out["imu_default"] = dflt["how"]          # only for preview / log; the imu handed to the helper is still just {source, quat}
         return out
 
     def _summary(self, payload, toml, used_helper):

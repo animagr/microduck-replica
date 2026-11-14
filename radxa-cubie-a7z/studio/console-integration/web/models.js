@@ -1,4 +1,4 @@
-// 模型库只在服务端确认成功后更新；安装、选用和正在执行是三个不同状态。
+// The model library is only updated after the server confirms success; installed, selected and running are three different states.
 import { html, useState, useEffect, useLayoutEffect, useRef } from './vendor/preact-htm.module.js';
 import { ConfirmBox } from './confirm.js';
 
@@ -37,7 +37,7 @@ export function modelState(item) {
 }
 
 export function modelSlots(view, item) {
-  // 只提供服务端确认兼容的用途，不把所有用途暴露给任意模型。
+  // Only offer the uses the server confirms as compatible; do not expose every use to any model.
   const allowed = item.allowed_slots || (item.suggested_slot ? [item.suggested_slot] : []);
   return (view?.slots || []).filter(slot => allowed.includes(slot.slot));
 }
@@ -90,7 +90,7 @@ export function createModelReader(api) {
 export function captureAllowed(view) {
   const rows = view?.bindings || [];
   const safeSkills = new Set(['', 'ground_pick', 'sit_toggle', 'kick_left', 'kick_right', 'roulade']);
-  // 旁路监听不拦截 padd 的原动作；stand_test 可在卸力时直接上力起身。
+  // The side-channel listener does not intercept padd's original actions; stand_test can power up and stand directly while relaxed.
   return rows.length === BUTTONS.length && BUTTONS.every(({ button }) => {
     const matches = rows.filter(row => row.button === button);
     return matches.length === 1 && !matches[0].error && safeSkills.has(matches[0].skill);
@@ -230,7 +230,7 @@ export function ModelsPage({ api, csrf, link, live, tune, section = 'all' }) {
   const safeCapture = captureAllowed(view);
   useEffect(() => {
     if (!safeCapture) { setStableBindings(''); return undefined; }
-    // padd 每秒重读一次绑定，给已写入但尚未应用的旧特殊动作留出更新时间。
+    // padd rereads bindings once per second; leave time for old special actions that were written but not yet applied to update.
     const timer = setTimeout(() => setStableBindings(captureFingerprint), 2000);
     return () => clearTimeout(timer);
   }, [captureFingerprint, safeCapture]);
@@ -339,7 +339,7 @@ export function ModelsPage({ api, csrf, link, live, tune, section = 'all' }) {
     setSeconds(20);
     bindingsArea.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
-  // 捕获提示可见时监听就必须就绪，避免首个按键落在绘制与普通 effect 之间。
+  // The listener must be ready whenever the capture prompt is visible, so the first key press does not land between paint and a normal effect.
   useLayoutEffect(() => {
     if (!capture || !link || section === 'library') return undefined;
     let previous = null;
@@ -355,7 +355,7 @@ export function ModelsPage({ api, csrf, link, live, tune, section = 'all' }) {
     const watch = () => {
       if (!done && document.visibilityState === 'visible' && link.status === 'open') link.cmd('pad.op', { op: 'watch' }, 3000);
     };
-    // 只借用快照频率与旁路订阅；不接管遥控，也不发送任何动作键或运动命令。
+    // Only borrow the snapshot rate and side-channel subscription; do not take over remote control or send any action keys or motion commands.
     link.setPadCapture(true);
     watch();
     const off = link.on(message => {

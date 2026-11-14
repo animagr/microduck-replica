@@ -1,9 +1,9 @@
-# 二进制文件必须声明，否则在 core.autocrlf=true 的 Windows 上
-# clone / checkout 时会被做 LF→CRLF 转换，文件直接损坏。
-# git 的自动二进制探测靠采样前几 KB 有无 NUL 字节，对 PDF 这类
-# 头部多为 ASCII 的格式会误判成文本。
+# Binary files must be declared, otherwise on Windows with core.autocrlf=true
+# clone / checkout applies LF→CRLF conversion and the files get corrupted outright.
+# Git's automatic binary detection samples the first few KB for NUL bytes, so formats like PDF
+# whose headers are mostly ASCII get misdetected as text.
 
-# 三维与制造
+# 3D and manufacturing
 *.stl   binary
 *.stp   binary
 *.step  binary
@@ -11,7 +11,7 @@
 *.3mf   binary
 *.gbr   binary
 
-# 图像
+# Images
 *.png   binary
 *.jpg   binary
 *.jpeg  binary
@@ -20,7 +20,7 @@
 *.webp  binary
 *.ico   binary
 
-# 文档与打包
+# Documents and packaging
 *.pdf   binary
 *.zip   binary
 *.7z    binary
@@ -28,16 +28,16 @@
 *.xlsx  binary
 *.docx  binary
 
-# EDA 工程
+# EDA projects
 *.eprj2 binary
 *.epro2 binary
 *.sh text eol=lf
-# systemd 单元直接拷到主板用，CRLF 会让 systemd 读错
+# systemd units are copied straight onto the board; CRLF makes systemd misread them
 *.service text eol=lf
 *.ps1 text eol=crlf
-# 鸭子上直接执行、或由 systemd / sudo / sshd / NetworkManager 读的文件：一律 LF。
-# 没后缀的脚本（#!/usr/bin/python3）、sudoers、*.conf 变成 CRLF 开机就会坏，
-# 复刻镜像构建脚本也会拒绝带 CR 的 overlay（见 software/image/README.md）。
+# Files executed directly on the duck, or read by systemd / sudo / sshd / NetworkManager: always LF.
+# Extensionless scripts (#!/usr/bin/python3), sudoers and *.conf break at boot if they become CRLF,
+# and the replica image build script also rejects overlays containing CR (see software/image/README.md).
 software/image/overlay/**        text eol=lf
 software/image/calib/**          text eol=lf
 software/image/tests/fixtures/** text eol=lf

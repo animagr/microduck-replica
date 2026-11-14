@@ -1,13 +1,13 @@
-"""IMU 页的后端：给页面推 IMU 的状态，接页面的指令（照 servo_ops 的 handle 写法）。
+"""Backend of the IMU page: pushes IMU state to the page and handles the page's commands (written like servo_ops's handle).
 
-方案：scratchpad console/imu-page-plan.md（子代理 10-18 写的，带出处）。这一步只接「现在就能做」的：
-- view()：芯片、读数状态、安装方向（每种芯片各存一份）、最近一次站着校准的时间；
-- solve：页面采到的读数交给 imu_calib.solve 算安装方向（纯计算）。
+Plan: scratchpad console/imu-page-plan.md (written by a subagent on 10-18, with sources). This step only hooks up what "can be done now":
+- view(): chip, reading status, mount orientation (one stored per chip type), time of the latest standing calibration;
+- solve: hand the readings sampled by the page to imu_calib.solve to compute the mount orientation (pure computation).
 
-完整站着校完、结果 ok 的那一份记进 state 目录的 imu-pending.json（Studio 重启也不丢），最后由上手清单
-的「写进主程序」一次写进 robotd。出厂镜像跑标定模式：粗校从 busStatus.last_sample.imu 采静止和前倾，
-算完直接交给主程序的 verify-imu（摆正 ≤5°，20 秒内往前低头 15–30°），主程序自己写标定文件。
-总线板卡由主程序启动时自动识别；I²C 芯片检测仍用 microduck-firstboot。
+The one from a complete standing calibration with an ok result is recorded in imu-pending.json in the state directory (survives a Studio restart), and finally the onboarding checklist's
+"write to the main program" writes it into robotd in one go. When the factory image runs commissioning mode: the rough calibration samples still and lean-forward from busStatus.last_sample.imu,
+and once computed hands it directly to the main program's verify-imu (level ≤5°, lean forward 15–30° within 20 seconds); the main program writes the calibration file itself.
+The bus board is auto-detected by the main program at startup; I²C chip detection still uses microduck-firstboot.
 """
 import asyncio
 import json
@@ -21,17 +21,17 @@ from .rpc import RpcError, Timeout, Unreachable, call_once
 from .startup_status import imu_context_current, imu_diagnostic
 from .estop import STARTING_PHASES
 
-MAX_SAMPLES = 6000          # 一次 solve 最多收这么多读数（5 步 × 每步 ≤ 600 还有富余），防页面发个巨包
+MAX_SAMPLES = 6000          # max readings accepted per solve (5 steps × ≤ 600 per step, with room to spare), guards against the page sending a huge packet
 ON_DUCK = ("总线 ID 200 的 IMU 由主程序启动时自动识别。I²C IMU 要在第一次开机前接好；之后才接的，要用 SSH 运行 "
            "sudo microduck-firstboot --detect-imu-only --force")
-# 「核对过」的门槛（总览重排审查 O4）：站着完整校一次，算出来的跟主程序现在用的方向差 < 2°、站姿倾斜 ≤ 5°
-# （5° 是 imu_calib RULES 的 stand_confirm_deg：robotd 自己验方向时直立只放 5°）
+# Threshold for "checked" (overview reshuffle review O4): one complete standing calibration, result differs from the orientation the main program currently uses by < 2°, standing tilt ≤ 5°
+# (5° is imu_calib RULES' stand_confirm_deg: when robotd verifies orientation itself it only allows 5° for upright)
 CHECK_MAX_DIFF_DEG = 2.0
 IMU_VERIFICATION_CONTRACT = "upright_nose_down_v1"
 
 
 class Refused(Exception):
-    """这个操作现在不能做，原因直接给页面看。"""
+    """This operation can't be done right now; the reason goes straight to the page."""
 
 
 def imu_bus_metadata(bus):
@@ -63,7 +63,7 @@ def imu_bus_metadata(bus):
 
 
 def bus_imu_of(bus):
-    """实际探测到的总线协议和板卡；运动模式在 native，标定模式在顶层。"""
+    """The actually detected bus protocol and board; in native for motion mode, at the top level for commissioning mode."""
     info, _configured, _error = imu_bus_metadata(bus)
     if info is None:
         return None
@@ -120,16 +120,16 @@ def calibration_context(bus, source, redo):
 
 
 def mount_of(bus, calib):
-    """(用的哪颗芯片, {"quat", "verified"} 或 None)。IMU 页和总览上手清单共用这一个挑法（审查 C3）：
-    先看 calibration-status 顶上 robotd 挑好的 imu_mount，再看 imu_mounts[芯片]，最后才是总线小板那一份。
-    别拿 calibration.imu_mount_verified 判模块 IMU（那是总线小板的）。"""
+    """(which chip is used, {"quat", "verified"} or None). The IMU page and the overview onboarding checklist share this one selection (review C3):
+    first look at the imu_mount robotd picked at the top of calibration-status, then imu_mounts[chip], and only last the bus board's.
+    Don't use calibration.imu_mount_verified to judge a module IMU (that's the bus board's)."""
     bus = bus if isinstance(bus, dict) else {}
     native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
     calib = calib if isinstance(calib, dict) else {}
     cal = calib.get("calibration") if isinstance(calib.get("calibration"), dict) else calib
-    # 用的哪颗芯片：busStatus 的 native.imu_source；robotd 卡在等总线时 busStatus 里没有它，
-    # 退到 calibration-status 顶上的 imu_source（模块芯片别被当成总线小板，IMU 子代理复核 #4）；
-    # 两边都没有、但 busStatus 有 native → 总线小板（方案 6.5）
+    # Which chip is used: native.imu_source in busStatus; when robotd is stuck waiting for the bus it's not in busStatus,
+    # fall back to imu_source at the top of calibration-status (so a module chip isn't taken as the bus board, IMU subagent re-review #4);
+    # neither has it, but busStatus has native → bus board (plan 6.5)
     last_sample = bus.get("last_sample") if isinstance(bus.get("last_sample"), dict) else {}
     sample = last_sample.get("imu") if isinstance(last_sample.get("imu"), dict) else {}
     source = (native.get("imu_source") or sample.get("source") or calib.get("imu_source")
@@ -137,7 +137,7 @@ def mount_of(bus, calib):
     top = calib.get("imu_mount") if isinstance(calib.get("imu_mount"), dict) else None
     mounts = cal.get("imu_mounts") if isinstance(cal.get("imu_mounts"), dict) else {}
     if top and top.get("quat") and calib.get("imu_source") in (None, source):
-        mount = {"quat": top.get("quat"), "verified": top.get("verified")}     # robotd 自己挑好的那份
+        mount = {"quat": top.get("quat"), "verified": top.get("verified")}     # the one robotd picked itself
     elif source in mounts and isinstance(mounts[source], dict):
         mount = {"quat": mounts[source].get("quat"), "verified": mounts[source].get("verified")}
     elif cal.get("imu_mount_quat"):
@@ -159,14 +159,14 @@ class ImuBackend:
         self._capture_basis = None
         self._result_basis = None
         self._verify_lock = asyncio.Lock()
-        self.job = None              # 粗校采数 / 交给主程序验证的进度
-        self.detected = None         # 最近一次识别芯片的结果（这一步还没有）
-        self.last_result = None      # 最近一次 solve 的结果：写入只认这一份
-        # 总览上手清单的「IMU 核对过」记录（审查 O4）：app 接上 Onboarding.note_imu_check。不是写入鸭子：写入照旧要上鸭子再接
+        self.job = None              # progress of rough-calibration sampling / handing to the main program for verification
+        self.detected = None         # result of the latest chip detection (not in this step yet)
+        self.last_result = None      # result of the latest solve: writing only accepts this one
+        # The overview onboarding checklist's "IMU checked" record (review O4): app hooks up Onboarding.note_imu_check. Not writing to the duck: writing still has to be hooked up on the duck
         self.on_check = None
-        self.commit = None           # 写进主程序的后端（app 接上）：标定模式「站姿使能」要跟它同一套方向
+        self.commit = None           # backend for writing to the main program (hooked up by app): commissioning-mode "stance enable" must use the same set of directions
 
-    # ---- 推给页面 ----
+    # ---- Pushed to the page ----
 
     def view(self):
         bus = self.rd.bus.value if isinstance(self.rd.bus.value, dict) else {}
@@ -174,7 +174,7 @@ class ImuBackend:
         if not current:
             bus = {}  # Preserve the raw cache; expired metadata cannot bind a board or mounting.
         native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
-        # 标定状态只认这次 hello 之后读到的（总览重排审查 O5：robotd 重启后旧的「已确认」不能当真）
+        # Only trust calibration status read after this hello (overview reshuffle review O5: the old "confirmed" can't be trusted after robotd restarts)
         calib = fresh_calib(self.rd) if current else None
         source, mount = mount_of(bus, calib)
         redo = self._redo_view(bus, source)
@@ -412,10 +412,10 @@ class ImuBackend:
         except (OSError, ValueError):
             return None
 
-    # ---- 页面的指令 ----
+    # ---- Page commands ----
 
     async def _bus_once(self):
-        """标定模式采数走新连接直接读 busStatus；测试 / 台架没有地址时退到已缓存的那份。"""
+        """Commissioning-mode sampling reads busStatus directly over a new connection; tests / bench without an address fall back to the cached one."""
         addr = getattr(self.rd, "addr", None)
         if addr and addr != "none":
             r = await call_once(addr, "robot.busStatus", {}, timeout=1.5, name="粗校读数")
@@ -424,7 +424,7 @@ class ImuBackend:
         return v if isinstance(v, dict) else {}
 
     async def _rpc_once(self, method, params, timeout, name):
-        """新开一条连接问一次。台架 / 测试里的假 rd 没有地址时，退到它的 cmd 连接。"""
+        """Open a new connection and ask once. When the fake rd on a bench / in tests has no address, fall back to its cmd connection."""
         addr = getattr(self.rd, "addr", None)
         if addr and addr != "none":
             return await call_once(addr, method, params, timeout=timeout, name=name)
@@ -539,9 +539,9 @@ class ImuBackend:
         return msg + "。主程序什么都没存（Nothing saved）"
 
     async def _hold(self, by=None):
-        """标定模式「站姿使能」（用户 10-21：「咱标定也能站姿不就好了吗？非要切到运动模式」）。
-        fork 标定模式的 hold-home：15 颗一起 3 秒转到 HOME、锁住，IMU 照常读，站着校准就在标定模式里做。
-        方向跟第 3 步「写进主程序」同一套，零位用主程序文件里的（出厂 2048）。失能 = 顶上的「卸力」（robot.relax）。"""
+        """Commissioning-mode "stance enable" (user on 10-21: "Why can't calibration just have a stance too? Why insist on switching to motion mode").
+        The fork's commissioning-mode hold-home: all 15 servos turn to HOME together over 3 seconds and lock, the IMU reads as usual, and standing calibration is done inside commissioning mode.
+        Directions are the same set as step 3 "write to the main program"; zero positions come from the main program's file (factory 2048). Disable = the "relax" at the top (robot.relax)."""
         bus = await self._bus_once()
         if self._redo_busy or (self.job and not self.job.get("done") and not self.job.get("failed")):
             raise Refused("正在采数、验证或切换站姿：等当前操作完成再使能")
@@ -559,7 +559,7 @@ class ImuBackend:
         self._redo_busy = True
         try:
             try:
-                # fork 的 command_timeout：3 秒爬升 + 2 秒稳住 + 10 秒；再加余量
+                # the fork's command_timeout: 3 s ramp + 2 s settle + 10 s; plus a margin
                 r = await self._rpc_once("robot.busCommand",
                                          {"action": "hold-home", "directions": dirs, "duration_ms": 3000},
                                          20.0, "站姿使能")
@@ -631,7 +631,7 @@ class ImuBackend:
         self.job = {"kind": "coarse", "title": "交给主程序验证",
                     "msg": "摆正，然后 20 秒内往前低头 15–30°", "target_deg": 20}
         try:
-            # fork 的 command_timeout 是 20 秒窗口 + 10 秒；再加 5 秒余量
+            # the fork's command_timeout is a 20-second window + 10 s; plus a 5-second margin
             r = await self._rpc_once("robot.busCommand",
                                      {"action": "verify-imu", "confirmed": True, "mount_wxyz": mount},
                                      35.0, "验证 IMU 方向")
@@ -792,7 +792,7 @@ class ImuBackend:
             mode = args.get("mode", "full")
             if mode not in ("full", "coarse"):
                 raise Refused(f"不认识的校准方式：{mode}")
-            # 旧方向只认主程序那份（不收页面传的），页面传来的 rules / home_gravity 也不透传（审查 A3）
+            # The old orientation only comes from the main program (not from the page), and rules / home_gravity sent by the page aren't passed through either (review A3)
             view = self.view()
             if view.get("profile_error"):
                 raise Refused(view["profile_error"])
@@ -831,7 +831,7 @@ class ImuBackend:
                         from .commit import save_pending
                         save_pending(self.state_dir, view["source"], res.get("mount"), res.get("quality"), by,
                                      imu_bus=view.get("imu_bus"))
-                    except Exception as e:  # noqa: BLE001 —— 存不下不影响这一次的结果给页面看
+                    except Exception as e:  # noqa: BLE001 —— failing to save doesn't affect showing this result to the page
                         self.log.error("这次的 IMU 方向没记下来", cat="IMU", raw=f"{type(e).__name__}: {e}", exc=True,
                                        hint="重校的时候还会再记一次；一直不行就导出诊断包")
                     res["check"] = self._check(res, view, old, old_verified, by)
@@ -862,8 +862,8 @@ class ImuBackend:
         raise Refused(f"不认识的指令：{op}")
 
     def _check(self, res, view, old, old_verified, by):
-        """完整站着校完（solve full、ok）：跟主程序现在用的方向比一比，够近就给上手清单记一笔「核对过」（审查 O4）。
-        只记一笔核对，**不往鸭子写任何东西**（写入要上鸭子再接）。回给页面看的 {recorded, diff_deg, tilt_deg, why}。"""
+        """Complete standing calibration done (solve full, ok): compare with the orientation the main program currently uses, and if close enough record "checked" in the onboarding checklist (review O4).
+        Only records a check, **writes nothing to the duck** (writing has to be hooked up on the duck). Returns {recorded, diff_deg, tilt_deg, why} for the page."""
         parts = res.get("parts") or {}
         diff, tilt = parts.get("total_deg"), parts.get("stand_tilt_deg")
         why = None
@@ -879,12 +879,12 @@ class ImuBackend:
         ok = why is None
         out = {"recorded": False, "ok": ok, "diff_deg": diff, "tilt_deg": tilt, "why": why}
         hook = self.on_check
-        # 方向没确认过的不记（清单那一步本来就是「没做」）；差得多的也记：最近一次核对说「差 x°」，清单照实写「要重做」
+        # Don't record if the orientation was never confirmed (that checklist step is simply "not done"); record even if it differs a lot: the latest check says "off by x°", and the checklist honestly says "needs redoing"
         if hook is not None and old and old_verified and isinstance(diff, (int, float)):
             try:
                 out["recorded"] = bool(hook({"source": view["source"], "quat": old, "verified": True,
                                              "diff_deg": diff, "tilt_deg": tilt, "ok": ok, "by": by}))
-            except Exception as e:  # noqa: BLE001 —— 记不上不影响算方向
+            except Exception as e:  # noqa: BLE001 —— failing to record doesn't affect computing the orientation
                 self.log.error("记「IMU 核对过」时出错", cat="IMU", raw=f"{type(e).__name__}: {e}", exc=True,
                                hint="这是 Studio 的问题；校准结果照常能看")
         if ok:

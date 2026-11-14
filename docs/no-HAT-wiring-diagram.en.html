@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microduck replica · No-HAT wiring diagram</title>
+<!--
+  This is the source file: the wiring topology is inline SVG, the rest is HTML.
+  To swap a module, change a pin or update a price, edit this file directly; open it in a browser and you get the new diagram.
+  Companion guide: ../docs/不打HAT.md
+  Printing: Ctrl+P in the browser, choose A3 landscape paper, margins 0.
+-->
+<style>
+  body { margin: 0; background: #e6e3dd; }
+  .page { margin: 28px auto; box-shadow: 0 3px 16px rgba(0,0,0,.18); }
+  a { color: #1f5f7a; } a:hover { color: #164659; }
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; }
+    @page { size: A3 landscape; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page" style="width: 1587px; height: 1123px; box-sizing: border-box; background: #f6f4f0; color: #1a1815; font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; padding: 34px 40px 28px; display: flex; flex-direction: column; gap: 18px;">
+
+  <!-- ═══ Title ═══ -->
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 3px solid #1a1815; padding-bottom: 12px;">
+    <div>
+      <div style="font-size: 38px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1;">Microduck replica · Full wiring diagram</div>
+      <div style="font-size: 19px; color: #57524a; margin-top: 7px;">Feetech servo route · <strong style="color:#1a1815;">no HAT board</strong>, replaced by a buck converter + half-duplex adapter board</div>
+    </div>
+    <div style="text-align: right; font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 13px; color: #6b655c; line-height: 1.7;">
+      Controller Radxa Zero 3W (RK3566)<br>
+      Servos Feetech HD-1910-C001 × 15<br>
+      Battery NP-F550 2S
+    </div>
+  </div>
+
+  <!-- ═══ Two warnings ═══ -->
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px;">
+
+    <div style="background: #fbf0e4; border: 2px solid #b3452f; border-left-width: 9px; padding: 15px 19px; display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 20px; font-weight: 700; color: #8f3524; display: flex; align-items: center; gap: 9px;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8f3524" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        Fully charged battery = servo voltage limit, zero margin
+      </div>
+      <div style="font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 15px; line-height: 1.85; background: #fff8ef; border: 1px solid #e0c3ab; padding: 9px 12px;">
+        NP-F550 full &nbsp;<strong style="color:#8f3524;">8.4 V</strong><br>
+        HD-1910 max <strong style="color:#8f3524;">8.4 V</strong> &nbsp;(range 4 – 8.4 V)
+      </div>
+      <div style="font-size: 15px; line-height: 1.65; color: #4a443c;">
+        Right after charging it runs right at the servo's <strong>absolute maximum</strong>. Only when the voltage sags under load to 6.6–8.2 V is it back in the safe zone.
+        <strong style="color:#8f3524;">Do not do stall tests on a full battery</strong>; for long-term storage, store at 3.8 V/cell.
+      </div>
+    </div>
+
+    <div style="background: #fbf0e4; border: 2px solid #b3452f; border-left-width: 9px; padding: 15px 19px; display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 20px; font-weight: 700; color: #8f3524; display: flex; align-items: center; gap: 9px;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8f3524" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        Feetech pin order is the exact reverse of Dynamixel
+      </div>
+      <div style="font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 14px; line-height: 1.85; background: #fff8ef; border: 1px solid #e0c3ab; padding: 9px 12px;">
+        Feetech AMP2.0-3P&nbsp;&nbsp;<span style="color:#1f5f7a;">1=Signal</span> &nbsp;2=Vcc &nbsp;<span style="color:#4a443c;">3=GND</span><br>
+        DXL &nbsp;JST EH&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#4a443c;">1=GND</span> &nbsp;&nbsp;&nbsp;&nbsp;2=Vcc &nbsp;<span style="color:#1f5f7a;">3=Signal</span>
+      </div>
+      <div style="font-size: 15px; line-height: 1.65; color: #4a443c;">
+        The two have different pitches (<strong>2.0 vs 2.5 mm</strong>) and <strong style="color:#8f3524;">will not fit into each other</strong> — so mis-plugging is physically prevented, and the only remaining risk is crimping your own cable backwards.
+        <strong>After crimping, check every wire with a multimeter before powering on.</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Main wiring diagram ═══ -->
+  <div style="flex-grow: 1; background: #fffefb; border: 2px solid #1a1815; padding: 16px 20px 10px; display: flex; flex-direction: column;">
+
+    <div style="display: flex; align-items: center; gap: 26px; margin-bottom: 6px;">
+      <div style="font-size: 17px; font-weight: 700;">Wiring topology</div>
+      <div style="display: flex; gap: 20px; font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 13px; color: #57524a;">
+        <span style="display:flex; align-items:center; gap:7px;"><span style="width:24px; height:5px; background:#b3452f; display:inline-block;"></span>Raw battery voltage 6.6–8.4 V</span>
+        <span style="display:flex; align-items:center; gap:7px;"><span style="width:24px; height:5px; background:#c07818; display:inline-block;"></span>+5 V</span>
+        <span style="display:flex; align-items:center; gap:7px;"><span style="width:24px; height:5px; background:#1f5f7a; display:inline-block;"></span>Signal 3.3 V</span>
+        <span style="display:flex; align-items:center; gap:7px;"><span style="width:24px; height:5px; background:#3d3a35; display:inline-block;"></span>GND (common ground required)</span>
+      </div>
+    </div>
+
+    <svg viewBox="0 0 1500 452" style="width: 100%; height: auto;" font-family="ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+        </marker>
+      </defs>
+
+      <!-- ── Battery ── -->
+      <rect x="8" y="150" width="196" height="132" rx="4" fill="#fbeeea" stroke="#b3452f" stroke-width="2.5"/>
+      <text x="106" y="180" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1815">NP-F550</text>
+      <text x="106" y="203" text-anchor="middle" font-size="14" fill="#57524a">2S Li-ion battery</text>
+      <text x="106" y="234" text-anchor="middle" font-size="17" font-weight="600" fill="#8f3524">6.6 – 8.4 V</text>
+      <text x="106" y="258" text-anchor="middle" font-size="12.5" fill="#6b655c">Full 8.4 · loaded 6.6–8.2</text>
+      <text x="106" y="275" text-anchor="middle" font-size="12.5" fill="#6b655c">+ battery holder &amp; tap plate</text>
+
+      <!-- Battery → buck converter (5V branch) -->
+      <path d="M 204 186 H 246 V 74 H 300" stroke="#b3452f" stroke-width="4" fill="none" marker-end="url(#ar)"/>
+      <!-- Battery → switch → fuse → servo bus (direct battery voltage) -->
+      <path d="M 204 246 H 246 V 432 H 936" stroke="#b3452f" stroke-width="5.5" fill="none" marker-end="url(#ar)"/>
+      <rect x="180" y="306" width="132" height="72" rx="4" fill="#fff" stroke="#b3452f" stroke-width="2.5"/>
+      <text x="246" y="330" text-anchor="middle" font-size="14" font-weight="600" fill="#8f3524">Power switch</text>
+      <text x="246" y="352" text-anchor="middle" font-size="14" font-weight="600" fill="#8f3524">+ 5 A fuse</text>
+      <text x="246" y="370" text-anchor="middle" font-size="11.5" fill="#6b655c">Li shorts spew fire</text>
+      <text x="258" y="400" font-size="12.5" font-weight="600" fill="#8f3524">Main line 18–20 AWG</text>
+      <text x="258" y="416" font-size="12.5" font-weight="600" fill="#8f3524">silicone wire, no Dupont wires</text>
+
+      <!-- ── Buck converter module ── -->
+      <rect x="300" y="26" width="212" height="96" rx="4" fill="#fdf4e6" stroke="#c07818" stroke-width="2.5"/>
+      <text x="406" y="52" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">Buck converter</text>
+      <text x="406" y="75" text-anchor="middle" font-size="14" fill="#57524a">6–9 V → 5 V / ≥2 A</text>
+      <text x="406" y="97" text-anchor="middle" font-size="12.5" fill="#6b655c">UBEC or MP1584 sync. buck</text>
+      <text x="406" y="114" text-anchor="middle" font-size="12.5" fill="#8f3524">No LM2596 · 470µF across input</text>
+
+      <!-- Buck converter → Radxa 5V -->
+      <path d="M 512 74 H 596" stroke="#c07818" stroke-width="4" fill="none" marker-end="url(#ar)"/>
+      <text x="554" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#a06412">+5 V</text>
+
+      <!-- ── Radxa ── -->
+      <rect x="600" y="26" width="286" height="220" rx="4" fill="#eef4f7" stroke="#1f5f7a" stroke-width="2.5"/>
+      <text x="743" y="53" text-anchor="middle" font-size="18" font-weight="600" fill="#1a1815">Radxa Zero 3W</text>
+      <text x="743" y="73" text-anchor="middle" font-size="12.5" fill="#57524a">RK3566 · 40-pin header (solder yourself)</text>
+      <line x1="618" y1="86" x2="868" y2="86" stroke="#b9cdd7" stroke-width="1.5"/>
+
+      <text x="620" y="110" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#a06412">pin 2 / 4</tspan>  +5V input</text>
+      <text x="620" y="135" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#1f5f7a">pin 8</tspan>  UART2_TX  GPIO0_D1</text>
+      <text x="620" y="160" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#1f5f7a">pin 10</tspan> UART2_RX  GPIO0_D0</text>
+      <text x="620" y="183" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#1f5f7a">pin 3 / 5</tspan> I2C SDA / SCL</text>
+      <text x="620" y="205" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#8f3524">pin 1</tspan>  3.3V → adapter logic</text>
+      <text x="620" y="227" font-size="13.5" fill="#1a1815"><tspan font-weight="600" fill="#8f3524">pin 17</tspan> 3.3V → ToF</text>
+      <text x="620" y="243" font-size="12" fill="#6b655c">pin 3/5 have onboard pull-ups; none needed for ext. I²C</text>
+
+      <!-- Radxa → ToF -->
+      <path d="M 886 150 H 936" stroke="#1f5f7a" stroke-width="3.5" fill="none" marker-end="url(#ar)"/>
+      <text x="911" y="140" text-anchor="middle" font-size="12" fill="#1f5f7a">I²C</text>
+
+      <!-- ── ToF ── -->
+      <rect x="940" y="98" width="196" height="120" rx="4" fill="#eef4f7" stroke="#1f5f7a" stroke-width="2.5"/>
+      <text x="1038" y="124" text-anchor="middle" font-size="16" font-weight="600" fill="#1a1815">VL53L8CX</text>
+      <text x="1038" y="146" text-anchor="middle" font-size="13" fill="#57524a">8×8 multizone ToF</text>
+      <text x="1038" y="166" text-anchor="middle" font-size="12.5" fill="#6b655c">Addr 0x29 / 0x52 · 400 kHz</text>
+      <text x="1038" y="185" text-anchor="middle" font-size="12.5" fill="#1a1815">SDA←pin3 &nbsp;SCL←pin5</text>
+      <text x="1038" y="203" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f3524">3V3←pin 17 &nbsp;GND←pin 6</text>
+
+      <!-- Radxa → adapter board: signal + 3.3V logic supply -->
+      <path d="M 700 246 V 292" stroke="#1f5f7a" stroke-width="3.5" fill="none" marker-end="url(#ar)"/>
+      <text x="712" y="268" font-size="12.5" fill="#1f5f7a">pin 8 / 10 / 6</text>
+      <text x="712" y="284" font-size="12" fill="#6b655c">TX↔RX crossed</text>
+      <path d="M 840 246 V 292" stroke="#1f5f7a" stroke-width="3" stroke-dasharray="5 4" fill="none" marker-end="url(#ar)"/>
+      <text x="852" y="276" font-size="12.5" font-weight="600" fill="#8f3524">pin 1 · 3.3V</text>
+
+      <!-- ── Half-duplex adapter board ── -->
+      <rect x="600" y="296" width="286" height="118" rx="4" fill="#eef4f7" stroke="#1f5f7a" stroke-width="2.5"/>
+      <text x="743" y="322" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">Half-duplex adapter board</text>
+      <text x="743" y="344" text-anchor="middle" font-size="13" fill="#57524a">ST/SC series · TTL or USB version ¥22</text>
+      <text x="743" y="366" text-anchor="middle" font-size="12.5" fill="#6b655c">Replaces the HAT's 1G125+1G126 direction circuit</text>
+      <text x="743" y="386" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f3524">Logic supply from 3.3V only; 5V kills the controller</text>
+      <text x="743" y="405" text-anchor="middle" font-size="12" fill="#6b655c">USB version is easier, but serial becomes /dev/ttyUSB0</text>
+
+      <!-- Adapter board → bus DATA -->
+      <path d="M 886 356 H 936" stroke="#1f5f7a" stroke-width="4" fill="none" marker-end="url(#ar)"/>
+      <text x="911" y="346" text-anchor="middle" font-size="12" fill="#1f5f7a">DATA</text>
+
+      <text x="620" y="423" text-anchor="middle" font-size="13" font-weight="600" fill="#8f3524">VDD 6.6–8.4 V ← servos run on raw battery voltage</text>
+
+      <!-- ── Servo bus ── -->
+      <rect x="940" y="296" width="552" height="146" rx="4" fill="#fbeeea" stroke="#b3452f" stroke-width="2.5"/>
+      <text x="1216" y="322" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1815">Feetech servo bus — 1 Mbps half-duplex single wire</text>
+      <line x1="958" y1="334" x2="1474" y2="334" stroke="#e0c3ab" stroke-width="1.5"/>
+      <text x="958" y="358" font-size="13.5" fill="#1a1815">HD-1910-C001 × 15, daisy-chained</text>
+      <text x="958" y="380" font-size="12.5" fill="#6b655c">Rated 690 mA@6V · stall 1.6 A@6V · idle 20 mA</text>
+      <text x="958" y="404" font-size="13.5" fill="#1a1815">imu_to_dxl homemade board — 16th device on the bus</text>
+      <text x="958" y="426" font-size="12.5" fill="#6b655c">J4 / J5 = PH 2.0 mm, pin order drawn for Feetech (1=DATA 2=VDD 3=GND)</text>
+
+      <!-- GND common-ground rail -->
+      <path d="M 106 282 V 452" stroke="#3d3a35" stroke-width="3" fill="none"/>
+      <path d="M 106 452 H 1216" stroke="#3d3a35" stroke-width="3" fill="none"/>
+      <path d="M 406 122 V 452" stroke="#3d3a35" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
+      <path d="M 743 414 V 452" stroke="#3d3a35" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
+      <path d="M 1216 442 V 452" stroke="#3d3a35" stroke-width="3" fill="none"/>
+      <text x="150" y="446" font-size="13" font-weight="600" fill="#3d3a35">GND common rail — battery negative · buck output ground · controller · servo bus: all four must be tied together</text>
+    </svg>
+  </div>
+
+  <!-- ═══ Bottom four columns ═══ -->
+  <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
+
+    <div style="background: #fffefb; border: 2px solid #1a1815; padding: 12px 15px;">
+      <div style="font-size: 15.5px; font-weight: 700; margin-bottom: 8px;">What to buy (about ¥70)</div>
+      <div style="font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.95; color: #33302b;">
+        Sync. buck 5V/2A ····· ¥15<br>
+        Half-duplex adapter ·· ¥22<br>
+        Fuse holder + 5A fuse  ¥5<br>
+        Power switch ≥5A ····· ¥5<br>
+        2×20 2.54 pin header · ¥1<br>
+        18AWG silicone (main)  ¥10<br>
+        Dupont / JST wiring ·· ¥10
+      </div>
+      <div style="font-size: 12px; color: #57524a; margin-top: 8px; line-height: 1.55;">
+        Compare: prototyping and assembling the HAT (4 layers · double-sided · 110 parts) costs over ¥1,000.
+      </div>
+    </div>
+
+    <div style="background: #fbf0e4; border: 2px solid #b3452f; padding: 12px 15px;">
+      <div style="font-size: 15.5px; font-weight: 700; margin-bottom: 8px; color: #8f3524;">⚠ Three ways to burn things</div>
+      <div style="display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 7px 8px; font-size: 12.5px; line-height: 1.5; color: #33302b;">
+        <strong style="color:#8f3524;">1</strong><span><strong>Power the adapter board logic from 3.3V only</strong> (pin 1). On 5V, its TX drives 5V levels into the controller's 3.3V RX pin.</span>
+        <strong style="color:#8f3524;">2</strong><span><strong>5V fed into the 40-pin header is unprotected</strong>: it bypasses the board's own input protection, and <strong>reversed polarity kills the board instantly</strong>. Measure polarity and voltage before plugging in.</span>
+        <strong style="color:#8f3524;">3</strong><span><strong>Do not use Dupont wires for the servo main line.</strong> 15 servos peak at several amps; 24–28AWG Dupont wire only handles about 1A and will get hot or even melt its insulation.</span>
+      </div>
+    </div>
+
+    <div style="background: #fffefb; border: 2px solid #1a1815; padding: 12px 15px;">
+      <div style="font-size: 15.5px; font-weight: 700; margin-bottom: 8px;">What you lose without the HAT</div>
+      <div style="font-size: 12.5px; line-height: 1.75; color: #33302b;">
+        · Onboard audio (codec + amplifier + mic)<br>
+        · <strong style="color:#8f3524;">Shutdown detect signal LM5050-1 · IO_06</strong><br>
+        · Pi HAT+ identification (the EEPROM is not populated anyway)<br>
+        · Onboard BMI088 (the official software does not use it anyway)
+      </div>
+      <div style="font-size: 12px; color: #8f3524; margin-top: 8px; line-height: 1.55; border-top: 1px solid #e2ddd4; padding-top: 7px;">
+        No shutdown signal + microSD = hard power cuts easily corrupt the filesystem. <strong>Shut down in software first, then cut power.</strong>
+      </div>
+    </div>
+
+    <div style="background: #fffefb; border: 2px solid #1a1815; padding: 12px 15px;">
+      <div style="font-size: 15.5px; font-weight: 700; margin-bottom: 8px;">Check each item before power-on</div>
+      <div style="display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 5px 8px; font-size: 12.5px; line-height: 1.45; color: #33302b;">
+        <strong>1</strong><span>All four grounds connected (multimeter continuity mode)</span>
+        <strong>2</strong><span>Buck no-load output 5.0 V ±0.2, <strong>polarity</strong></span>
+        <strong>3</strong><span>Servo cable Signal / Vcc / GND not crimped backwards</span>
+        <strong>4</strong><span>Adapter board TX / RX crossed<br><span style="color:#6b655c; font-size:11.5px;">RX on the module silkscreen goes to the controller's TX</span></span>
+        <strong>5</strong><span><span style="font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace; font-size: 11.5px;">systemctl mask serial-getty@ttyS2</span><br><span style="color:#6b655c; font-size:11.5px;">otherwise agetty holds the serial port and the servos will not move</span></span>
+        <strong>6</strong><span>Servo IDs already set one by one with the debug board</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #8a847a; font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;">
+    <span><strong style="color:#8f3524;">⚠ This diagram has not been verified on real hardware</strong> — derived from documentation and datasheets: pins from Radxa's official hardware docs, servo parameters from Feetech's 《HD-1910-C001 串型规格书》 (HD-1910-C001 serial-type datasheet) A/0 (2026-09-07)</span>
+    <span>Third-party replica material, not affiliated with Pollen Robotics · github.com/fanhao375/microduck-replica</span>
+  </div>
+
+</div>
+</body>
+</html>

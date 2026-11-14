@@ -1,51 +1,51 @@
-// IMU 页：看现在的姿态、选芯片、站着校安装方向。
-// 用户 10-18：「开启采集读数，官方站姿的时候收集左移右移前移后移，让代码自己去校准，校准成功写进去保存；旁边有鸭子的 3D」；
-// 接进 Studio 以后又定了流程：「点开始采集，采集开始，然后再点采集结束，采集完了，然后自动化校准」「大家装的都不一样，需要重新 offset 一下」。
+// IMU page: see the current attitude, choose the chip, calibrate the mounting orientation while standing.
+// User, 10-18: "Start capturing readings, collect left/right/forward/backward tilts in the official standing pose, let the code calibrate itself, and write and save it once calibration succeeds; with a 3D duck alongside";
+// after integrating into Studio the flow was settled: "click start capture, capture begins, then click end capture, capture done, then calibrate automatically" "everyone assembles theirs differently, so the offset needs to be redone".
 //
-// - 一个大按钮三种状态：开始采集 → 采集中…（点这里结束）→ 正在算… → 出结果。
-// - 采集中：先在桌上静止 3 秒；然后前、后、左、右各倾一次（顺序随便），每一步先端平停半秒当零点，再倾、停 1 秒。
-//   3D 上一条弯箭头示范下一步往哪倾；做够一个方向，那个方向的圆点亮、响一声短的（Web Audio 自己合成，能静音）。
-//   五步齐了自动结束；中途点结束，缺哪步就说哪步，接着采或重来。
-// - 算完：3D 变成「校准前 / 校准后」两只并排，竖直参考线 + 大字倾角，下面写差了几度；再下面是写入（后端现在拒，上鸭子才接）。
-//   完整站着校完、跟主程序现在用的方向差 < 2°、站姿倾斜 ≤ 5°：后端给总览的上手清单记一笔「核对过」（res.check；只是记录，
-//   不往鸭子写任何东西：总览重排审查 O4）。
-//   没过：写原因，只让人补做没过的那几步（后端回的 redo）。
-// - 「停住了没有」「端平的那一下」两条规则跟 studio/imu_calib.py 的 find_hold / find_ref 一句一句对应，参数同名（RULES 上半截）；
-//   前端只是更严（倾 ≥12°、≤30°、停满 1 秒、方向离前后左右之一 ≤35°），前端放行的后端一定收。
-//   方向由后端算：link.cmd('imu.op', {op:'solve', samples})，samples 是平铺列表 [{step, t, g}]。
-//   端到端测试：tests/imu_wizard_e2e.mjs 喂读数给这里的向导，tests/test_imu_wizard_e2e.py 把采到的交给 Python 算。
-// - 后端（studio/imu.py）接 solve / coarse-capture / verify：出厂标定模式下用 busStatus.last_sample.imu
-//   采「静止 + 前倾」，算完交给主程序的 verify-imu（摆正 ≤5°，20 秒内往前低头 15–30°）写进标定文件。
-//   总线板卡由主程序启动时自动识别；I²C 芯片检测仍用 microduck-firstboot。
+// - One big button with three states: Start capture → Capturing… (click here to finish) → Computing… → result.
+// - While capturing: first hold still on the table for 3 seconds; then tilt forward, back, left and right once each (any order); for each step first hold level for half a second as the zero point, then tilt and hold for 1 second.
+//   A curved arrow on the 3D view demonstrates which way to tilt next; once a direction is done, its dot lights up and a short beep plays (synthesized with Web Audio, can be muted).
+//   Finishes automatically once all five steps are in; if the user clicks finish midway, say which steps are missing, then continue or start over.
+// - After computing: the 3D view becomes two ducks side by side, "before calibration / after calibration", with a vertical reference line + large tilt angle, and below it how many degrees off; below that is writing (the backend currently refuses; only accepted on the duck).
+//   After a full standing calibration with a difference < 2° from the orientation the main program uses now and a standing tilt ≤ 5°: the backend records a "checked" mark on the overview's getting-started checklist (res.check; record only,
+//   nothing is written to the duck: overview re-layout review O4).
+//   Not passed: write the reason and only let the user redo the steps that failed (the redo returned by the backend).
+// - The two rules "has it held still" and "the level moment" correspond line by line to find_hold / find_ref in studio/imu_calib.py, with the same parameter names (top half of RULES);
+//   the frontend is just stricter (tilt ≥12°, ≤30°, hold a full 1 second, direction within ≤35° of one of forward/back/left/right), so whatever the frontend lets through the backend will accept.
+//   The orientation is computed by the backend: link.cmd('imu.op', {op:'solve', samples}), where samples is a flat list [{step, t, g}].
+//   End-to-end tests: tests/imu_wizard_e2e.mjs feeds readings to the wizard here, and tests/test_imu_wizard_e2e.py hands what was captured to Python to compute.
+// - The backend (studio/imu.py) handles solve / coarse-capture / verify: in factory calibration mode it uses busStatus.last_sample.imu
+//   to capture "still + forward tilt", then hands the result to the main program's verify-imu (level ≤5°, nose down 15–30° within 20 seconds), which writes it into the calibration file.
+//   The bus board is detected automatically when the main program starts; I²C chip detection still uses microduck-firstboot.
 import { html, useState, useEffect, useRef } from './vendor/preact-htm.module.js';
 import { Duck3D } from './duck3d.js';
 import { TwoStep } from './confirm.js';
 import { imuDiagnosticCopy } from './startup-status.js';
 
 const RULES = {
-  // ---- 跟 imu_calib.py RULES 同名同值（改一边就要改另一边，端到端测试会抓） ----
+  // ---- Same names and values as imu_calib.py RULES (change one side and you must change the other; the end-to-end tests will catch it) ----
   still_min_n: 15,
   still_max_spread_deg: 1.5,
-  level_deg: 5,              // 端平：离桌上静止这么多以内
-  ref_min_n: 5,              // 端平至少连续这么多个读数
-  ref_spread_deg: 1.5,       // 端平时自己最多晃这么多
-  hold_band_deg: 1.8,        // 停住段：跟最后一个读数差这么多以内（单个乱跳读数跳过）
-  // ---- 前端自己的（比后端严） ----
-  still_s: 3.0,              // 静止采 3 秒
-  hold_min_n: 8,             // 后端 5
-  hold_s: 1.0,               // 停满 1 秒算这个方向做够了
-  tilt_go_deg: 12,           // 后端最少 10°
+  level_deg: 5,              // level: within this much of resting on the table
+  ref_min_n: 5,              // level for at least this many consecutive readings
+  ref_spread_deg: 1.5,       // while level, it may wobble at most this much
+  hold_band_deg: 1.8,        // hold segment: within this much of the last reading (single erratic readings are skipped)
+  // ---- Frontend-only (stricter than the backend) ----
+  still_s: 3.0,              // capture 3 seconds of stillness
+  hold_min_n: 8,             // backend: 5
+  hold_s: 1.0,               // holding a full 1 second counts as this direction done
+  tilt_go_deg: 12,           // backend minimum is 10°
   tilt_target_deg: 15,
-  tilt_max_deg: 30,          // 后端最多 35°
-  dir_max_deg: 35,           // 倾的方向离前后左右之一（按现在的方向）≤ 这么多才认
+  tilt_max_deg: 30,          // backend maximum is 35°
+  dir_max_deg: 35,           // the tilt direction must be within ≤ this much of one of forward/back/left/right (by the current orientation) to count
   stale_ms: 1000,
-  dedupe_ms: 40,             // 没有 state_t_ns 时：两帧的「生成时间」差这么少，当成同一个读数
-  max_step_n: 600,           // 每段最多留这么多个读数（10 Hz 下 1 分钟）
+  dedupe_ms: 40,             // without state_t_ns: if two frames' "generation time" differs by this little, treat them as the same reading
+  max_step_n: 600,           // keep at most this many readings per segment (1 minute at 10 Hz)
 };
 
 const STEPS = ['still', 'fwd', 'back', 'left', 'right'];
 const TILTS = ['fwd', 'back', 'left', 'right'];
-// dir：往这边倾时重力偏向哪（按「现在的方向」，从机身 +x 起逆时针，度）。只用来认方向、画箭头，不参与计算
+// dir: which way gravity shifts when tilting this way (by "the current orientation", counterclockwise from body +x, degrees). Only used to recognize the direction and draw the arrow, not in the computation
 const STEP = {
   still: { cn: '静止站好', short: '静止' },
   fwd: { cn: '前倾', short: '前', dir: 0, how: '头那边往下' },
@@ -53,7 +53,7 @@ const STEP = {
   left: { cn: '左倾', short: '左', dir: 90, how: '鸭子自己的左边往下（站在它后面看，就是你的左边）' },
   right: { cn: '右倾', short: '右', dir: -90, how: '鸭子自己的右边往下（站在它后面看，就是你的右边）' },
 };
-const DIRV = { fwd: [1, 0, 0], back: [-1, 0, 0], left: [0, 1, 0], right: [0, -1, 0] };   // 机身系（= 3D 场景的世界系）
+const DIRV = { fwd: [1, 0, 0], back: [-1, 0, 0], left: [0, 1, 0], right: [0, -1, 0] };   // body frame (= world frame of the 3D scene)
 
 const CHIP_CN = { bus: '总线小板（ID 200）', bno08x: 'BNO085（I²C）', lsm6dsv16x: 'LSM6DSV16X（I²C）' };
 const BUS_BOARD_CN = { ft6: 'FT6', imu_to_dxl: 'IMU-to-DXL', sflp_124_12: 'SFLP 124/12', qinmo: 'Qinmo（已配置）' };
@@ -76,7 +76,7 @@ function imuContext(mode, imu) {
     imu?.redo?.session_id || null, !!imu?.redo?.active]);
 }
 
-// ---------------- 小算术（跟 imu_calib.py 同一套） ----------------
+// ---------------- Small arithmetic (same set as imu_calib.py) ----------------
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -88,14 +88,14 @@ const rad = (d) => d * Math.PI / 180;
 const angle = (a, b) => { const ua = unit(a), ub = unit(b); return ua && ub ? deg(Math.acos(Math.max(-1, Math.min(1, dot(ua, ub))))) : null; };
 const meanDir = (vs) => (vs.length ? unit(vs.reduce((s, v) => [s[0] + v[0], s[1] + v[1], s[2] + v[2]], [0, 0, 0])) : null);
 const spread = (vs) => { const m = meanDir(vs); return m ? Math.max(0, ...vs.map((v) => angle(v, m) ?? 0)) : 0; };
-// 90% 分位（imu_calib.spread_p90_deg）：静止那一步用，一两帧乱跳不算晃
+// 90th percentile (imu_calib.spread_p90_deg): used for the still step, so one or two erratic frames do not count as wobble
 const spreadP90 = (vs) => {
   const m = meanDir(vs);
   if (!m) return 0;
   const ds = vs.map((v) => angle(v, m) ?? 0).sort((a, b) => a - b);
   return ds[Math.floor(0.9 * (ds.length - 1))];
 };
-// imu_calib.trimmed_mean_dir：去掉离平均最远的 10% 再平均（静止那一步定「上」用）
+// imu_calib.trimmed_mean_dir: drop the 10% farthest from the mean, then average again (used in the still step to determine "up")
 const trimmedMeanDir = (vs) => {
   const m = meanDir(vs);
   if (!m) return null;
@@ -105,7 +105,7 @@ const trimmedMeanDir = (vs) => {
 const okVec = (g) => Array.isArray(g) && g.length === 3 && g.every((x) => typeof x === 'number' && Number.isFinite(x));
 const DOWN = [0, 0, -1];
 
-/** 相对 g0 倾了多少度、往哪边（在 g0 定的水平面里从 +x 起逆时针，度）。跟 imu_calib.tilt_of 一样。 */
+/** How many degrees it tilted relative to g0, and which way (counterclockwise from +x in the horizontal plane defined by g0, degrees). Same as imu_calib.tilt_of. */
 function tiltOf(g0, g) {
   const t = angle(g0, g);
   const up = [-g0[0], -g0[1], -g0[2]];
@@ -130,7 +130,7 @@ const sgn = (v, d = 1) => (typeof v === 'number' && Number.isFinite(v) ? `${v > 
 const dirDiff = (a, b) => Math.abs(((a - b) % 360 + 540) % 360 - 180);
 const names = (ks) => ks.map((k) => STEP[k].cn).join('、');
 
-// ---------------- 停住段、端平基准（imu_calib.py 的 _run_back / find_hold / find_ref，一句一句对应） ----------------
+// ---------------- Hold segment, level reference (_run_back / find_hold / find_ref in imu_calib.py, corresponding line by line) ----------------
 
 function runBack(gs, end, band) {
   const last = gs[end];
@@ -138,7 +138,7 @@ function runBack(gs, end, band) {
   let skipped = 0, j = end - 1;
   while (j >= 0) {
     if (angle(gs[j], last) <= band) { idx.push(j); j--; }
-    else if (j - 1 >= 0 && angle(gs[j - 1], last) <= band) { skipped++; j--; }   // 单个乱跳：跳过
+    else if (j - 1 >= 0 && angle(gs[j - 1], last) <= band) { skipped++; j--; }   // single erratic reading: skip it
     else break;
   }
   return { idx: idx.sort((a, b) => a - b), skipped };
@@ -166,14 +166,14 @@ function findRef(gs, g0, before) {
   return null;
 }
 
-// ---------------- 采集（状态放在 ref 里，每来一帧 st 喂一次） ----------------
-// phase：idle → collect →（齐了）solving → done / error；中途点结束、缺步 → short（接着采 / 重来）
+// ---------------- Capture (state lives in ref, fed once per incoming st frame) ----------------
+// phase: idle → collect → (all in) solving → done / error; clicking finish midway with missing steps → short (continue / start over)
 
 function freshWizard() {
   return { phase: 'idle', t0: 0, g0: null,
-    buf: { still: [], fwd: [], back: [], left: [], right: [] },          // 每个方向做够时，那一段读数（后端从里面找端平和停住）
+    buf: { still: [], fwd: [], back: [], left: [], right: [] },          // when a direction is done, that segment of readings (the backend finds the level and hold parts in it)
     done: { still: false, fwd: false, back: false, left: false, right: false },
-    seg: [],                 // 上一个方向做够以后到现在的读数
+    seg: [],                 // readings since the previous direction was done
     ref: null, level: 0, cand: null, inZone: false, repeat: null, needLevel: false,
     live: null, progress: 0, hold: 0, paused: null, moved: false, over: false,
     lastKey: null, lastBirth: null, events: [], missing: [], result: null, error: null };
@@ -182,8 +182,8 @@ function freshWizard() {
 const missingSteps = (W) => STEPS.filter((k) => !W.done[k]);
 const nextTodo = (W) => TILTS.find((k) => !W.done[k]) || null;
 
-/** 喂一帧。live：页面给的「跟鸭子的连接是不是实时的」（跟总览同一个判断）；没给就看 joints_age_ms。返回 true = 要重画。
- *  做够一个方向往 W.events 里放一条（'still' / 'fwd' … / 'all'），页面拿去响一声。 */
+/** Feed one frame. live: the page's "is the connection to the duck live" (same judgment as the overview); if not given, look at joints_age_ms. Returns true = needs a redraw.
+ *  When a direction is done, push an entry into W.events ('still' / 'fwd' … / 'all'), which the page uses to beep. */
 function feed(W, st, live) {
   if (W.phase !== 'collect') return false;
   const g = st?.gravity;
@@ -191,8 +191,8 @@ function feed(W, st, live) {
   if (!okVec(g) || !fresh) { const p = W.paused; W.paused = '读数断了，等它回来（已采的不丢）'; return p !== W.paused; }
   const gu = unit(g);
   if (!gu) return false;
-  // 去重：Studio 10 Hz 推状态，robot.state 也是 10 Hz，同一个读数可能推两次（robotd 卡住时会一直推同一个）。
-  // 有 state_t_ns（robot.state 的 t_ns）就认它；没有就用「生成时间」= 收到的时间 − joints_age_ms
+  // Dedupe: Studio pushes state at 10 Hz and robot.state is also 10 Hz, so the same reading may be pushed twice (when robotd is stuck it keeps pushing the same one).
+  // If there is state_t_ns (robot.state's t_ns), go by it; otherwise use "generation time" = time received − joints_age_ms
   const birth = performance.now() - st.joints_age_ms;
   if (st.state_t_ns != null) {
     if (st.state_t_ns === W.lastKey) return false;
@@ -216,12 +216,12 @@ function feed(W, st, live) {
     }
     return true;
   }
-  // 倾的几步：顺序随便。读数一直攒在 seg 里，停住了就看往哪倾、这个方向做过没有
+  // Tilt steps: any order. Readings keep accumulating in seg; once it holds still, see which way it tilted and whether this direction is already done
   const b = W.seg;
   b.push(s);
   if (b.length > RULES.max_step_n) b.splice(0, b.length - RULES.max_step_n);
   const gs = b.map((x) => x.g);
-  // 端平：最后 ref_min_n 个读数离桌上静止 ≤ level_deg、自己晃 ≤ ref_spread_deg → 下一次倾的零点（以最后一次为准）
+  // Level: the last ref_min_n readings are within level_deg of resting on the table and wobble ≤ ref_spread_deg → zero point for the next tilt (the latest one wins)
   const n = RULES.ref_min_n;
   const tail = gs.slice(-n);
   const levelNow = tail.length === n && tail.every((v) => angle(W.g0, v) <= RULES.level_deg) && spread(tail) <= RULES.ref_spread_deg;
@@ -232,7 +232,7 @@ function feed(W, st, live) {
   W.live = tiltOf(W.ref || W.g0, gu);
   W.over = W.live.t > RULES.tilt_max_deg;
   W.hold = 0; W.inZone = false; W.cand = null; W.repeat = null; W.needLevel = false;
-  // 停住：跟后端同一套（停住段 + 它之前最后一次端平）；再加前端自己的：倾 12–30°、离前后左右之一 ≤35°、停满 1 秒
+  // Hold: same rules as the backend (hold segment + the last level before it); plus frontend-only rules: tilt 12–30°, within ≤35° of one of forward/back/left/right, hold a full 1 second
   const { idx } = findHold(gs);
   const hold = idx.map((i) => b[i]);
   const hm = meanDir(hold.map((x) => x.g));
@@ -262,12 +262,12 @@ function finishStep(W, k) {
   else W.events.push(k);
 }
 
-/** 开始采集（全新的一遍）。 */
+/** Start capture (a completely fresh run). */
 function startCollect(W, now) {
   Object.assign(W, freshWizard(), { phase: 'collect', t0: now });
 }
 
-/** 点「结束」：齐了就去算，缺步就停在 short，说缺哪几步。 */
+/** Click "finish": if everything is in, go compute; if steps are missing, stop at short and say which ones. */
 function endCollect(W) {
   if (W.phase !== 'collect') return;
   const miss = missingSteps(W);
@@ -275,30 +275,30 @@ function endCollect(W) {
   W.phase = 'short'; W.missing = miss;
 }
 
-/** 接着采（做过的留着）。 */
+/** Continue capturing (keep what is already done). */
 function resumeCollect(W) {
   W.phase = 'collect'; W.seg = []; W.ref = null; W.paused = null; W.missing = []; W.result = null; W.error = null;
   if (!W.done.still) { W.buf.still = []; W.progress = 0; }
 }
 
-/** 只补做这几步（后端回的 redo）：清掉它们再接着采。 */
+/** Redo only these steps (the redo returned by the backend): clear them and continue capturing. */
 function redoSteps(W, steps) {
   for (const k of steps) { if (k in W.done) { W.done[k] = false; W.buf[k] = []; } }
   resumeCollect(W);
 }
 
-/** 交给后端的读数：平铺列表，每个带 step（studio/imu.py 要列表） */
+/** Readings handed to the backend: a flat list, each with a step (studio/imu.py wants a list) */
 function payload(W) {
   return STEPS.flatMap((k) => W.buf[k].map((x) => ({ step: k, t: x.t, g: x.g })));
 }
 
-// ---------------- 提示音（Web Audio 自己合成，很短很轻；静音记在 localStorage） ----------------
+// ---------------- Beeps (synthesized with Web Audio, very short and quiet; mute is stored in localStorage) ----------------
 
 const MUTE_KEY = 'studio.imu.mute';
 function loadMute() { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } }
-function saveMute(v) { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch { /* 隐私模式：只在这一页有效 */ } }
+function saveMute(v) { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch { /* private mode: only applies to this page */ } }
 let actx = null;
-/** 浏览器要求「用户点过」才能出声：在「开始采集」的点击里调一次。 */
+/** Browsers require "the user has clicked" before playing sound: call this once in the "Start capture" click. */
 function audioUnlock() {
   try {
     const C = window.AudioContext || window.webkitAudioContext;
@@ -311,7 +311,7 @@ function beep(kind) {
   if (!actx) return;
   try {
     const t = actx.currentTime + 0.01;
-    // 做够一个方向：一声 990 Hz；静止：低一点 660 Hz；全齐：两声往上走
+    // A direction done: one 990 Hz beep; still: a bit lower at 660 Hz; all done: two rising beeps
     const tones = kind === 'all' ? [[880, 0], [1320, 0.13]] : [[kind === 'still' ? 660 : 990, 0]];
     for (const [f, dt] of tones) {
       const o = actx.createOscillator(), gn = actx.createGain();
@@ -323,23 +323,23 @@ function beep(kind) {
       o.connect(gn); gn.connect(actx.destination);
       o.start(t + dt); o.stop(t + dt + 0.12);
     }
-  } catch { /* 出不了声就算了 */ }
+  } catch { /* if sound cannot play, never mind */ }
 }
 
 // ---------------- 3D ----------------
 
 const reduceMotion = () => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 
-/** 在 3D 上面画：竖直参考线、示范箭头（从头顶往要倾的方向弯过去，来回摆）。用鸭子自己的相机投影，转视角也跟着。 */
+/** Draw on top of the 3D view: vertical reference line and the demonstration arrow (curving from the top of the head toward the direction to tilt, swinging back and forth). Uses the duck's own camera projection, so it follows when the view rotates. */
 function drawOverlay(d, canvas, svg, arrow, plumb, now) {
   if (!svg) return;
   if (!d || !d.ready || !d.home || !d.blob) { svg.innerHTML = ''; return; }
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return;
-  const V = d.camera.position.constructor;           // three.js 的 Vector3（不用另外 import three）
+  const V = d.camera.position.constructor;           // three.js Vector3 (no separate import of three needed)
   d.camera.updateMatrixWorld();
-  const P = d.blob.position;                          // 脚下（地面）中心
-  const H = 2 * (d.home.target.z - P.z);              // 鸭子高度
+  const P = d.blob.position;                          // center under the feet (ground)
+  const H = 2 * (d.home.target.z - P.z);              // duck height
   const pr = (x, y, z) => { const v = new V(x, y, z).project(d.camera); return [(v.x + 1) / 2 * w, (1 - v.y) / 2 * h]; };
   let out = '';
   if (plumb) {
@@ -349,7 +349,7 @@ function drawOverlay(d, canvas, svg, arrow, plumb, now) {
   if (arrow && DIRV[arrow]) {
     const u = DIRV[arrow], R = H * 1.08;
     const swing = reduceMotion() ? 1 : 0.55 + 0.45 * Math.sin(now / 260);
-    const end = 6 + 20 * swing;                        // 弧从头顶（0°）摆到 6–26°
+    const end = 6 + 20 * swing;                        // the arc swings from the top of the head (0°) to 6–26°
     const pts = [];
     for (let a = 0; a <= end + 1e-6; a += 2) {
       const s = Math.sin(rad(a)), c = Math.cos(rad(a));
@@ -359,11 +359,11 @@ function drawOverlay(d, canvas, svg, arrow, plumb, now) {
       const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
       const dx = ex - px, dy = ey - py, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, sz = Math.max(12, h * 0.03);
       const head = `${ex + ux * sz},${ey + uy * sz} ${ex - uy * sz * 0.6},${ey + ux * sz * 0.6} ${ex + uy * sz * 0.6},${ey - ux * sz * 0.6}`;
-      // 示范的「倾下去的鸭子」：从脚下到箭头尖的一条虚线（机身中线倒向那边）
+      // Demonstration "tilted duck": a dashed line from the feet to the arrow tip (the body centerline leaning that way)
       const [gx, gy] = pr(P.x, P.y, P.z);
       out += `<line class="ghost" x1="${gx}" y1="${gy}" x2="${ex}" y2="${ey}"/>`;
       out += `<polyline class="arc" points="${pts.map((p) => p.join(',')).join(' ')}"/><polygon class="head" points="${head}"/>`;
-      // 字放在箭头尖下面一点；别压到左上角的大字倾角、也别出框
+      // Put the text a little below the arrow tip; do not cover the large tilt angle in the top-left corner and do not go out of frame
       const lx = Math.min(w - 50, Math.max(50, ex)), ly = Math.min(h - 50, Math.max(120, ey + sz + 26));
       out += `<text class="lbl" x="${lx}" y="${ly}">往${STEP[arrow].short}倾</text>`;
     }
@@ -372,8 +372,8 @@ function drawOverlay(d, canvas, svg, arrow, plumb, now) {
   svg.innerHTML = out;
 }
 
-/** 换机位。字符串用 Duck3D 自带的（front34 / front / back34 / back）；{az, el} 是自己定的角度（度，跟 Duck3D 的 VIEWS 同一个算法：
- *  az 0 = 正前方，−90 = 鸭子右侧），先按 front 算好距离和看的点，再把机位挪过去（「回正」也回到这里）。 */
+/** Change the camera position. Strings use Duck3D's built-ins (front34 / front / back34 / back); {az, el} is a custom angle (degrees, same algorithm as Duck3D's VIEWS:
+ *  az 0 = straight ahead, −90 = the duck's right side); first compute the distance and look-at point as for front, then move the camera there ("reset view" also returns here). */
 function applyView(d, view) {
   if (typeof view === 'string') { d.setView(view); return; }
   d.setView('front');
@@ -432,9 +432,9 @@ function DuckView({ g, joints, stale, arrow, plumb, view = 'front34', children }
   </div>`;
 }
 
-/** 平时一只鸭子（采集中带示范箭头）；算完一左一右「校准前 / 校准后」。第一只始终是同一个实例（key 不变），切换不重新加载。
- *  机位：采集中从后面看（鸭子的左 = 屏幕左 = 方向盘的左 = 站在它后面的人的左）；
- *  对比时，修正以前后为主就从侧面看（前倾、后倾正面看不出来），以左右为主就从正面看。 */
+/** Normally one duck (with the demonstration arrow while capturing); after computing, "before calibration / after calibration" left and right. The first one is always the same instance (key unchanged), so switching does not reload.
+ *  Camera: while capturing, view from behind (the duck's left = screen left = the steering wheel's left = the left of a person standing behind it);
+ *  when comparing, view from the side if the correction is mainly forward/back (forward and backward tilt cannot be seen from the front), and from the front if it is mainly left/right. */
 function ImuStage({ st, stale, corr, parts, collecting, arrow, cue }) {
   const g = okVec(st?.gravity) ? st.gravity : null;
   const joints = st?.joints;
@@ -462,12 +462,12 @@ function ImuStage({ st, stale, corr, parts, collecting, arrow, cue }) {
   </div>`;
 }
 
-// ---------------- 方向盘：前后左右四个点 + 中间静止；做够的亮，下一个闪，蓝点是现在往哪倾 ----------------
+// ---------------- Steering wheel: four dots for forward/back/left/right + still in the middle; finished ones light up, the next one blinks, the blue dot is where it is tilting now ----------------
 
 function DirPad({ W }) {
   const C = 100, R = 80, MAX = 32;
   const r = (t) => Math.min(t, MAX) / MAX * R;
-  const pt = (t, d) => [C - r(t) * Math.sin(rad(d)), C - r(t) * Math.cos(rad(d))];   // 头朝上：前 → 上，鸭子的左 → 左
+  const pt = (t, d) => [C - r(t) * Math.sin(rad(d)), C - r(t) * Math.cos(rad(d))];   // head up: forward → up, the duck's left → left
   const collecting = W.phase === 'collect';
   const next = collecting && W.done.still ? nextTodo(W) : null;
   const L = collecting && W.done.still ? W.live : null;
@@ -494,11 +494,11 @@ function DirPad({ W }) {
   </svg>`;
 }
 
-// ---------------- 右边几块 ----------------
+// ---------------- The blocks on the right ----------------
 
-// 方向确认没有，只认 imu 消息里的 mount.verified（calibration-status 回读，studio/imu.py 的 view）。
-// 不看 robotd 起不来时的原话：关节没标定时报的也是「…and verified IMU mounting」（feetech.rs:1018-1029）。
-// 主程序只有「确认 / 没确认」两种；「临时方向」是 Studio 以后可能加的（方案拍板 3 的 ②），后端给 imu.temporary 才显示。
+// Whether the orientation is confirmed: only trust mount.verified in the imu message (read back from calibration-status, the view in studio/imu.py).
+// Do not look at robotd's raw message when it fails to start: when joints are uncalibrated it also reports "…and verified IMU mounting" (feetech.rs:1018-1029).
+// The main program only has two states, "confirmed / not confirmed"; a "temporary orientation" is something Studio may add later (decision 3, option ②), shown only if the backend sends imu.temporary.
 function statusOf(st, imu, live) {
   const s = st?.imu?.status;
   const v = imu?.mount?.verified;
@@ -512,7 +512,7 @@ function statusOf(st, imu, live) {
   if (imu?.temporary) return { word: '临时方向', kind: 'warn', hint: '只认了哪边朝上，朝前没验过：能站，别走' };
   if (live !== false && s === 'missing') return { word: '读不到 IMU', kind: 'bad', hint: '检查模块接线，或者在下面重新识别芯片' };
   if (live !== false && s === 'frozen') return { word: '读数冻住了', kind: 'bad', hint: '姿态不更新，别走路' };
-  // imu 消息还没到时：运动模式下 IMU 正常就说明方向确认过（没确认 robotd 进不了运动模式）
+  // Before the imu message arrives: in motion mode, a working IMU means the orientation was confirmed (robotd cannot enter motion mode without confirmation)
   if (v === true || (v == null && s === 'ok' && st?.mode === 'motion')) {
     const when = imu?.stand_calib_at;
     return { word: '方向已确认', kind: 'ok', hint: when ? `上次站着校准：${when}` : '主程序验过「哪边朝上、哪边朝前」；还没站着校过站姿' };
@@ -621,14 +621,14 @@ function blockReason(st, imu, live) {
   if (st.posture === 'absent') return '鸭子主程序没在跑';
   if (st.posture === 'starting') return `主程序还在启动${st.start_error ? `：${st.start_error}` : ''}`;
   if (st.mode === 'commissioning') {
-    // 标定模式也能站（fork hold-home，用户 10-21）：站住了就能站着校，方向没确认过也能校（算出整份新方向，第 3 步写进去）
+    // Calibration mode can also stand (fork hold-home, user 10-21): once standing it can be calibrated standing, even if the orientation was never confirmed (it computes a whole new orientation, written in step 3)
     if (!st.hold) return '标定模式软着：先点上面的「站姿使能」让它站起来（双手扶着）';
     if (st.hold.stage !== 'holding') return '正在站起来：等它站稳';
     if (!okVec(st.gravity) || st.joints_age_ms == null || st.joints_age_ms > RULES.stale_ms) return '没有实时姿态数据';
     return null;
   }
   if (imu?.mount?.verified === false) return '方向还没确认过：先做上面的「粗校」';
-  // 站姿没使能：提示先点上面的「站姿使能」（任务 17）
+  // Standing pose not enabled: prompt to click "Enable standing" above first (task 17)
   if (st.posture === 'limp') return '软着：先点上面的「站姿使能」让它站起来（双手托着）';
   if (st.posture === 'homing') return '正在站起来：等它站稳';
   if (st.posture === 'walking') return '正在走：先停下';
@@ -640,12 +640,12 @@ function blockReason(st, imu, live) {
   return null;
 }
 
-// ---------------- 站姿使能 / 失能（任务 17，用户 10-21：「得有个按钮站姿使能、失能」） ----------------
-// 「站姿使能」走遥控卡「站起来」同一条路：link.cmd('pad.op', {op: 'stand'})，后端按姿势再判一遍（软着 robot.init、坐着 sit_toggle）；
-// 能不能按用手柄快照里遥控卡那颗「站起来」的判断（pd.motion.buttons.stand）。「失能（卸力）」走顶上「卸力」同一条路：link.cmd('relax')。
-// 标定模式也能站（用户 10-21：「咱标定也能站姿不就好了吗？非要切到运动模式」）：「站姿使能」发 imu.op hold →
-// fork 标定模式的 hold-home，15 颗一起 3 秒转到 HOME 锁住（没有平衡，扶着点），IMU 照常读，站着校准就在标定模式做；
-// 「失能」一样走顶上「卸力」（标定模式下 robot.relax 就是总线 relax）。
+// ---------------- Enable / disable standing (task 17, user 10-21: "there has to be a button to enable and disable standing") ----------------
+// "Enable standing" takes the same path as the remote-control card's "Stand up": link.cmd('pad.op', {op: 'stand'}), and the backend re-checks by posture (limp → robot.init, sitting → sit_toggle);
+// whether it can be pressed follows the judgment for the remote-control card's "Stand up" button in the gamepad snapshot (pd.motion.buttons.stand). "Disable (relax)" takes the same path as "Relax" at the top: link.cmd('relax').
+// Calibration mode can also stand (user 10-21: "wouldn't it be fine if calibration could also do the standing pose? Why must we switch to motion mode"): "Enable standing" sends imu.op hold →
+// hold-home in fork calibration mode, all 15 servos move to HOME together over 3 seconds and lock (no balancing, hold onto it), the IMU reads as usual, and standing calibration is done in calibration mode;
+// "Disable" likewise goes through "Relax" at the top (in calibration mode robot.relax is just a bus relax).
 const POSE_CN = { holding: '站着', policy: '站着（策略在跑）', walking: '在走', limp: '软着', homing: '正在站起来',
   sitting: '坐着', commissioning: '标定模式（软着）', starting: '主程序在启动', absent: '主程序没在跑', servo_session: '调舵机中' };
 const HOLD_CN = { holding: '标定模式（站着）', ramping: '标定模式（正在站起来）' };
@@ -659,7 +659,7 @@ function StanceCard({ st, imu, pd, link, live }) {
   const hold = st?.hold || imu?.hold || null;
   const now = !st ? '还没连上' : live === false ? '连不上鸭子' : st.posture === 'servo_session' ? POSE_CN.servo_session
     : commissioning && hold ? HOLD_CN[hold.stage] || '标定模式（站着）' : (POSE_CN[st.posture] || '读不出');
-  const sb = pd?.motion?.buttons?.stand;              // 遥控卡「站起来」的判断（后端推的手柄快照，1 Hz 也够用）
+  const sb = pd?.motion?.buttons?.stand;              // the remote-control card's "Stand up" judgment (the gamepad snapshot pushed by the backend; 1 Hz is enough)
   const standWhy = !st || live === false ? '连不上鸭子：等它回来'
     : imu?.redo?.active ? '重新标定方向期间保持卸力：双手托住，完成或取消后再站起来'
     : st.posture === 'servo_session' ? '舵机页还占着总线：点顶上的「交还主程序」'
@@ -699,7 +699,7 @@ function StanceCard({ st, imu, pd, link, live }) {
   </section>`;
 }
 
-/** 采集中这一刻该跟人说的一句话（大字）+ 一句补充（小字）。 */
+/** What to tell the person at this moment during capture (large text) + one supplementary line (small text). */
 function collectWords(W) {
   if (W.paused) return [W.paused, ''];
   if (!W.done.still) {
@@ -815,9 +815,9 @@ function ResultCard({ res, imu, link, onRedo }) {
   </section>`;
 }
 
-// 站着精校的结果先记在 Studio（imu-pending.json）；写进主程序统一在上手清单第 3 步做。
+// Results of the fine standing calibration are first recorded in Studio (imu-pending.json); writing them into the main program is done uniformly in step 3 of the getting-started checklist.
 
-// ---------------- 方向没确认、站不起来：先粗校 ----------------
+// ---------------- Orientation not confirmed, cannot stand: coarse calibration first ----------------
 
 function CoarseCard({ st, imu, link, live }) {
   const [opened, setOpened] = useState(false);
@@ -969,9 +969,9 @@ function CoarseSteps({ link, disabled, unloadedOnly, onBegin, onDone }) {
   </div>`;
 }
 
-// ---------------- 后端在做的事（粗校、写入、换芯片）：一步一步报给页面 ----------------
+// ---------------- What the backend is doing (coarse calibration, writing, switching chips): reported step by step to the page ----------------
 // imu.job = { kind: 'coarse'|'save'|'set_chip'|'detect', title, msg, tilt_deg?, target_deg?, hold?, failed?, done? }
-// 托着鸭子的那几步（摆正 ≤5°、低头 15–30°）要看倾角，所以 tilt_deg 放大写
+// The steps where the duck is held by hand (level ≤5°, nose down 15–30°) need to watch the tilt angle, so tilt_deg is shown large
 
 function JobBanner({ job }) {
   if (!job) return null;
@@ -983,13 +983,13 @@ function JobBanner({ job }) {
   </div>`;
 }
 
-// 给测试用（不接浏览器也能喂一串读数，看采集怎么走）
+// For tests (feed a series of readings without a browser to see how capture proceeds)
 export const _test = { RULES, STEPS, TILTS, feed, freshWizard, startCollect, endCollect, resumeCollect, redoSteps,
   missingSteps, payload, findHold, findRef, spreadP90, tiltOf, qRotate };
 
-// ---------------- 页面 ----------------
+// ---------------- Page ----------------
 
-/** live / age：跟总览同一个判断（app.js 的 Main 里算好传进来）；没传就只看 st.joints_age_ms。 */
+/** live / age: same judgment as the overview (computed in app.js's Main and passed in); if not passed, only look at st.joints_age_ms. */
 export function ImuPage({ st, imu, link, live, age, diagnosticElapsed = 0, pd }) {
   const W = useRef(freshWizard());
   const [, bump] = useState(0);
@@ -1012,7 +1012,7 @@ export function ImuPage({ st, imu, link, live, age, diagnosticElapsed = 0, pd })
     redraw();
   }, [st, live]);
 
-  // 采完了：交给后端算（旧方向后端自己从 calibration-status 拿，不用页面传）
+  // Capture finished: hand it to the backend to compute (the backend gets the old orientation itself from calibration-status; the page does not need to pass it)
   const phase = W.current.phase;
   useEffect(() => {
     if (phase !== 'solving') return undefined;

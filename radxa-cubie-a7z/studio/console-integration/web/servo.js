@@ -1,12 +1,12 @@
-// 舵机页：servo-web 整个收进 Studio（用户 10-18：「舵机这个工具就是把外部的工具合进去，一模一样」）。
+// Servo page: servo-web folded entirely into Studio (user, 10-18: "the servo tool should just merge the external tool in, exactly the same").
 //
-// 布局（用户 10-18：「布局写得不好」「每个都没对齐乱乱的」「单颗中位校准就够了，别的用不上」）：
-// - 左边：3D 固定在屏幕上（往下滚也不跑），下面一张「常用」卡：一键校准、撤销、去官方姿势、全部保持 / 松开、停；
-// - 右边：15 颗按左腿 / 右腿 / 头颈分三组，所有行同一套固定列宽、有表头，上下对齐；
-//   点一行才展开电压、负载、电流、偏移、P/D、方向 ±；
-// - 最下面折叠的「更多」：运动方式、存的姿态、高级工具（导出寄存器、改 ID……）、日志。
-// 没接管总线时数据来自主程序，只能看；点「开始调舵机」才由 Studio 接管总线（主程序停、手柄不能用）。
-// 后端是 studio/servo_ops.py（照搬 servo-web 的 server.py）。
+// Layout (user, 10-18: "the layout is badly done" "nothing is aligned, it's all messy" "single-servo center calibration is enough, the rest is never used"):
+// - Left: 3D pinned on screen (it stays put when scrolling down), with a "Common" card below it: one-click calibration, undo, go to the official pose, hold all / release all, stop;
+// - Right: the 15 servos in three groups (left leg / right leg / head and neck); all rows share one set of fixed column widths with a header, aligned vertically;
+//   clicking a row expands voltage, load, current, offset, P/D, direction ±;
+// - Collapsed "More" at the bottom: motion mode, saved poses, advanced tools (export registers, change ID…), log.
+// When the bus is not taken over, data comes from the main program and is view-only; only clicking "Start servo tuning" makes Studio take over the bus (the main program stops and the gamepad cannot be used).
+// The backend is studio/servo_ops.py (ported from servo-web's server.py).
 import { html, Component, useState, useEffect, useRef, useCallback } from './vendor/preact-htm.module.js';
 import { Duck3D, JOINT_NAMES } from './duck3d.js';
 import { drawServoLabels } from './labels.js';
@@ -14,14 +14,14 @@ import { TwoStep } from './confirm.js';
 import { Stepper } from './stepper.js';
 import { servoReplyStatus } from './startup-status.js';
 
-// 官方参考姿势：microduck_rl scene.xml 的关键帧（servo-web 同一份），弧度、模型约定，按 JOINT_NAMES 顺序。
+// Official reference pose: the keyframe from microduck_rl scene.xml (same as servo-web), in radians and model conventions, in JOINT_NAMES order.
 const POSES = {
   zero: { label: '零位', rad: Array(15).fill(0) },
   stand: { label: '站', rad: [0, -0.0873, -0.4579, -0.0049, 0.453, 0.3491, 0.3491, 0, 0, 0, 0, 0.0873, 0.4579, 0.0049, -0.453] },
   sit: { label: '坐', rad: [0, 0, -0.5236, 1.0472, 0, 0.5, 1.6, 0, 0, 0, 0, 0, 0.5236, -1.0472, 0] },
   fold: { label: '折叠', rad: [0, 0, 1.57, 1.57, 0, 1, 1, 0, 0, 0, 0, 0, -1.57, -1.57, 0] },
 };
-const IDS = [20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 10, 11, 12, 13, 14];       // = JOINT_NAMES 的顺序
+const IDS = [20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 10, 11, 12, 13, 14];       // = JOINT_NAMES order
 const ID_OF = Object.fromEntries(JOINT_NAMES.map((n, i) => [n, IDS[i]]));
 const NAME_OF = Object.fromEntries(IDS.map((id, i) => [id, JOINT_NAMES[i]]));
 const GROUP_OF = (id) => (id >= 30 ? 'H' : id >= 20 ? 'L' : 'R');
@@ -37,7 +37,7 @@ const REGS = [[41, '加速度', 1, 'SRAM'], [46, '运行速度', 2, 'SRAM'], [48
 
 const fmt = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
 const sign = (v, d = 1) => (typeof v === 'number' ? `${v > 0 ? '+' : ''}${v.toFixed(d)}` : '—');
-let calibHandler = null;      // ServoPage 设置：各处的「中位校准」都走同一个预览对话框
+let calibHandler = null;      // set by ServoPage: every "center calibration" goes through the same preview dialog
 
 // ---------------- 3D ----------------
 
@@ -55,7 +55,7 @@ function ServoStage({ sv, pose, setPose, selected, onSelect, fixed = false }) {
     return () => d.dispose();
   }, []);
 
-  // 实时：读数换成弧度（方向 ×（读数 − 2048）× 2π / 4096）；参考姿势：官方关键帧
+  // Live: readings converted to radians (direction × (reading − 2048) × 2π / 4096); reference pose: the official keyframe
   useEffect(() => {
     const d = duckRef.current;
     if (!d || !ready) return;
@@ -91,8 +91,8 @@ function ServoStage({ sv, pose, setPose, selected, onSelect, fixed = false }) {
   </div>`;
 }
 
-// 页头一行「软硬：P5 · D0 · 限力 1000（跟主程序一样 · 来源）」（用户 10-19：上力的 P/D/限力跟主程序一样）。
-// 手动在寄存器面板改过、或者有上着力但不一样的，后面标黄说一句。后端 servo_ops.gains_view
+// A page-header line "Stiffness: P5 · D0 · torque limit 1000 (same as the main program · source)" (user, 10-19: P/D/torque limit when powered should match the main program).
+// If manually changed in the register panel, or powered but different, it is marked yellow with a note after it. Backend: servo_ops.gains_view
 function GainsLine({ g }) {
   const man = g.manual || [], off = g.differ_on || [];
   return html`<div class="sv-sub sv-gains" title=${g.detail + (g.warn ? '\n' + g.warn : '')}>
@@ -116,7 +116,7 @@ function Why() {
   </section>`;
 }
 
-// ---------------- 15 颗：同一套列宽，上下对齐 ----------------
+// ---------------- The 15 servos: one set of column widths, aligned vertically ----------------
 
 function commDot(r) {
   const reply = servoReplyStatus(r);
@@ -192,7 +192,7 @@ function Row({ r, open, selected, onSelect, op, follow, setHint }) {
   </article>`;
 }
 
-// 舵机数据每秒推 10 次：这一行显示的东西没变就不重画（15 行带滑块，整页重画会让 3D 转起来卡）
+// Servo data is pushed 10 times per second: do not redraw a row if what it shows has not changed (15 rows with sliders; redrawing the whole page makes the 3D rotation stutter)
 const rowSig = (p) => { const r = p.r, c = r.comm || {};
   return [r.raw, r.deg, r.volt, r.temp, r.load, r.current_ma, r.current_raw, r.speed_raw, r.responding, r.torque, r.fresh, r.dir, r.offset, r.p, r.d, r.status,
     r.p_run, r.d_run, r.limit, r.gains_ok, c.missed, c.streak, p.open, p.selected, p.follow].join('|'); };
@@ -211,9 +211,9 @@ function ServoList({ sv, open, selected, onSelect, op, follow, setHint }) {
   </section>`;
 }
 
-// ---------------- 常用（3D 下面） ----------------
+// ---------------- Common (below the 3D view) ----------------
 
-// 选一颗舵机的下拉框：跟 3D、表格联动（哪边选了，另外两边都跟着变）
+// Dropdown to pick a servo: linked with the 3D view and the table (whichever side selects, the other two follow)
 function ServoPick({ selected, onSelect, rows }) {
   return html`<select class="sv-pick" value=${selected ?? ''} onChange=${(e) => onSelect(e.target.value === '' ? null : +e.target.value)}>
     <option value="">选一颗舵机</option>
@@ -222,7 +222,7 @@ function ServoPick({ selected, onSelect, rows }) {
   </select>`;
 }
 
-// 照 servo-web 顶上那一排（用户 10-18：「跟 servo-web 一样，左边 3D、右边各种功能，对齐」）
+// Mirrors the row along the top of servo-web (user, 10-18: "same as servo-web, 3D on the left, the various functions on the right, aligned")
 function Toolbar({ open, op, motion, setMotion, idle, setIdle, follow, setFollow, poses, setHint, syncSliders }) {
   const ms = { seconds: motion.seconds, mode: motion.mode, acc: motion.acc };
   const goNamed = (word, fallback) => {
@@ -243,7 +243,7 @@ function Toolbar({ open, op, motion, setMotion, idle, setIdle, follow, setFollow
     <label><input type="checkbox" checked=${follow} onChange=${e => setFollow(e.target.checked)} /> 跟随拖动</label></div></div>`;
 }
 
-// ---------------- 更多（折叠） ----------------
+// ---------------- More (collapsed) ----------------
 
 function MoreArea({ open, op, motion, setMotion, follow, setFollow, poses, setPoses, idle, setIdle, setHint, syncSliders }) {
   const [name, setName] = useState('');
@@ -369,19 +369,19 @@ function CalibDialog({ plan, onOk, onCancel }) {
   </div>`;
 }
 
-// ---------------- 页面 ----------------
+// ---------------- Page ----------------
 
-// 「交还主程序」：页面内两步确认（confirm.js 的 TwoStep，跟测急停的跳过共用：审查 D4）——第一下旁边冒出确认按钮，
-// 700 ms 后、3 秒内点它才交还（舵机页头上、每一页顶上的提示条都用它）。
-// 交还走后端 hand_back：先等在路上的舵机操作做完，再在总线上全部卸力并回读确认、关总线、起主程序（小助手在的话）。
-// 交还是 Studio 当场卸力（审查 D7：以前写「主程序起来时会松开」不对；不卸力的交接要等 fork 的 robotd 部署）
+// "Hand back to the main program": two-step confirmation within the page (TwoStep in confirm.js, shared with skipping the e-stop test: review D4): the first click pops up a confirm button next to it,
+// and clicking that after 700 ms and within 3 s hands back (used by the servo page header and the hint bar at the top of every page).
+// Hand-back goes through the backend's hand_back: first wait for in-flight servo operations to finish, then relax everything on the bus and confirm by reading back, close the bus, and start the main program (if the helper is present).
+// On hand-back, Studio relaxes the servos right then (review D7: the old text "released when the main program starts" was wrong; a handover without relaxing has to wait for the fork's robotd to be deployed)
 const HANDBACK_ASK = '交还：马上把 15 颗全部松开，鸭子会软下来——先扶住或放平';
 export function HandBackButton({ link, disabled = false }) {
   const [err, setErr] = useState(null);
   const confirm = async () => {
     setErr(null);
     if (disabled || link.status !== 'open') { setErr('连接或交还状态尚未就绪'); return; }
-    const r = await link.cmd('servo.close', {}, 90000);     // 小助手起主程序要等启动四步（最多 60 秒）
+    const r = await link.cmd('servo.close', {}, 90000);     // starting the main program via the helper waits for the four startup steps (up to 60 seconds)
     if (!r.ok) setErr(r.reason || r.error || '没交还成');
   };
   return html`<span class="sv-handback"><${TwoStep} label="交还主程序" ask=${HANDBACK_ASK} busyLabel="交还中…" disabled=${disabled || link.status !== 'open'} onConfirm=${confirm} />${

@@ -1,0 +1,11 @@
+# Camera and ToF status cards
+
+**English** · [简体中文](2026-10-23-sensor-band-design.md)
+
+The user confirmed adding the camera and ToF to the status bar that holds battery, servos, IMU, gamepad and board, mainly showing online status, with a click going to the existing standalone pages. The order is battery, servos, IMU, camera, ToF, gamepad, board. Development continues locally without connecting to or updating the board, and the IMU flow stays as it is.
+
+The camera checks service response with a read-only hello on the standalone local mediad socket; reading the configuration by itself cannot prove the device is online. When the service is healthy and configured for camera, show "服务在线／点开确认画面" (Service online / open to confirm the picture); for test show "测试画面／视频服务在线" (Test picture / video service online); when the service does not respond show "未连接" (Not connected); without device proof, do not show the hardware as recognized. ToF shows online only after receiving a complete new frame; fake/sim is labeled as simulated, service online but no frame yet shows waiting for data, and an explicit unavailable shows not connected. Errors, timeouts and unknown are handled separately. None of the checks request video frames, set up WebRTC, or start or restart services.
+
+The status bar reads at low frequency, once every 10 seconds, only while the overview / gamepad area is visible and the browser is in the foreground; leaving or going to the background cancels requests and timers. Stale readings are cleared and do not keep the online green. On phones it uses two columns, with the final board card taking a full row; on desktop seven columns, wrapping on narrow desktops, with all cards readable and no horizontal overflow.
+
+The user also asked whether "automatically not starting services when there is no hardware" is done. The current image has been reviewed: firstboot auto-detection covers the IMU; apply-rootfs changes the media source to test, which prevents a crash when the camera is missing but still runs the media service; the old tools support manually turning off ToF / camera. This is not the same as automatic hardware detection and on-demand startup. That system policy is not yet implemented, and this round does not use web network errors as grounds for shutting down system services.

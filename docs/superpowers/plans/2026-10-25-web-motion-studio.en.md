@@ -2,7 +2,7 @@
 
 **English** · [简体中文](2026-10-25-web-motion-studio.md)
 
-> **For agentic workers:** Use subagent-driven-development for bounded backend implementation, then independent spec and code review. Work in this isolated worktree. The human authorized implementation ("开始吧…灵动…先做在网页版里头" — "Go ahead... lively... build it in the web version first"). Do not repeat an execution or approval question.
+> **For agentic workers:** Use subagent-driven-development for bounded backend implementation, then independent spec and code review. Work in this isolated worktree. The human authorized implementation ("Go ahead... lively... build it in the web version first"). Do not repeat an execution or approval question.
 
 **Goal:** Add a complete recording/library/playback flow and a lively head/mouth mode to Studio's existing web remote controls.
 

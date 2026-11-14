@@ -1,6 +1,6 @@
-// 设置页的「电池」一栏（battery-plan.md v2 §4）：型号（2S 锂电 / 台架电源）、提醒线、红线、负载电压线、读数校准
-// （带「我量了电池电压」）、提示音、保养提示。设置存在鸭子上（state 目录的 battery-settings.json，后端 battery.op 校验），
-// 存了马上生效。只警告：这里没有任何让鸭子动的东西。
+// The "Battery" section of the settings page (battery-plan.md v2 §4): type (2S lithium / bench supply), warning line, red line, under-load voltage line, reading calibration
+// (with "I measured the battery voltage"), beeps, maintenance tips. Settings are stored on the duck (battery-settings.json in the state directory, validated by the backend's battery.op),
+// and take effect immediately when saved. Warnings only: nothing here makes the duck move.
 import { html, useState, useEffect } from './vendor/preact-htm.module.js';
 import { loadMute, saveMute } from './battery.js';
 import { Stepper } from './stepper.js';
@@ -37,12 +37,12 @@ if (!document.getElementById('bset-css')) {
 }
 
 export function BatterySettings({ link, st }) {
-  const [data, setData] = useState(null);         // 后端给的：settings、defaults、ranges、presets
+  const [data, setData] = useState(null);         // from the backend: settings, defaults, ranges, presets
   const [form, setForm] = useState(null);
   const [msg, setMsg] = useState(null);           // {kind, text}
   const [busy, setBusy] = useState(false);
   const [meter, setMeter] = useState('');
-  const [cal, setCal] = useState(null);           // calibrate 的回执
+  const [cal, setCal] = useState(null);           // calibrate's acknowledgment
   const [muted, setMuted] = useState(loadMute());
 
   const load = async () => {

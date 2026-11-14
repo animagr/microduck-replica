@@ -61,8 +61,8 @@ export function PasswordSettings({ hasPassword, api, onSaved }) {
   </form>`;
 }
 
-// 「更多」页的 SSH 开关（用户 10-21：「出了问题他们 SSH 自己修，不用重新烧卡」）。镜像出厂只认钥匙、不带任何人的钥匙，
-// 也没有默认密码：在这里自己定一个密码再打开。要先设网页登录密码（后端也挡）。
+// SSH switch on the "More" page (user, 10-21: "when something breaks they fix it themselves over SSH, no need to reflash the card"). The factory image accepts keys only, ships with nobody's key,
+// and has no default password: set a password here yourself, then turn it on. The web login password must be set first (the backend enforces this too).
 export function SshSettings({ hasPassword, api }) {
   const [ssh, setSsh] = useState(null);
   const [loadErr, setLoadErr] = useState(null);
