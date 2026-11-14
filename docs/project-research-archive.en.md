@@ -2,7 +2,7 @@
 
 [Home](../README.en.md) · [Documentation](README.en.md) · [简体中文](项目研究归档.md)
 
-> Archived from the README on 2026-10-25. These early investigations describe the upstream XL330 design and the state of the build at the time. Dimensions, prices, feasibility judgments and outstanding work are historical references. Use the current [CAD resources](https://github.com/fanhao375/microduck-replica-cad), [BOM](../BOM/README.md) and [image guide](../software/image/烧录和第一次使用.md) when building today. Run reproduction commands from the repository root.
+> Archived from the README on 2026-10-25. These early investigations describe the upstream XL330 design and the state of the build at the time. Dimensions, prices, feasibility judgments and outstanding work are historical references. Use the current [CAD resources](https://github.com/fanhao375/microduck-replica-cad), [BOM](../BOM/README.en.md) and [image guide](../software/image/flashing-and-first-use.en.md) when building today. Run reproduction commands from the repository root.
 
 ## 🔨 Build Progress
 
@@ -60,7 +60,7 @@ passive linkage and never enters the action space.
 
 **Feetech build · compiled by 机械行者Robo · 2026-10-23: 33 printed items and 23 purchased items.** Includes materials, quantities, recorded prices and purchase links. XL330 servos and associated electronics need separate checks.
 
-**[Online preview](../BOM/README.md)** · **[Download the complete Excel file](../BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**. The same version is also provided in the CAD repository.
+**[Online preview](../BOM/README.en.md)** · **[Download the complete Excel file](../BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**. The same version is also provided in the CAD repository.
 
 The [early reverse-engineered parts estimate](../BOM.en.md) remains available as historical reference; use the current assembly shopping list above when preparing a build.
 
@@ -90,7 +90,7 @@ See the respective CAD sections for file versions, changes and printing methods,
   The one thing people get wrong: <b>the compute board, the HAT and the camera are all in the head</b> —
   the camera sits ~13 mm from the board centre with no joint between them,<br>
   so the MIPI ribbon never crosses the neck. What does cross it is the servo bus and the power line.<br>
-  <a href="../docs/硬件入门.md">Full diagram set (Chinese) →</a>　·　<a href="../assets/hw/Microduck硬件图集.pdf">Download PDF (7 diagrams, A3)</a></sub>
+  <a href="hardware-primer.en.md">Full diagram set (Chinese) →</a>　·　<a href="../assets/hw/Microduck硬件图集.pdf">Download PDF (7 diagrams, A3)</a></sub>
 </div>
 
 
@@ -123,7 +123,7 @@ no second bus, no host-side sensor fusion (the LSM6DSV16X's on-chip SFLP block e
 rotation quaternion and estimates its own gyro bias).
 
 **Full detail:** [Hardware Teardown](../docs/hardware-teardown.en.md) (English) ·
-[Spec Sheet](../docs/硬件规格速查.md) (Chinese)
+[Spec Sheet](hardware-spec-quick-reference.en.md) (Chinese)
 
 ---
 
@@ -197,15 +197,15 @@ what it is good for.
 
 | Document | Contents |
 |---|---|
-| [**Hardware Spec Sheet**](../docs/硬件规格速查.md) | One-page reference — block diagram, part numbers, bus parameters, build list, pitfalls |
-| [**Hardware Primer**](../docs/硬件入门.md) | **Board by board** — what each of the five modules does, how one 20 ms control tick flows, what changes on the Feetech route, and a closing section on **five checks to run before you replicate** |
-| [**Electronics Sourcing (CN)**](../docs/电控采购清单.md) | Taobao links with verified availability — main board, camera, ToF, power, both PCBs, cabling and the debug adapter |
-| [**Mechanical Sourcing (CN)**](../docs/机械采购清单.md) | Bearings, M2 fasteners, heat-set inserts and the insertion tip, thread locker, filament |
+| [**Hardware Spec Sheet**](hardware-spec-quick-reference.en.md) | One-page reference — block diagram, part numbers, bus parameters, build list, pitfalls |
+| [**Hardware Primer**](hardware-primer.en.md) | **Board by board** — what each of the five modules does, how one 20 ms control tick flows, what changes on the Feetech route, and a closing section on **five checks to run before you replicate** |
+| [**Electronics Sourcing (CN)**](electronics-purchase-list.en.md) | Taobao links with verified availability — main board, camera, ToF, power, both PCBs, cabling and the debug adapter |
+| [**Mechanical Sourcing (CN)**](mechanical-purchase-list.en.md) | Bearings, M2 fasteners, heat-set inserts and the insertion tip, thread locker, filament |
 | [**Hardware Teardown**](../docs/hardware-teardown.en.md) 🇬🇧 | **Full derivation with evidence citations — the main board, both custom boards, bus protocol, sensors, power** |
 | [**Actuator Selection**](../docs/actuator-selection.en.md) 🇬🇧 | XL330 parameters, BAM M6 config, five calibrated PD sets, backlash modeling — plus **why closed-loop steppers do not work here, what swapping to a Feetech STS3215 actually costs** (737 g vs 2107 g, measured), and a **cross-comparison of same-class servos** including a deep assessment of the Unitree S288 |
 | [**Fastener Reconstruction**](../docs/fastener-reconstruction.en.md) 🇬🇧 | Hole-feature scan across 47 STLs → M2 system and purchase quantities |
-| [Community Intelligence](../docs/社区动态.md) | X / GitHub signals, independent verification, noise and scam warnings |
-| [Progress](../PROGRESS.md) | Status, decisions, open work |
+| [Community Intelligence](community-news.en.md) | X / GitHub signals, independent verification, noise and scam warnings |
+| [Progress](../PROGRESS.en.md) | Status, decisions, open work |
 
 > 🇬🇧 marks documents available in English. The rest are Chinese-only for now — their
 > tables, part numbers, addresses and diagrams are readable without it, and machine
@@ -236,4 +236,4 @@ Requires `mujoco`, `numpy`, `pillow`, `scipy`. Rendering needs a working OpenGL 
 - `assembly-drawings/` and retained simulation meshes — **CC BY-SA-NC 4.0**. Upstream 3D models are CC BY-SA-NC;
   ShareAlike requires derivatives to carry the same license. **Non-commercial only.**
 
-See [NOTICE.md](../NOTICE.md). Not affiliated with or endorsed by Pollen Robotics.
+See [NOTICE.md](../NOTICE.en.md). Not affiliated with or endorsed by Pollen Robotics.

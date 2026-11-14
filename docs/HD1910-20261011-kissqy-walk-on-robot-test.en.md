@@ -23,7 +23,7 @@ His code has **no I²C IMU path**, so to his program the BNO085 is the same as h
 
 **So what we did that night**: used his model, but ran it with the runner we used for Luwu on 10-04 (`tools/servo-web/run_luwu_trial.py`), adding a `kissqy_walk` profile. The observation (61 dims), joint order and standing pose HOME all match his deployment contract, checked item by item.
 
-For the overall strategy for the two IMU setups, see [Feetech adaptation architecture](../software/飞特适配架构.md): A, the bus board; B, a BNO085 connected directly to the board; one or the other via configuration.
+For the overall strategy for the two IMU setups, see [Feetech adaptation architecture](../software/feetech-adaptation-architecture.en.md): A, the bus board; B, a BNO085 connected directly to the board; one or the other via configuration.
 
 ## 2. The model
 
@@ -116,7 +116,7 @@ sudo python3 /home/duck/policy-trial/run_luwu_trial.py --profile kissqy_walk --e
 | Without `--execute --supported` | Read-only, no servo writes |
 | `--inspect-model` | Only checks the model, does not touch the hardware |
 
-Note: when Clash's TUN mode is on on your computer, neither `ssh` nor the web console can reach the board; see the [pitfall log](../踩坑记录.md#软件).
+Note: when Clash's TUN mode is on on your computer, neither `ssh` nor the web console can reach the board; see the [pitfall log](../PITFALLS.en.md).
 
 ## 7. Next steps (decided: switch to his Rust runtime)
 

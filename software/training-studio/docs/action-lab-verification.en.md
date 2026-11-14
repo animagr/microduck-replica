@@ -16,7 +16,7 @@ Catalog metadata commit `6ca4d5f` and UI commit `109083a` have been merged into 
 - The original service confirmed the GPU environment is ready and there are no active tasks; the old flat-ground experiment `caa6a1c5de10` and the single-leg experiment `a930fbbab951` are kept, the single-leg result is still 0/8, and the actual video plays. Page errors and failed resources are both zero.
 - Independent code review has no remaining P1/P2. This time GPU training was not started again, and no community online publishing feature was added.
 
-The evidence is in the outer `本地记录/training-action-lab-20261023/catalog-browser.mjs` (`本地记录` = local records), `catalog-validation/` and `catalog-validation-stable/`, including reports and desktop and mobile screenshots. For the inclusion process see [Contributing recipes](recipe-contribution.md).
+The evidence is in the outer `本地记录/training-action-lab-20261023/catalog-browser.mjs` (`本地记录` = local records), `catalog-validation/` and `catalog-validation-stable/`, including reports and desktop and mobile screenshots. For the inclusion process see [Contributing recipes](recipe-contribution.en.md).
 
 ## Verification scope
 

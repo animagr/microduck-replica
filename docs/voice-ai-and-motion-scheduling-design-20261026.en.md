@@ -6,7 +6,7 @@ Date: 2026-10-26 (JST). Source: the user wants to interact with the duck by spea
 
 Status: architecture recommendations and a check of candidate services; no cloud service has been chosen or integrated yet. This document is not a deployment or real-hardware acceptance check record.
 
-Oct 27 addendum: the user confirmed "not subscribed yet, build the configuration entry point first". The web console model configuration and the basic text chat test have been installed on duck-0de6; for details see [entry point verification and delivery status](superpowers/verification/2026-10-27-ai-provider-settings.md). Hardware voice, real-time voice and AI action invocation are still not connected; the overall architecture below remains the plan for later work.
+Oct 27 addendum: the user confirmed "not subscribed yet, build the configuration entry point first". The web console model configuration and the basic text chat test have been installed on duck-0de6; for details see [entry point verification and delivery status](superpowers/verification/2026-10-27-ai-provider-settings.en.md). Hardware voice, real-time voice and AI action invocation are still not connected; the overall architecture below remains the plan for later work.
 
 ## Recommendation
 

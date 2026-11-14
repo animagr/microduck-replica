@@ -24,7 +24,7 @@ This is a short window, so long-term temperature stability cannot be concluded f
 
 ## Past issues and what is different this time
 
-The [pitfall log](../踩坑记录.md) recorded two independent phenomena on Oct 11/12: when the camera/ToF were missing, services restarted repeatedly and GStreamer scanning maxed out the CPU; after stopping the related services, the sealed body still got hot enough to throttle. The current window did not reproduce the former high load. The user then confirmed that no heatsink or fan is installed yet, so adding cooling is a prerequisite for this round of continuous camera testing; case ventilation and ambient temperature still need to be checked.
+The [pitfall log](../PITFALLS.en.md) recorded two independent phenomena on Oct 11/12: when the camera/ToF were missing, services restarted repeatedly and GStreamer scanning maxed out the CPU; after stopping the related services, the sealed body still got hot enough to throttle. The current window did not reproduce the former high load. The user then confirmed that no heatsink or fan is installed yet, so adding cooling is a prerequisite for this round of continuous camera testing; case ventilation and ambient temperature still need to be checked.
 
 ## Suggested order
 
@@ -39,4 +39,4 @@ On the software side, prefer hardware H.264 encoding, and check whether pixel fo
 
 The goal is continuous preview for about 10 minutes alongside the existing control tasks, recording the real frame rate, temperature curve, thermal control state, and changes to gamepad/control cycles. An SoC temperature below about 70°C can be used as an engineering target with margin; this is not a manufacturer rating, nor a temperature that can be guaranteed before testing. After a fan is installed, do a separate R3 recording/voice command comparison to check the actual effect of fan noise and mounting vibration on the microphone, then decide the fan speed and mounting position.
 
-This time, no physical cooling modification, real camera on the robot, or on-demand media service change was completed. Later software changes and image/update packaging are recorded under F09/F21 in the [software ledger](软件功能与升级总账.md); the hardware solution and test environment should also be recorded along with the results.
+This time, no physical cooling modification, real camera on the robot, or on-demand media service change was completed. Later software changes and image/update packaging are recorded under F09/F21 in the [software ledger](software-features-and-upgrades-ledger.en.md); the hardware solution and test environment should also be recorded along with the results.

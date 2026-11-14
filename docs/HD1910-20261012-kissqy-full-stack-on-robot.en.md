@@ -4,7 +4,7 @@
 
 **In one sentence**: without reflashing the card on the first robot, we remotely installed official 0.15.1 and kissqy's R17 on the existing card and swapped in our robotd with "IMU on the board's I²C" support; the BNO085 was read successfully on the real robot, and all 15 servos answered at 50 Hz. Using his program, the duck **went to HOME in the official standing pose, and after the model took over it held in place for 10 seconds**, with body tilt reduced from 6.6° to 3.3°. The web joystick did not get it walking, because the board was overheating and the CPU was throttled to 408 MHz, so the Python path behind the web gamepad could not respond in time; the user shut it down to cool off, and walking is postponed until cooling is solved.
 
-This document is written for both humans and AI: each step says why it was done that way, and the numbers all come from that night's logs. For the previous night (running the same model with our own Python runner), see [10-11 on-robot test](HD1910-20261011-kissqy-walk上机实测.md).
+This document is written for both humans and AI: each step says why it was done that way, and the numbers all come from that night's logs. For the previous night (running the same model with our own Python runner), see [10-11 on-robot test](HD1910-20261011-kissqy-walk-on-robot-test.en.md).
 
 ---
 
@@ -58,7 +58,7 @@ The original plan was to reflash a new card, but after looking remotely it turne
 
 **Two official scripts deliberately not run:**
 
-- `setup-board.sh`: its audio step apt-installs Armbian's vendor kernel package and points `/boot/Image`, `dtb` and `uInitrd` at the new kernel. This board needs Radxa's U-Boot to boot (see [pitfall log · board](../踩坑记录.md#主板--hat--摄像头)), and changing the kernel remotely risks a board that will not boot. Although this robot's HAT has an audio chip, using it requires switching to the vendor kernel and building the driver, and walking does not need sound, so it is left off for now; the other things it does (servo serial port overlay, freeing the serial console) are already done on the card.
+- `setup-board.sh`: its audio step apt-installs Armbian's vendor kernel package and points `/boot/Image`, `dtb` and `uInitrd` at the new kernel. This board needs Radxa's U-Boot to boot (see [pitfall log · board](../PITFALLS.en.md)), and changing the kernel remotely risks a board that will not boot. Although this robot's HAT has an audio chip, using it requires switching to the vendor kernel and building the driver, and walking does not need sound, so it is left off for now; the other things it does (servo serial port overlay, freeing the serial console) are already done on the card.
 - `migrate-network.sh`: switches networking from netplan to NetworkManager, only needed for Bluetooth network setup. Switching networking remotely could drop the WiFi and leave us unable to reconnect, so it is not switched for now.
 
 ### 3.3 kissqy's original R17: install the original first to confirm a baseline
@@ -135,7 +135,7 @@ The user shut it down that night to cool off. Cooling must be solved before the 
 
 ## 5. For others following along (IMU is a BNO085 module, HAT audio not enabled or no HAT installed)
 
-1. The card has a bootable Armbian (this V1.12 board needs Radxa U-Boot, see [no-HAT build](不打HAT.md)), and both `/dev/ttyS2` (servos) and `/dev/i2c-4` (IMU) exist.
+1. The card has a bootable Armbian (this V1.12 board needs Radxa U-Boot, see [no-HAT build](no-HAT-build.en.md)), and both `/dev/ttyS2` (servos) and `/dev/i2c-4` (IMU) exist.
 2. Stop anything holding the serial port (e.g. servo-web).
 3. Install official `daemon-v0.15.1` from local files (section 3.2); if ONNX Runtime will not download, temporarily give root's curl a proxy; set `auto_apply` to `"off"`. Do not run the audio part of `setup-board.sh` or `migrate-network.sh`.
 4. `systemctl disable --now mediad tofd` (when there is no camera or ToF).
@@ -183,7 +183,7 @@ On the first robot, J5 is actually unused (no ToF connected). Recommendations:
 
 Both options are only derived from the schematic; the first time you make the change, use `i2cdetect -y 4` (or the corresponding bus number) to confirm 0x4B is visible before starting robotd.
 
-For a pad-by-pad comparison of the C1 and D1 revisions (on-board chip addresses, J6 jumper resistors, mounting the IMU module on the trunk), see [kissqy image R1 analysis §9](HD1910-20261012-kissqy镜像R1分析.md#9-hat-上接-imu-模块c1旧版咱们手上这块和-d1官方最新版对照).
+For a pad-by-pad comparison of the C1 and D1 revisions (on-board chip addresses, J6 jumper resistors, mounting the IMU module on the trunk), see [kissqy image R1 analysis §9](HD1910-20261012-kissqy-image-R1-analysis.en.md).
 
 ### 8.2 Cooling: holes + airflow path; the fan does not have to be on the board
 

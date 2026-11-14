@@ -61,7 +61,7 @@ On 2026-08-31, [@tspy](https://x.com/tspy/status/2094249218735300630) posted a "
 > 1 GB RAM + 32 GB · dual 6-axis IMU · 8×8 multizone ToF LiDAR · forward wide-angle camera ·
 > 2× NFC antennas · battery NP-F550 · control frequency 50 Hz
 
-**Fully consistent with the conclusions of this repo's [hardware reverse engineering](硬件方案逆向.md)**, including the most crucial point,
+**Fully consistent with the conclusions of this repo's [hardware reverse engineering](hardware-teardown.en.md)**, including the most crucial point,
 the **Radxa Zero 3W**. Two independent paths reached the same answer.
 
 In the same thread, @tspy's answer on cost also matched this repo's conclusion:

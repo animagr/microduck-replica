@@ -8,8 +8,8 @@ For the **STM32G031F8P6 + LSM6DSV16X** board made by a teammate. The hardware ba
 firmware flashing with readback verification, Keil stopping at `main`, the 64MHz clock and IMU sampling were all verified.
 In a short test the IMU ID was `0x70`, ready=1, and SPI/FIFO errors were 0; the external bus and servos have not yet been tested on real hardware.
 
-**0.2.0 (2026-09-22) switches the bus protocol to Feetech SCS/STS**, implemented item by item according to the [bus protocol](../总线协议.md): ID 200, a 15-byte block at address 56, sync_read queuing. The IMU, board-level code and Keil project are unchanged. The host tests on the PC and the acceptance check "on a simulated bus running the real protocol code" (`Tests/bus_sim_test.py`, using the `check` criteria from [`tools/imu200`](../../../tools/imu200)) all pass; it has been flashed to the original development board and the IMU works as before. **The real bus and servos have not yet been tested on real hardware.**
-For the boundaries of the build, desktop tests and first real-board validation, see [VALIDATION.md](VALIDATION.md).
+**0.2.0 (2026-09-22) switches the bus protocol to Feetech SCS/STS**, implemented item by item according to the [bus protocol](../bus-protocol.en.md): ID 200, a 15-byte block at address 56, sync_read queuing. The IMU, board-level code and Keil project are unchanged. The host tests on the PC and the acceptance check "on a simulated bus running the real protocol code" (`Tests/bus_sim_test.py`, using the `check` criteria from [`tools/imu200`](../../../tools/imu200)) all pass; it has been flashed to the original development board and the IMU works as before. **The real bus and servos have not yet been tested on real hardware.**
+For the boundaries of the build, desktop tests and first real-board validation, see [VALIDATION.md](VALIDATION.en.md).
 
 This directory sits next to the schematic and PCB and provides the source code, the Keil project and the only prebuilt output kept in the repo,
 [`Build/imu_to_dxl.hex`](Build/imu_to_dxl.hex). The serial debug console [`tools/servo-web`](../../../tools/servo-web) can overlay servo joint angles and the IMU torso attitude in the same web page, with three ways to read the IMU: `--imu-bus` (servo bus, the same sync_read as the main controller), `--imu-swd` (ST-Link / DAPLink), `--imu-jlink` (J-Link).
@@ -136,7 +136,7 @@ This version's PC capture script already reads these fields; "the board returns 
 
 ## 5. Communication and registers
 
-Frame format `FF FF ID LEN INSTR params… CHK`, `CHK = ~(ID+LEN+INSTR+Σparams)`. There is no byte stuffing, so `FF FF` can also appear in the payload: the receiver collects the frame by length and then checks the checksum; on a checksum error it drops one byte and searches for the header again, so it is not thrown off by false headers in the payload. For the behavior of each instruction, see [bus protocol §8](../总线协议.md#8-其它指令怎么应答):
+Frame format `FF FF ID LEN INSTR params… CHK`, `CHK = ~(ID+LEN+INSTR+Σparams)`. There is no byte stuffing, so `FF FF` can also appear in the payload: the receiver collects the frame by length and then checks the checksum; on a checksum error it drops one byte and searches for the header again, so it is not thrown off by false headers in the payload. For the behavior of each instruction, see [bus protocol §8](../bus-protocol.en.md):
 
 | Instruction | Behavior |
 |---|---|
@@ -227,7 +227,7 @@ Passing software tests cannot replace these acceptance checks.
 - [LSM6DSV16X datasheet](https://www.st.com/resource/en/datasheet/lsm6dsv16x.pdf)
 - [ST IMU driver](https://github.com/STMicroelectronics/lsm6dsv16x-pid)
 - Feetech "SCS Communication Protocol" and memory table: [`docs/飞特资料/`](../../../docs/飞特资料/) in the repo
-- [This board's bus protocol (interface contract)](../总线协议.md)
+- [This board's bus protocol (interface contract)](../bus-protocol.en.md)
 - [The upstream main controller interface that was checked](https://github.com/pollen-robotics/microduck/blob/5984efb770855432b03dafd3d879e9929981e45b/duck-control/src/bus.rs)
 
 New code written for this project is provided under the MIT license; third-party files keep their own copyrights and licenses, see each Drivers directory.

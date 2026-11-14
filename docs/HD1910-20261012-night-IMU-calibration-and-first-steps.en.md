@@ -3,7 +3,7 @@
 **English** · [简体中文](HD1910-20261012-夜-IMU校准与首次迈步.md)
 
 **Robot**: unit #1 (Feetech HD-1910 ×15, Radxa Zero 3W 2G without eMMC + microSD, official HAT revision C1). Software is kissqy's full stack (official 0.15.1 + R17 v146). The IMU is a BNO085 module on I²C (40-pin header pins 1/6/27/28, `/dev/i2c-4`, 0x4B). The walking model is kissqy's "walking + fall recovery joint 9600 iterations" (`Mjlab-VelStand-Rough-Backlash-MicroDuck`).
-**Background**: in the early hours of the same day we installed kissqy's full stack; it could go HOME and hold, see the [10-12 on-robot log](HD1910-20261012-kissqy整套上机.md).
+**Background**: in the early hours of the same day we installed kissqy's full stack; it could go HOME and hold, see the [10-12 on-robot log](HD1910-20261012-kissqy-full-stack-on-robot.en.md).
 
 **One-line conclusion**: the robot falling backward the moment the model takes over is not the model's fault, nor button latency. The **IMU module is mounted about 8.5° off**. The duck is standing upright, but the IMU says "leaning forward 8.5°", so the model keeps trying to save it backward, harder and harder. After calibrating those 8.5° away (using simulation), the model held it standing steadily for 70 seconds, and pushing the stick made both legs start stepping rhythmically in alternation.
 
@@ -193,7 +193,7 @@ All in [`tools/radxa/onboard-analysis/`](../tools/radxa/onboard-analysis/), read
 
 ## 11. Next steps
 
-1. **TPU soles**, and mark the floor to measure forward distance and speed (addendum 10-14: our soles are actually already TPU 95A, on the hard side; see [10-14 daytime log §6](HD1910-20261014-白天-仿真找原因与新版放开参数.md#6-脚底摩擦和鞋底));
+1. **TPU soles**, and mark the floor to measure forward distance and speed (addendum 10-14: our soles are actually already TPU 95A, on the hard side; see [10-14 daytime log §6](HD1910-20261014-day-simulation-diagnosis-and-relaxed-params.en.md));
 2. **Manual calibration tool**: turn §4.4 into a button-driven flow (direction check + standing zero, compute and present new parameters, write only after confirmation, log every run). While standing at HOME, compute the offset in the background and warn if it exceeds 2°, but **don't change it automatically**: the duck may be held by hand or standing on a slope;
 3. **Filter A/B**: run once each with 1/1/1 and 0.9/0.5/0.7, comparing standing sway and stepping;
 4. Cooling, mouth servo;

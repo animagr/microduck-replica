@@ -1,13 +1,13 @@
-// 共用的数字步进控件：「−」输入框「+」一行。舵机页、设置 › 电池、设置 › 模型的重量都用它。
-// 只依赖页面已有的 CSS 变量，跟随亮/暗主题；纯计算部分单独导出，tests/stepper.test.mjs 可以直接测。
+// Shared numeric stepper control: a "−" input "+" row. Used by the servo page, Settings › Battery, and the weights in Settings › Model.
+// Depends only on CSS variables already on the page, follows the light/dark theme; the pure computation parts are exported separately so tests/stepper.test.mjs can test them directly.
 import { html, useEffect, useRef, useCallback } from './vendor/preact-htm.module.js';
 
-export const HOLD_DELAY_MS = 400;      // 按住后先等这么久
-export const HOLD_INTERVAL_MS = 80;    // 之后每这么久加一格
+export const HOLD_DELAY_MS = 400;      // after pressing and holding, wait this long first
+export const HOLD_INTERVAL_MS = 80;    // then step once every this long
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
-// step 的小数位数（0.5 → 1，0.01 → 2）
+// Number of decimal places in step (0.5 → 1, 0.01 → 2)
 export function stepperDecimals(step) {
   const s = String(step == null ? 1 : step);
   const m = /^[-+]?(\d+)(?:\.(\d+))?(?:[eE]([-+]?\d+))?$/.exec(s);
@@ -17,7 +17,7 @@ export function stepperDecimals(step) {
   return Math.max(0, frac - exp);
 }
 
-// 把输入框里的字符串变成数字；空字符串和不是数的都返回 null
+// Turn the input box string into a number; empty strings and non-numbers return null
 export function stepperNumber(raw) {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
   if (typeof raw !== 'string') return null;
@@ -34,7 +34,7 @@ export function stepperClamp(v, min, max) {
   return n;
 }
 
-// value 为空时从 min（没有 min 就从 0）开始；只按 step 的小数位四舍五入，避免 0.30000000000000004
+// When value is empty, start from min (or 0 if there is no min); round only to step's decimal places, to avoid 0.30000000000000004
 export function stepperStep(value, delta, { min, max, step = 1 } = {}) {
   const st = finite(step) && step > 0 ? step : 1;
   const base = finite(value) ? value : finite(min) ? min : 0;
@@ -48,8 +48,8 @@ export function stepperText(v) {
   return n === null ? '' : String(n);
 }
 
-// 按住连加/连减：start() 后停 delay，再每 every 毫秒调一次 fire；stop() 随时停。
-// timers 可以换成假时钟，测试用。
+// Press-and-hold repeat increment/decrement: after start(), wait delay, then call fire every `every` ms; stop() stops at any time.
+// timers can be swapped for a fake clock, for tests.
 export function createHoldRepeater(fire, { delay = HOLD_DELAY_MS, every = HOLD_INTERVAL_MS, timers = globalThis } = {}) {
   let timeoutId = null;
   let intervalId = null;
@@ -192,7 +192,7 @@ export function Stepper({ value, min, max, step = 1, onChange, disabled = false,
   };
 
   const stepOnce = (dir) => (e) => {
-    if (e.detail !== 0) return;        // 鼠标/触摸已经由 pointerdown 处理；这里只接键盘和辅助技术
+    if (e.detail !== 0) return;        // mouse/touch is already handled by pointerdown; this only handles keyboard and assistive technology
     if (editingRef.current && inputRef.current) inputRef.current.blur();
     nudgeRef.current(dir);
   };

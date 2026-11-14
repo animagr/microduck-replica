@@ -2,7 +2,7 @@
 
 **English** · [简体中文](软件更新与语音使用说明-20261027.md)
 
-This delivery manages the web console, the matching helper and local voice as one signed software package; the new image uses the same package. Local voice does not need an AI account or API key. For the build, deployment and the physical acceptance check scope of this release, the [verification record](superpowers/verification/2026-10-27-web-updates.md) is authoritative.
+This delivery manages the web console, the matching helper and local voice as one signed software package; the new image uses the same package. Local voice does not need an AI account or API key. For the build, deployment and the physical acceptance check scope of this release, the [verification record](superpowers/verification/2026-10-27-web-updates.en.md) is authoritative.
 
 ## Release entry points
 

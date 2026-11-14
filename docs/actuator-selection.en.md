@@ -66,7 +66,7 @@ could not feed 15 XL330s anyway (~1.5 A each at stall).
   at 8 V it is well above 0.52 N·m. This is likely part of how an 18 g servo carries an 800 g robot.
 - ⚠️ **Lifetime and heat are the price.** Over-voltage stresses windings and MOSFETs. Pollen have
   published nothing on this, so **the following is inference**: it may relate to the servo heating
-  users report, and to Pollen starting to consider selling repair kits (see [community notes](社区动态.md)).
+  users report, and to Pollen starting to consider selling repair kits (see [community notes](community-news.en.md)).
 - ⚠️ **You have to make this call yourself.** Copy them and you over-volt too. Play safe with a
   regulator down to 5–6 V and you lose torque — **which may mean retraining the policies**, since
   the official ONNX files were trained under the over-volted condition.

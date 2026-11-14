@@ -6,7 +6,7 @@ Connects the approved v18 page structure to the original Studio's Preact, WebSoc
 
 Installed on `cubie-XXXX` on Nov 9, 2026: <http://BOARD_IP:8000/>, release `20261109-console1`. Only the frontend was updated; the Studio/robotd PIDs, backend, binaries and calibration digests were all unchanged. The user confirmed that only the main controller was powered and no servos were connected; this installation used `--static-startup`, and real-world torque-off, standing and walking were not verified.
 
-Old web page backup: `/opt/microduck-studio/console-backups/20261109T024849766301Z-c5f27ff2b853/`. The installation result is in the local `artifacts/deployment-20261109.json`; for the verification scope, see [VERIFICATION.md](VERIFICATION.md). Board capabilities that are not installed or are turned off are still shown as unavailable.
+Old web page backup: `/opt/microduck-studio/console-backups/20261109T024849766301Z-c5f27ff2b853/`. The installation result is in the local `artifacts/deployment-20261109.json`; for the verification scope, see [VERIFICATION.md](VERIFICATION.en.md). Board capabilities that are not installed or are turned off are still shown as unavailable.
 
 ## Directories and baseline
 

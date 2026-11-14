@@ -1,16 +1,16 @@
-"""造一棵假的鸭子文件树（调参方案 v2 T2、T3：调参卡读的那些文件），给测试和电脑上截图用。
+"""Build a fake duck file tree (tuning plan v2 T2, T3: the files the tuning cards read), for tests and screenshots on a computer.
 
-    py -3.13 -I dev/duckfs.py <目录>            # 造一棵跟二号鸭 10-18 一样的（没有舵机参数文件、嘴巴 0%）
-    run.py ... --robotd tcp:... --dev-duck-root <目录>
+    py -3.13 -I dev/duckfs.py <directory>            # build one like duck #2 on 10-18 (no servo parameter file, mouth 0%)
+    run.py ... --robotd tcp:... --dev-duck-root <directory>
 
-**内容是我们自己写的最小 JSON / TOML**，只放调参卡要读的字段，不拷原版板端文件（它们不是开源许可）。
-形状照二号鸭上读到的（scratchpad duck4.log、tuning-plan.md §2.1）：
-- etc/robot/feetech-ft5/robotd.toml 和 robotd.saved.toml：键带引号（原版板端工具的写法），[policy] 里
-  action_scale = 0.7、没有 head_lowpass / legs_lowpass、各槽是 /opt/robot/feetech-ft5-r5/models/<id>/policy.onnx；
-- 走路模型 1cbf8730… 的 deployment-execution.json：1.0 / 0.5 / 0.7；合同里 model.actuators[0].kp_fw = 5；
-- pad-settings.json：嘴巴 0%、头 2.5（.previous 是 6%）；padd 的回执 run/padd/input-settings.json；
-- 4 个滑轮模型目录；management-profile.json 的 builtin_models（名字是我们自己起的）。
-模型的 sha256 跟假 robotd 回放的夹具（tests/fixtures/now-20261018.jsonl 的 loaded_models）对得上。
+**The contents are minimal JSON / TOML we wrote ourselves**, holding only the fields the tuning cards read; the original on-board files are not copied (they are not under an open-source license).
+The shape follows what was read on duck #2 (scratchpad duck4.log, tuning-plan.md §2.1):
+- etc/robot/feetech-ft5/robotd.toml and robotd.saved.toml: keys quoted (as the original on-board tools write them), in [policy]
+  action_scale = 0.7, no head_lowpass / legs_lowpass, each slot is /opt/robot/feetech-ft5-r5/models/<id>/policy.onnx;
+- deployment-execution.json of walking model 1cbf8730…: 1.0 / 0.5 / 0.7; in the contract model.actuators[0].kp_fw = 5;
+- pad-settings.json: mouth 0%, head 2.5 (.previous is 6%); padd's acknowledgment run/padd/input-settings.json;
+- 4 roller model directories; builtin_models in management-profile.json (the names are our own).
+The models' sha256 match the fixture replayed by the fake robotd (loaded_models in tests/fixtures/now-20261018.jsonl).
 """
 import json
 import sys
@@ -75,8 +75,8 @@ def toml_text(action_scale=0.7, extra_policy=""):
 
 def build(root, servo=None, exec_walk=None, orig=False, saved_differs=False, mouth=0.0, pad_live=True,
           bad_servo=None, bad_exec=None, no_pad_file=False):
-    """造树。servo：舵机参数文件的内容（dict），None = 没有这个文件（V167 原版）。bad_servo / bad_exec：写一段坏文本。
-    orig：走路模型目录里放一份 .orig。saved_differs：robotd.saved.toml 跟主文件不一样。"""
+    """Build the tree. servo: content of the servo parameter file (dict), None = no such file (original V167). bad_servo / bad_exec: write a piece of broken text.
+    orig: put an .orig copy in the walking model directory. saved_differs: robotd.saved.toml differs from the main file."""
     root = Path(root)
     _w(root / ETC / "robotd.toml", toml_text())
     _w(root / ETC / "robotd.saved.toml", toml_text(0.8) if saved_differs else toml_text())

@@ -6,18 +6,18 @@
 >
 > | Document | Covers | Does not cover |
 > |---|---|---|
-> | [BOM](../BOM.md) | **Master table**: all parts, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
+> | [BOM](../BOM.en.md) | **Master table**: all parts, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
 > | **Electronics purchase list** (this one) | **Where to buy** the electronics: main controller / camera / ToF / power / the two PCBs / cables, real Taobao links + pitfalls | Basis for quantities, mechanical parts |
-> | [Mechanical purchase list](机械采购清单.md) | **Where to buy** the mechanical parts: bearings / fasteners / consumables, real Taobao links | Electronics |
-> | [Hardware spec quick reference](硬件规格速查.md) | **Parameters**: interfaces, voltages, protocols, values the software side must match | Prices and shops |
-> | [print/README](../print/README.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
+> | [Mechanical purchase list](mechanical-purchase-list.en.md) | **Where to buy** the mechanical parts: bearings / fasteners / consumables, real Taobao links | Electronics |
+> | [Hardware spec quick reference](hardware-spec-quick-reference.en.md) | **Parameters**: interfaces, voltages, protocols, values the software side must match | Prices and shops |
+> | [print/README](../print/README.en.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
 >
 > The mapping between assembly part numbers and screws is in the [CAD repo](https://github.com/fanhao375/microduck-replica-cad#装配-bom).
 
 
 > **Snapshot date: 2026-09-04.** Prices and sales volumes change and links may break; check prices yourself before ordering.
 > **2026-10-12 correction**: the conclusion on the main-controller configuration has been changed to "1G or 2G without eMMC + microSD", and only official channels are recommended; see [Which configuration to buy](#该买哪个配置).
-> For mechanical parts (bearings / fasteners / consumables), see the [mechanical purchase list](机械采购清单.md).
+> For mechanical parts (bearings / fasteners / consumables), see the [mechanical purchase list](mechanical-purchase-list.en.md).
 >
 > This list is not an endorsement, just a record of search results. Shop information (sales, years in business) is what was displayed at the time of scraping.
 
@@ -318,7 +318,7 @@ The "cover" (盖片) is a black optical shroud mounted above the sensor (¥5 sep
 
 ### Buck converter module (supplies 5 V to the controller in the no-HAT build)
 
-`U9 AP63205` on the HAT provides 5 V to the controller; in the [no-HAT build (without the HAT board)](不打HAT.md) you need to buy a ready-made module to take its place.
+`U9 AP63205` on the HAT provides 5 V to the controller; in the [no-HAT build (without the HAT board)](no-HAT-build.en.md) you need to buy a ready-made module to take its place.
 
 | Part | Spec | Price | Search term | Link |
 |---|---|---|---|---|
@@ -331,7 +331,7 @@ The "cover" (盖片) is a black optical shroud mounted above the sensor (¥5 sep
 2. **Output current ≥ 2 A continuous** — the Radxa Zero 3W running NPU + camera + WiFi peaks a bit over 1 A, and the official HAT uses the 2 A AP63205. Small modules rated 3 A deliver 1.5–2 A in practice without heatsinking, so prefer a UBEC
 3. **Synchronous buck** — 90%+ efficiency. **Do not buy an LM2596**: 150 kHz non-synchronous, needs more than 1.5 V of headroom; 6 V in / 5 V out is already marginal, and it runs hot
 
-Put a **470 µF / 16 V** electrolytic across the input to buffer the voltage drop when all 15 servos start at once — see [no-HAT build · Step 3](不打HAT.md#第-3-步--电源每接一段量一次).
+Put a **470 µF / 16 V** electrolytic across the input to buffer the voltage drop when all 15 servos start at once — see [no-HAT build · Step 3](no-HAT-build.en.md).
 
 ---
 
@@ -377,7 +377,7 @@ J3 / J11 = **JST EH 4P** (RS-485, driven by U8 `SIT3088E`, directly on `+BATT`),
 ### imu_to_dxl — draw it yourself
 
 STM32G031F8P6 + LSM6DSV16X + half-duplex buffer, presenting itself externally as a bus slave (ID 200 on the Dynamixel side).
-The protocol and register layout have been fully reconstructed; see [hardware reverse engineering](硬件方案逆向.md).
+The protocol and register layout have been fully reconstructed; see [hardware reverse engineering](hardware-teardown.en.md).
 
 - **Fabrication cost**: 2-layer board, about ¥25–40 at JLCPCB (without assembly)
 - **Dual protocol**: to support both Feetech and Dynamixel, **same hardware, firmware branch** —
@@ -423,7 +423,7 @@ The protocol and register layout have been fully reconstructed; see [hardware re
 > i.e. **500 µs/device**, "Across **16 devices** that is **8 ms per tick — 40% of a 20 ms budget**";
 > the official fix is to write 0 to this register (it is in `EXPECTED_REGISTERS`).
 > **The Feetech side has been checked**: STS/SCS has `SYNC READ` (`0x82`), and Return Delay Time is 0 from the factory —
-> see [hardware reverse engineering · Feetech STS/SCS protocol comparison](硬件方案逆向.md). All the more reason to measure rather than assume it must be slower.
+> see [hardware reverse engineering · Feetech STS/SCS protocol comparison](hardware-teardown.en.md). All the more reason to measure rather than assume it must be slower.
 
 ---
 
@@ -435,7 +435,7 @@ The protocol and register layout have been fully reconstructed; see [hardware re
 4. **Do not overpay for the bare Radxa board** — 1G / no eMMC is about ¥130 through official channels (2026-09 snapshot), while small shops list it at ¥690–1469. Only use official channels; and there is no need to pay extra for eMMC, just insert a microSD.
 5. **The TaiShanPi does not fit** — it is not just expensive; the head simply has no room for 70×45.
 6. **The ¥8 Feetech STS3215 / ¥22 TaiShanPi** — both are SKU bait; click through and the lowest tier is an accessory.
-7. **Beware of counterfeits of Loctite 243 below ¥15** (see the [mechanical purchase list](机械采购清单.md)).
+7. **Beware of counterfeits of Loctite 243 below ¥15** (see the [mechanical purchase list](mechanical-purchase-list.en.md)).
 
 ---
 

@@ -4,7 +4,7 @@
 
 The user has replied explicitly: "Yes, record sit down and stand up too." This is a scope correction to the original first version, which excluded sit/stand; the earlier authorization for local development, testing and SSH updates to the existing control URL still applies, so execution permission is not asked again.
 
-Completion record: aa825fc has implemented this and updated the current duck's original web page, and the user confirmed "It saves, and sit/stand playback works too." The 389 software checks and the deployment/rollback boundaries are in the [acceptance check](../verification/2026-10-25-web-posture-recording.md).
+Completion record: aa825fc has implemented this and updated the current duck's original web page, and the user confirmed "It saves, and sit/stand playback works too." The 389 software checks and the deployment/rollback boundaries are in the [acceptance check](../verification/2026-10-25-web-posture-recording.en.md).
 
 ## Choices and boundaries
 

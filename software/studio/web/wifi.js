@@ -1,10 +1,10 @@
-// 总览的「连 WiFi」卡片、设置里的 WiFi 一栏（任务 10b）。
-// 鸭子开着热点时，手机连热点、打开 Studio，选家里的 WiFi、填密码；Studio 先关热点，再让 configd net.connect。
-// 热点开关、net.* 都在后端（studio/net.py）；这里只管选网、确认、把「断开以后还能看」的话留在屏幕上。
-// 换网以后的地址按设备写（openLines），「更多」页还有一块能复制的「这只鸭子的地址」（DuckAddresses）。
-// 连接发出去、页面跟鸭子断了以后自己去找鸭子的新地址（任务 17，用户 10-21：「连 WiFi 弄了三下」）：每 2 秒用 new Image()
-// 加载 duck-xxxx / duck-xxxx.local 上的 probe.svg（跨域加载图片不要 CORS），哪个先加载成功就跳过去；最多找 3 分钟。
-// 探测逻辑（findUrls / probeImage / startFind）不碰页面，tests/wifi_find.mjs 在 Node 里用假时钟跑它。
+// The overview's "Connect WiFi" card and the WiFi section in settings (task 10b).
+// When the duck has its hotspot on, the phone joins the hotspot, opens Studio, picks the home WiFi and enters the password; Studio first turns off the hotspot, then has configd run net.connect.
+// The hotspot switch and net.* are all in the backend (studio/net.py); this only handles choosing a network, confirming, and keeping the "still readable after disconnect" text on screen.
+// The address after switching networks is written per device (openLines); the "More" page also has a copyable "This duck's addresses" block (DuckAddresses).
+// After the connect request is sent and the page loses the duck, it looks for the duck's new address by itself (task 17, user, 10-21: "connecting WiFi took three tries"): every 2 s, new Image()
+// loads probe.svg on duck-xxxx / duck-xxxx.local (cross-origin image loads need no CORS), and jumps to whichever loads first; searches for at most 3 minutes.
+// The probe logic (findUrls / probeImage / startFind) doesn't touch the page; tests/wifi_find.mjs runs it in Node with a fake clock.
 import { html, useState, useEffect } from './vendor/preact-htm.module.js';
 import { ConfirmBox } from './confirm.js';
 
@@ -68,7 +68,7 @@ const CSS = `
   .wifi-psk, .wifi-manual-name, .wifi-manual-psk { height: 46px; }
 }
 `;
-if (typeof document !== 'undefined' && !document.getElementById('wifi-css')) {   // Node 里跑探测逻辑的测试时没有 document
+if (typeof document !== 'undefined' && !document.getElementById('wifi-css')) {   // no document when the probe-logic tests run in Node
   const s = document.createElement('style');
   s.id = 'wifi-css';
   s.textContent = CSS;
@@ -92,8 +92,8 @@ function minutesSince(at) {
   return Math.max(1, Math.round((Date.now() / 1000 - at) / 60));
 }
 
-// 换了网以后怎么打开 Studio，按设备写（10-20 真机：开着 Clash 系统代理的 Windows 打不开 duck-xxxx.local——走了代理、502；
-// 不带点的 duck-xxxx Windows 用 LLMNR 问得到，代理按 <local> 绕过；IP 哪儿都能开）
+// How to open Studio after switching networks, written per device (10-20 real hardware: Windows with the Clash system proxy on couldn't open duck-xxxx.local: it went through the proxy, 502;
+// the dotless duck-xxxx resolves on Windows via LLMNR and the proxy bypasses it via <local>; the IP works everywhere)
 export function openLines(net) {
   const host = net.hostname || 'duck-xxxx';
   const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'https' : 'http';
@@ -105,14 +105,14 @@ export function openLines(net) {
   ];
 }
 
-// ---------------- 连 WiFi 以后找鸭子的新地址（任务 17） ----------------
-export const FIND_EVERY_MS = 2000;           // 每 2 秒探一轮
-export const FIND_GIVEUP_MS = 3 * 60 * 1000; // 最多找 3 分钟
-export const FIND_PROBE_MS = 6000;           // 一次探测最多等这么久（连不上的地址可能挂几十秒才报错）
-export const FIND_SILENT_MS = 5000;          // 这么久没收到 Studio 的任何消息也算断了（WebSocket 有时不马上报断）
+// ---------------- Finding the duck's new address after connecting WiFi (task 17) ----------------
+export const FIND_EVERY_MS = 2000;           // one probe round every 2 s
+export const FIND_GIVEUP_MS = 3 * 60 * 1000; // search for at most 3 minutes
+export const FIND_PROBE_MS = 6000;           // max wait for one probe (an unreachable address may hang for tens of seconds before erroring)
+export const FIND_SILENT_MS = 5000;          // no message from Studio for this long also counts as disconnected (WebSocket sometimes doesn't report the close right away)
 
-/** 要找的地址：<proto>://<hostname>:<端口>/ 和 <proto>://<hostname>.local:<端口>/（net.json 的 hostname，端口跟 --listen 一致）。
- *  proto 跟当前页面一致：Studio 开了 https 就不要再探 http（80/8000 上没人应答）。 */
+/** Addresses to look for: <proto>://<hostname>:<port>/ and <proto>://<hostname>.local:<port>/ (hostname from net.json, port same as --listen).
+ *  proto matches the current page: if Studio uses https, don't probe http (nobody answers on 80/8000). */
 export function findUrls(net) {
   const host = (net && net.hostname) || 'duck-xxxx';
   const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'https' : 'http';
@@ -120,7 +120,7 @@ export function findUrls(net) {
   return urls.filter((u, i) => urls.indexOf(u) === i);
 }
 
-/** 用一张小图探一个地址：加载成功回 true，出错 / 超时回 false。跨域加载图片不要 CORS；?t= 防缓存。 */
+/** Probe one address with a small image: true on successful load, false on error / timeout. Cross-origin image loads need no CORS; ?t= defeats caching. */
 export function probeImage(url, timeoutMs = FIND_PROBE_MS) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -139,8 +139,8 @@ export function probeImage(url, timeoutMs = FIND_PROBE_MS) {
   });
 }
 
-/** 每 every 毫秒把 urls 各探一次（上一次还没回话的那个先不探），哪个先成功就 onFound(那个地址)、停下；
- *  giveUp 毫秒还没找到就 onGiveUp()、停下。回 {stop}：页面重新连上原来的地址（热点回来了）时调它，停下以后什么都不再回调。 */
+/** Every `every` ms, probe each of urls once (skip one whose previous probe hasn't answered yet); on the first success call onFound(that address) and stop;
+ *  if nothing is found after giveUp ms, call onGiveUp() and stop. Returns {stop}: call it when the page reconnects to the original address (hotspot came back); after stopping, no more callbacks. */
 export function startFind({ urls, onFound, onGiveUp, probe = probeImage, every = FIND_EVERY_MS, giveUp = FIND_GIVEUP_MS,
   now = () => Date.now(), timers = { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) } }) {
   const t0 = now();
@@ -170,7 +170,7 @@ export function startFind({ urls, onFound, onGiveUp, probe = probeImage, every =
   return { stop, get stopped() { return stopped; } };
 }
 
-// 确认框里的几行：热点卡片和设置里的「换一个 WiFi」只在第一句不同
+// The lines in the confirm box: the hotspot card and "Switch WiFi" in settings differ only in the first sentence
 function confirmLines(net, ssid, variant) {
   const back = variant === 'switch'
     ? '没连上：这个页面会断开；热点马上就回来，手机重新连鸭子热点就能看到原因。'
@@ -181,11 +181,11 @@ function confirmLines(net, ssid, variant) {
   return [first, '连上以后，手机（或电脑）连回家里的 WiFi，按设备打开：', ...openLines(net).map((l) => `· ${l}`), back];
 }
 
-// 复制一个地址。鸭子的局域网地址是 http，不算安全上下文，navigator.clipboard 用不了：退回老办法（选中一个看不见的输入框再 copy）
+// Copy an address. The duck's LAN address is http, not a secure context, so navigator.clipboard is unavailable: fall back to the old way (select an invisible input and copy)
 async function copyText(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
-  } catch { /* 退回下面 */ }
+  } catch { /* fall back below */ }
   try {
     const t = document.createElement('textarea');
     t.value = text;
@@ -216,10 +216,10 @@ function Switching({ net, ssid, variant }) {
   </div>`;
 }
 
-// 「断了」= 跟 Studio 的连接不在，或者 5 秒没收到任何消息（Main 每 250 ms 重画一次，WifiFlow 跟着重算）
+// "Disconnected" = the connection to Studio is gone, or no message for 5 s (Main re-renders every 250 ms and WifiFlow recomputes along with it)
 const linkGone = (link) => link.status !== 'open' || (link.lastAt > 0 && performance.now() - link.lastAt > FIND_SILENT_MS);
 
-// 页面跟鸭子断了以后：在找鸭子的新地址（每 2 秒探一次，找到就跳过去）；3 分钟没找到就换回原来那段说明
+// After the page loses the duck: looking for the duck's new address (probe every 2 s, jump there when found); if not found within 3 minutes, switch back to the original explanation
 function Finding({ net, find, variant }) {
   const ssid = find.ssid || '这个 WiFi';
   if (find.phase === 'timeout') {
@@ -250,7 +250,7 @@ export function WifiFlow({ net, link, variant = 'card' }) {
   const [switching, setSwitching] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [msg, setMsg] = useState(null);
-  // 连接发出去以后要找的鸭子新地址：{ssid, urls, phase}。phase：wait（还连着）→ finding（断了，在探）→ timeout（3 分钟没找到）
+  // The duck's new address to look for after the connect request: {ssid, urls, phase}. phase: wait (still connected) → finding (disconnected, probing) → timeout (not found within 3 minutes)
   const [find, setFind] = useState(null);
   const [linkUp, setLinkUp] = useState(link.status === 'open');
   useEffect(() => link.on((m) => { if (m.t === '_status') setLinkUp(m.status === 'open'); }), []);
@@ -279,13 +279,13 @@ export function WifiFlow({ net, link, variant = 'card' }) {
   useEffect(() => {
     if (!switching && !find) return;
     const lt = net.last_try;
-    // 连着的时候这一次有了结果（或者早就不忙了）：不用再找
+    // While still connected, this attempt has a result (or has long stopped being busy): no need to search
     if ((lt && typeof lt.at === 'number' && startedAt && lt.at * 1000 >= startedAt - 2000)
       || (!net.busy && startedAt && Date.now() - startedAt > 12000)) { setSwitching(false); setFind(null); }
   }, [net.busy, net.last_try ? net.last_try.at : null]);
 
-  // 断了：开始找鸭子。断过又连上了原来的地址（热点回来了，说明没连上）：停止探测、退回「等结果」，
-  // 上面那个 effect 一收到这一次的 last_try 就收起，失败原因照旧由 LastTry 显示（只是手机睡了几秒、其实没断，也不会把找鸭子弄丢）
+  // Disconnected: start looking for the duck. If it reconnected to the original address (hotspot came back, meaning the connect failed): stop probing and go back to "waiting for result";
+  // the effect above closes as soon as it receives this attempt's last_try, and LastTry still shows the failure reason (if the phone just slept a few seconds and never really disconnected, the duck search isn't lost either)
   useEffect(() => {
     if (!find) return;
     if (gone && find.phase === 'wait') setFind({ ...find, phase: 'finding' });
@@ -295,13 +295,13 @@ export function WifiFlow({ net, link, variant = 'card' }) {
     if (!find || find.phase !== 'finding') return undefined;
     const f = startFind({
       urls: find.urls,
-      onFound: (url) => { if (linkGone(link)) location.href = url; },     // 原来的地址刚好又连上了：不跳，交给上面停下
+      onFound: (url) => { if (linkGone(link)) location.href = url; },     // the original address just reconnected: don't jump, let the code above stop it
       onGiveUp: () => setFind((x) => (x ? { ...x, phase: 'timeout' } : x)),
     });
     return () => f.stop();
   }, [find ? find.phase : null]);
 
-  // 确认框在卡片最下面：手机上点了「连接」看不到它，弹出时滚过去
+  // The confirm box is at the bottom of the card: on phones, after tapping "Connect" it would be out of view, so scroll to it when it pops up
   useEffect(() => {
     if (!confirm) return;
     const e = document.querySelector('.wifi-confirm-wrap');
@@ -326,7 +326,7 @@ export function WifiFlow({ net, link, variant = 'card' }) {
     const wasOpen = link.status === 'open';
     setFind({ ssid, urls: findUrls(net), phase: 'wait' });
     const r = await link.cmd('net.op', { op: 'connect', ssid, psk: pass }, 20000);
-    // Studio 明说不行、本来就没连着、或者连着却没回话：没发出去。回执路上连接断了：多半已经开始切换，接着找鸭子
+    // Studio explicitly refused, wasn't connected to begin with, or was connected but didn't reply: not sent. Connection dropped while the receipt was in flight: most likely switching has started, go on looking for the duck
     if (!r.ok && (r.reason || !wasOpen || link.status === 'open')) {
       setSwitching(false); setFind(null); setMsg(r.reason || r.error || '没发出去');
     }
@@ -457,8 +457,8 @@ export function WifiSettings({ net, link }) {
   </div>`;
 }
 
-// 「更多」页的「这只鸭子的地址」（10-20 真机验收：开着 Clash 的电脑打不开 .local）：后端 net.urls 列出现在能用的
-// HTTP 可列出 DHCP 地址；HTTPS 列出主机名和证书覆盖的固定 IP。
+// "This duck's addresses" on the "More" page (10-20 real-hardware acceptance check: a computer running Clash couldn't open .local): backend net.urls lists the ones usable now
+// HTTP can list the DHCP address; HTTPS lists the hostname and the fixed IPs covered by the certificate.
 export function DuckAddresses({ net }) {
   const [copied, setCopied] = useState(null);       // {url, ok}
   useEffect(() => {

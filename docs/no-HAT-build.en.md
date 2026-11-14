@@ -5,11 +5,11 @@
 > The official HAT is a 4-layer board with components on both sides and 110 parts — one round of prototyping and assembly costs over ¥1,000, and **many people feel it is not worth it**.
 > This is the alternative: one buck converter + one half-duplex adapter board, with jumper wires for the rest. **Functionally you only lose the onboard audio and the shutdown detect signal.**
 
-Read [Hardware basics](硬件入门.md) first to understand what the HAT is supposed to do, then read this to see how to do without it.
+Read [Hardware basics](hardware-primer.en.md) first to understand what the HAT is supposed to do, then read this to see how to do without it.
 
-[![No-HAT wiring diagram](../assets/hw/不打HAT-接线图.png)](不打HAT-接线图.html)
+[![No-HAT wiring diagram](../assets/hw/不打HAT-接线图.png)](no-HAT-wiring-diagram.en.html)
 
-> **The source file of the diagram is [`不打HAT-接线图.html`](不打HAT-接线图.html)** — inline SVG; download it and open it in a browser to zoom, select text and print on A3.
+> **The source file of the diagram is [`不打HAT-接线图.html`](no-HAT-wiring-diagram.en.html)** — inline SVG; download it and open it in a browser to zoom, select text and print on A3.
 > To swap a module or change a pin, edit it directly. The PNG above is only a preview for GitHub.
 
 **Goal**: the controller is powered from the battery, communicates with the servo bus through the adapter board, and the ToF hangs on I²C — **without the HAT board**, ¥70 of modules standing in for over ¥1,000 of prototyping.
@@ -19,7 +19,7 @@ Read [Hardware basics](硬件入门.md) first to understand what the HAT is supp
 
 ## What to buy
 
-Taobao links go dead; **search terms and the numbers to check do not**. For each row, search with the "Search term" and choose by "Check before buying". When you find a suitable one, paste the link into the [Electronics purchase list](电控采购清单.md).
+Taobao links go dead; **search terms and the numbers to check do not**. For each row, search with the "Search term" and choose by "Check before buying". When you find a suitable one, paste the link into the [Electronics purchase list](electronics-purchase-list.en.md).
 
 | Item | Search term | Check before buying | Approx. price |
 |---|---|---|---|
@@ -45,7 +45,7 @@ No shutdown signal + microSD = hard power cuts damage the card; **shut down in s
 > ⚠️ **Zero 3W boards bought after 2024-11 are version V1.12 (WiFi module AIC8800), and the official Armbian image will not boot when flashed directly**:
 > the LED double-blinks, it never boots into the system, and it cannot be found on the LAN. The reason is that the mainline U-Boot Armbian ships for this board (whose memory init firmware is v1.21 from 2024-01)
 > cannot bring up the new board; replacing it with Radxa's own bootloader fixes it. This is why Radxa's official OS boots and Armbian does not.
-> It took us two days and nine card flashes to pin this down, see the [pitfall log](../踩坑记录.md). The card-making script below already handles this step together with the other pitfalls.
+> It took us two days and nine card flashes to pin this down, see the [pitfall log](../PITFALLS.en.md). The card-making script below already handles this step together with the other pitfalls.
 
 **Image**: Armbian **26.2.1 · Debian 13 (trixie) · minimal · vendor kernel 6.1.115**, the version specified by Pollen's official documentation.
 Mirrors in China now only have 26.8.1; 26.2.1 is here (376 MB):

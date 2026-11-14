@@ -24,7 +24,7 @@ The Microduck geometry, mass/inertia and joint conventions in this snapshot come
 | Content | Source | License |
 |---|---|---|
 | Training framework, existing tasks, tools and docs | [Pollen Robotics / microduck_rl](https://github.com/pollen-robotics/microduck_rl) | [Apache-2.0](LICENSE) |
-| Microduck 3D models and meshes | Same as above | The CC BY-SA-NC notice in the upstream README; this repo keeps the attribution, non-commercial and share-alike terms as CC BY-NC-SA 4.0, see [NOTICE](../../NOTICE.md#许可证名称说明) |
+| Microduck 3D models and meshes | Same as above | The CC BY-SA-NC notice in the upstream README; this repo keeps the attribution, non-commercial and share-alike terms as CC BY-NC-SA 4.0, see [NOTICE](../../NOTICE.en.md) |
 | `1910_m6.json` servo dynamics parameters and accompanying configuration reference | [LuwuDynamics / xgoduck_rl](https://github.com/LuwuDynamics/xgoduck_rl) | [Copy of Apache-2.0](src/mjlab_microduck/robot/hd1910/LICENSE) |
 | BAM actuator model and identification library (installed as a dependency) | [Rhoban / BAM](https://github.com/Rhoban/bam) | Apache-2.0; the lock file pins `62bd8ce12154340be97e06f7f41a0ca8f116d967` |
 | HD1910 tasks, state-initialization adaptation, corresponding tests and docs added in this directory | This replica project | Apache-2.0 |
@@ -40,4 +40,4 @@ Dependencies continue to follow their own licenses.
 - SHA-256 of the original file: `ef2d51adfb1cc0831b9b02ca19aa9176fceecdf725148d084378d7d9a64afceb`
 
 The parameters are kept as in the original file and were not identified by this project. For detailed references and configuration boundaries see
-[Parameter source](src/mjlab_microduck/robot/hd1910/README.md). If you later train your own policies based on these parameters, keep the parameter authors' attribution.
+[Parameter source](src/mjlab_microduck/robot/hd1910/README.en.md). If you later train your own policies based on these parameters, keep the parameter authors' attribution.

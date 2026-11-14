@@ -3,7 +3,7 @@
 **English** · [简体中文](HD1910-20261013-官方更新与UDP手柄.md)
 
 **Status**: code written, integration-tested on the PC, 6 rounds of independent review completed (the last round found nothing that must be fixed). **Not yet on the robot.** The patch only lives on the local branch `hd1910-v164-udp-pad`; how to publish it will be decided after real-hardware verification.
-**Base**: kissqy V164 (control.40, official 0.15.1 + his Feetech HD-1910 adaptation), plus our I²C IMU patch; see the [10-12 night on-robot log](HD1910-20261012-夜-IMU校准与首次迈步.md).
+**Base**: kissqy V164 (control.40, official 0.15.1 + his Feetech HD-1910 adaptation), plus our I²C IMU patch; see the [10-12 night on-robot log](HD1910-20261012-night-IMU-calibration-and-first-steps.en.md).
 
 **One-line conclusion**: on 10-12 the official team released robotd 0.16.2 through 0.17.1 in quick succession; the main new feature is the "UDP gamepad": plug a gamepad into a PC and control the duck over the LAN. We're not upgrading wholesale; we only picked out two items, the UDP gamepad and "sit down automatically 1 second after the gamepad disconnects", and ported them into kissqy's padd. The wire protocol is byte-for-byte identical to the official one, so the official `duckctl` can be used directly on the PC side.
 
@@ -13,7 +13,7 @@
 
 | Official update | Relevance to us | Action |
 |---|---|---|
-| robotd 0.17: **UDP gamepad** (`netpadd` + PC-side `duckctl udp-pad`) | Can replace the trouble-prone web gamepad ([10-12 night §1](HD1910-20261012-夜-IMU校准与首次迈步.md)); also usable by people without a Bluetooth gamepad | **Port it** |
+| robotd 0.17: **UDP gamepad** (`netpadd` + PC-side `duckctl udp-pad`) | Can replace the trouble-prone web gamepad ([10-12 night §1](HD1910-20261012-night-IMU-calibration-and-first-steps.en.md)); also usable by people without a Bluetooth gamepad | **Port it** |
 | Gamepad disconnect: after 1 second disconnected, make a sound and sit down; dropouts shorter than 1 second are silent (PR #372, #398) | Safety item; benefits the Bluetooth gamepad too | **Port it** |
 | Stick axes are configurable | Our gamepad works with the default mapping | Don't port |
 | Beta board features from 0.16 on: NFC, head IMU, face lights, SPI-interface ToF, new camera | Our hardware can't use them | Don't port |
@@ -70,7 +70,7 @@ After the changes, as agreed, we started a subagent for independent review, 6 ro
 | Holding Select and leaving during a stall triggers shutdown after the stall ends; holding X keeps re-sending the forward roll | The "held" state in queued packets was taken at face value, and the stall time was counted toward the 2-second long press | During the untrusted period, long press and repeat only keep time and don't trigger |
 | Releasing and re-pressing Select during a stall turns two short presses into one shutdown | Old `SelectButton` logic: when "release + press" happen in the same tick, the release is swallowed. kissqy's and the official Bluetooth paths are written the same way | Process the release first (e-stop), then restart timing from the current moment |
 
-We also fixed: several files had been written with Windows line endings ([Pitfall log · Software](../踩坑记录.md#软件) already had this entry, and we hit it again); the docs now describe the consequences of a misconfigured `[netpad]`; requests sent during auto sit-down no longer show up as "your request was rejected".
+We also fixed: several files had been written with Windows line endings ([Pitfall log · Software](../PITFALLS.en.md) already had this entry, and we hit it again); the docs now describe the consequences of a misconfigured `[netpad]`; requests sent during auto sit-down no longer show up as "your request was rejected".
 
 ## 5. Test results (on the PC)
 

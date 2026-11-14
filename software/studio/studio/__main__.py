@@ -1,10 +1,10 @@
-"""启动 Studio。用 run.py 启动（它负责把 deps/ 放进搜索路径）：
+"""Start Studio. Launch via run.py (it puts deps/ on the search path):
 
-    鸭子上：  python3 -I run.py --listen 0.0.0.0:8000
-    电脑上：  py -3.13 -I run.py --listen 127.0.0.1:8000 --robotd tcp:127.0.0.1:17001 --configd tcp:127.0.0.1:17002
-              （先起假 robotd：py -3.13 -I dev/fake_robotd.py）
-    只读自检：python3 -I run.py --selfcheck
-    设密码：  网页「更多 → 登录密码」，或者用 radxa 用户运行 python3 -I run.py set-password
+    On the duck:  python3 -I run.py --listen 0.0.0.0:8000
+    On a computer:  py -3.13 -I run.py --listen 127.0.0.1:8000 --robotd tcp:127.0.0.1:17001 --configd tcp:127.0.0.1:17002
+              (start the fake robotd first: py -3.13 -I dev/fake_robotd.py)
+    Read-only self-check: python3 -I run.py --selfcheck
+    Set password:  web page "More → Login password", or run python3 -I run.py set-password as the radxa user
 """
 import argparse
 import asyncio
@@ -66,7 +66,7 @@ def parse(argv=None):
 
 def main(argv=None):
     a = parse(argv)
-    # 默认值放在最前面定：后面 Robotd、自检都要用
+    # Defaults are set first: Robotd and the self-check below both need them
     if a.listen is None:
         a.listen = "127.0.0.1:18080" if a.bench else "0.0.0.0:8000"
     if a.robotd is None:
@@ -117,7 +117,7 @@ def main(argv=None):
     host, _, port = a.listen.rpartition(":")
     scheme = "http"
     tls = {}
-    # 首次开机生成的局部 CA 证书放这儿；没显式给 --tls-* 就自动用它（镜像不用额外 drop-in）
+    # The local CA certificate generated at first boot lives here; used automatically if no --tls-* is given explicitly (the image needs no extra drop-in)
     tls_dir = "/etc/microduck/tls"
     auto_cert, auto_key = os.path.join(tls_dir, "duck.crt"), os.path.join(tls_dir, "duck.key")
     if not a.tls_cert and not a.tls_key and os.path.isfile(auto_cert) and os.path.isfile(auto_key):
@@ -136,36 +136,36 @@ def main(argv=None):
     if a.dev_autologin and host != "127.0.0.1":
         raise SystemExit("--dev-autologin 只能配 --listen 127.0.0.1:端口 用")
     if a.dev_autologin and (os.path.exists("/run/robotd.sock") or a.robotd.startswith("unix:")):
-        # 鸭子上本机转发（反向代理、SSH 隧道）来的请求也是 127.0.0.1，开了等于人人是管理员
+        # Requests forwarded locally on the duck (reverse proxy, SSH tunnel) also come from 127.0.0.1, so enabling this would make everyone an admin
         raise SystemExit("--dev-autologin 只能在电脑上配假 robotd 用，鸭子上不能开")
-    # 镜像里不写死名字：没给 --duck-label 就用主机名（新卡第一次开机是 duck-xxxx）
+    # The name is not hard-coded in the image: without --duck-label use the hostname (duck-xxxx on a new card's first boot)
     label = a.duck_label or socket.gethostname()
     duck = {"label": label, "short": label.split(" ")[-1], "color": a.duck_color}
     names = list(a.name)
     precompress(a.web_dir)
     from .servo import ServoSession, load_directions
-    # 舵机页一直有：鸭子上默认 /dev/ttyS2；电脑上没给 --servo-port 就在页面上选串口（跟 servo-web 一样）
+    # The servo page is always there: /dev/ttyS2 by default on the duck; on a computer without --servo-port, the serial port is chosen on the page (same as servo-web)
     servo = ServoSession(log, port=a.servo_port, sim=a.servo_sim, directions=load_directions(state_dir),
                          state_dir=state_dir)
     from .imu import ImuBackend
     imu = ImuBackend(rd, log, state_dir, root=a.dev_duck_root or "/")
     from .pad import default_pad
-    # 台架模式（--bench）不连主程序，也就没有手柄页的后端
+    # Bench mode (--bench) does not connect to the main program, so there is no gamepad page backend
     pad = None if a.bench else default_pad(log, configd_addr=a.configd, robotd_addr=a.robotd, state_dir=state_dir)
     from .onboard import Onboarding
-    # 总览上的上手清单（记录在 state 目录的 onboarding.json）；台架模式不连主程序，清单只写一句「不检查」
+    # Getting-started checklist on the overview (recorded in onboarding.json in the state directory); bench mode does not connect to the main program, so the checklist just says "not checked"
     onboard = Onboarding(state_dir, log)
     from .commit import CommitService
-    # 上手清单第 3 步「写进主程序」：准备情况、预览、调 root 小助手写（电脑上没有小助手就只给预览、写入拒绝）
+    # Step 3 of the getting-started checklist, "Write to main program": readiness, preview, and writing via the root helper (on a computer without the helper, only preview is offered and writing is refused)
     commit = CommitService(rd, log, state_dir)
     from .battery_svc import BatteryService
-    # 电量估算（舵机电压查表，只警告）：设置在 state 目录的 battery-settings.json
+    # Battery estimate (servo voltage lookup, warnings only): settings in battery-settings.json in the state directory
     battery = BatteryService(rd, log, state_dir, servo=servo, onboard=onboard)
     from .net import Net
-    # 配网状态：电脑上开发 / 没装小助手时，连 WiFi 不关热点（日志里写一句）
+    # Network setup status: when developing on a computer / without the helper installed, connecting to Wi-Fi does not shut the hotspot (a line is logged)
     net = Net(a.configd, a.net_state, state_dir, log, dev_mode=bool(a.dev_autologin), port=int(port),
               scheme=scheme)
-    # 总览下面「运行和调参」、设置页的模型（调参方案 T1–T3，只读）。台架模式不连主程序，就不开
+    # "Run and tuning" below the overview and the model on the settings page (tuning plan T1–T3, read-only). Not enabled in bench mode, which does not connect to the main program
     tune = None
     models = None
     if not a.bench:

@@ -18,7 +18,7 @@ Set IDs, change parameters, drag a slider and watch the servo turn. This folder 
 3  In FD, select that COM port → baud rate 1000000 → click "Open" → click "Search"
 ```
 
-If it finds the servo, you're connected. **How to wire jumpers, how to power it, setting IDs, which parameters to change, the ID mapping table**: all in [Debug log · Servo configuration](../../调试记录.md#舵机配置--拿到货一步一步做), step by step.
+If it finds the servo, you're connected. **How to wire jumpers, how to power it, setting IDs, which parameters to change, the ID mapping table**: all in [Debug log · Servo configuration](../../DEBUG-LOG.en.md), step by step.
 
 ## Drivers and serial terminal
 
@@ -28,7 +28,7 @@ If it finds the servo, you're connected. **How to wire jumpers, how to power it,
 | [CH341SER.ZIP](https://gitee.com/ftservo/fddebug/blob/master/CH341SER.ZIP) | For adapter boards with CH340 / CH341 chips |
 | [UartAssist.zip](https://gitee.com/ftservo/fddebug/blob/master/UartAssist.zip) | General-purpose serial send/receive tool; sends and receives text or hex data according to the device protocol |
 
-The official repository was checked on 2026-10-25, and FD 1.9.8.5 is still listed as the stable version. For later versions, the [official Feetech repository](https://gitee.com/ftservo/fddebug) is authoritative; for the protocol, memory table and SDK, see the [Feetech materials index](../../docs/飞特资料/README.md).
+The official repository was checked on 2026-10-25, and FD 1.9.8.5 is still listed as the stable version. For later versions, the [official Feetech repository](https://gitee.com/ftservo/fddebug) is authoritative; for the protocol, memory table and SDK, see the [Feetech materials index](../../docs/飞特资料/README.en.md).
 
 ## Source and verification
 
@@ -43,7 +43,7 @@ CH340_URT.rar          546aaf96a54647f7a3ddd7e21389d64be2d198926c6058d8b19ee90e9
 If you suspect a file is corrupted, run `sha256sum` and compare against these two lines.
 
 **Why it's in the repo**: Gitee sometimes requires a login to download and sometimes changes its folder structure; people who clone this repo shouldn't have to go hunting for it. MIT allows redistribution as is.
-**To update**: get the new version from the repository above, replace the files, update the version numbers and hashes here, and update the version in [NOTICE](../../NOTICE.md).
+**To update**: get the new version from the repository above, replace the files, update the version numbers and hashes here, and update the version in [NOTICE](../../NOTICE.en.md).
 
 ## Web debug console
 

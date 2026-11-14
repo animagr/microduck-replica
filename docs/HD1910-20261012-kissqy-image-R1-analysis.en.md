@@ -40,10 +40,10 @@ This document is written for both humans and AI: every conclusion states its bas
 
 | Problem | Who is affected | Basis |
 |---|---|---|
-| **V1.12 boards may not boot** | Our first robot's V1.12 (AIC8800) batch; group members say the 2026-09 V1.12J batch also needs a different device tree | The bootloader is Armbian mainline U-Boot 2025.10 + DDR v1.21. The first robot got stuck on exactly this combination in September and only came up after switching to the Radxa bootloader (see [pitfall log · software](../踩坑记录.md#软件)). His board boots, which shows his batch has no such problem |
+| **V1.12 boards may not boot** | Our first robot's V1.12 (AIC8800) batch; group members say the 2026-09 V1.12J batch also needs a different device tree | The bootloader is Armbian mainline U-Boot 2025.10 + DDR v1.21. The first robot got stuck on exactly this combination in September and only came up after switching to the Radxa bootloader (see [pitfall log · software](../PITFALLS.en.md)). His board boots, which shows his batch has no such problem |
 | **Only accepts the bus IMU board** | People using BNO085 / LSM6DSV16X modules | The firmware only has code to read ID 200, with required identity `06 00 00 00 F2` (his FT6 firmware) and no I²C IMU; the boot configuration also does not enable I2C4 (pins 27/28) |
 | **His prototype's calibration preinstalled, IMU marked "confirmed"** | Everyone | The zero positions in `hd1910-calibration.toml` are from his duck (2281, 2176, ...), directions all −1, `imu_mount_verified = true`. Fortunately `motion_enabled = false`, so it will not move as soon as it is powered |
-| **Camera and ranging services on by default** | People without a camera or ToF installed | Without the devices, mediad and tofd keep crashing and restarting and the board heats up until it throttles; see [on-robot record §4](HD1910-20261012-kissqy整套上机.md) |
+| **Camera and ranging services on by default** | People without a camera or ToF installed | Without the devices, mediad and tofd keep crashing and restarting and the board heats up until it throttles; see [on-robot record §4](HD1910-20261012-kissqy-full-stack-on-robot.en.md) |
 | **Full HAT configuration by default** | People with a no-HAT build | Audio chip and I2C3 overlays are on; in a no-HAT build this does not prevent booting, but those features do not work |
 | **robotd has no I²C device permission** | Adding IMU module support on his image later | robotd's systemd configuration only allows the servo serial port and the sound card, not `char-i2c` |
 
@@ -70,7 +70,7 @@ sudo bash kissqy-r1-v112.sh microduck-zero3w-0.15.1-R1.img.xz [--no-camera] [--n
 
 It only changes the following and keeps everything else as is (his firmware, models, first-time network setup, account locking and first-boot SSH key generation are untouched):
 
-1. Writes the Radxa `u-boot-rk2410 2017.09-64` bootloader at sectors 64 and 16384 (the same package used by our [card-flashing script](../tools/radxa/README.md), sha256 pinned);
+1. Writes the Radxa `u-boot-rk2410 2017.09-64` bootloader at sectors 64 and 16384 (the same package used by our [card-flashing script](../tools/radxa/README.en.md), sha256 pinned);
 2. Adds `/boot/extlinux/extlinux.conf`. The Radxa bootloader only reads this file, not `boot.scr`. Overlays, device tree and kernel parameters are all carried over from the image's own `armbianEnv.txt`, so his HAT audio, camera and NPU still take effect;
 3. `--overlay NAME`: adds an extra overlay, e.g. `i2c4-m0` (for an IMU module wired to 40-pin header pins 27/28);
 4. `--no-camera`, `--no-tof`: when no camera or ToF is installed, mediad and tofd are not started at boot;

@@ -33,6 +33,6 @@ Date: 2026-10-26 (JST). The user explicitly asked for it to "keep working in the
 
 In this round the live speaker-output input RMS was about 327–2266, with clear acoustic changes observable; a 12-second private DSP comparison could detect 24 onsets, but the existing RMS beat had only 16/120 valid items. Another 45-second record had 149/450 valid items, the UI foreground state was uncertain, and the joints did not move. Therefore "music received", "stable beat recognized", "background session alive" and "the model makes the joints move" must each be confirmed separately. The aubio experiment is still only in staging and is not wired into production.
 
-The current model's body tracking reward weight is 0; an earlier short direct head yaw test could respond, while the body basically did not respond. See the [local music investigation](2026-10-26-local-music-fix.md). This background lifecycle fix does not change the body model's capability, nor does it add mouth motion to the music.
+The current model's body tracking reward weight is 0; an earlier short direct head yaw test could respond, while the body basically did not respond. See the [local music investigation](2026-10-26-local-music-fix.en.md). This background lifecycle fix does not change the body model's capability, nor does it add mouth motion to the music.
 
 Root workspace evidence: `artifacts/background-music-20261026/`; earlier sound/model probes are in `artifacts/music-local-fix-20261026/`.

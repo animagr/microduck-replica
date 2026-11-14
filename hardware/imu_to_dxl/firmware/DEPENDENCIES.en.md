@@ -39,4 +39,4 @@ After recompiling, recheck the symbols and sizes with your local MAP file, and r
 
 The host C tests need MSVC; first launch the **x64 Native Tools Command Prompt / Developer PowerShell**, then run `Tools/test.ps1 -PythonExe '自己的Python路径'` (replace with your own Python path). The test entry point installs no software and does not connect to hardware.
 
-`Drivers/CMSIS/dependency-hashes.json` records the SHA-256 of the included driver files; the ST source commit metadata is in `Drivers/CMSIS/Device/ST/STM32G0xx/source-commit.json`. The scope of build and real-board validation is described in [VALIDATION.md](VALIDATION.md).
+`Drivers/CMSIS/dependency-hashes.json` records the SHA-256 of the included driver files; the ST source commit metadata is in `Drivers/CMSIS/Device/ST/STM32G0xx/source-commit.json`. The scope of build and real-board validation is described in [VALIDATION.md](VALIDATION.en.md).

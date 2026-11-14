@@ -5,8 +5,8 @@
 > This document answers one question: **how many boards are actually in a Microduck, and what does each one do.**
 >
 > How it divides the work with the other two:
-> [Hardware reverse engineering](硬件方案逆向.md) is the **derivation process and sources of evidence** (for people who want to verify),
-> [Hardware spec quick reference](硬件规格速查.md) is the **one-page spec sheet** (for people who already know and want to look things up).
+> [Hardware reverse engineering](hardware-teardown.en.md) is the **derivation process and sources of evidence** (for people who want to verify),
+> [Hardware spec quick reference](hardware-spec-quick-reference.en.md) is the **one-page spec sheet** (for people who already know and want to look things up).
 > This document is the **introductory explanation**, assuming you are new to the project.
 >
 > Every conclusion can be checked yourself — the last section, [How to check it yourself](#九怎么自己核对复刻前必做的五件事),
@@ -86,7 +86,7 @@ because it means the replica does not need to make a controller board. The devic
 | GPIO04/05, 08/09, 10/11 | Extra Stemma/QT I²C | |
 | MIPI CSI | Camera | |
 
-**Which configuration to buy**: a 1G or 2G bare board **without eMMC**, plus a 32 GB microSD card, only from official channels. For the hardware test and reasoning, see the [electronics purchase list](电控采购清单.md#该买哪个配置).
+**Which configuration to buy**: a 1G or 2G bare board **without eMMC**, plus a 32 GB microSD card, only from official channels. For the hardware test and reasoning, see the [electronics purchase list](electronics-purchase-list.en.md).
 The official material says 1 GB RAM, 32 GB storage (without saying eMMC). (2026-10-12 correction: the "2G / 16G eMMC" written previously is unnecessary.)
 
 ---
@@ -118,7 +118,7 @@ This is not a guess; the schematic says so directly: the power pins of all four 
 with the note "3A max". And **the whole board has only one buck (U9) and one inductor (L4)**; that 5V rail is for the controller
 — the 2A AP63205 could not drive 15 XL330s anyway (about 1.5A each at stall).
 
-See [the voltage truth](执行器选型.md#-电压真相xl330-被超压运行) for details.
+See [the voltage truth](actuator-selection.en.md) for details.
 
 > `+3V3`, conversely, is **supplied to the HAT by the controller via the 40-pin header**; the HAT does not generate it itself.
 
@@ -175,7 +175,7 @@ Audio clocks: MCLK from a fixed 12 MHz oscillator, I²S sysclk 12.288 MHz (256 �
 
 1. **Faithful fabrication** — take the official Gerber + BOM + pick-and-place and order from JLCPCB. 4-layer + SMT, from several hundred yuan, with minimum order quantities.
 2. **Replace it with ready-made modules** — a ¥22 ST/SC half-duplex adapter board + a UBEC replaces both required functions, "servo bus" and
-   "power distribution", and the ToF hangs directly on i2c3. The cost is losing the onboard audio. See the [electronics purchase list](电控采购清单.md#六两块-pcb).
+   "power distribution", and the ToF hangs directly on i2c3. The cost is losing the onboard audio. See the [electronics purchase list](electronics-purchase-list.en.md).
 
 ---
 
@@ -233,7 +233,7 @@ ID  200              imu_to_dxl board
 
 ### Notes for the replica
 
-- **The protocol and register layout have been fully reconstructed**; just implement it as described ([hardware reverse engineering](硬件方案逆向.md))
+- **The protocol and register layout have been fully reconstructed**; just implement it as described ([hardware reverse engineering](hardware-teardown.en.md))
 - **Use a 2.5 mm pitch 3P connector** (JST EH / 5264)
 - **Input capacitor voltage rating ≥25 V** — the bus is 8.4 V fully charged; a 10 V rating is not enough margin (and MLCCs also lose capacitance under DC bias)
 - **Add a pull-up on the CS pin** — see the real case in the next section
@@ -316,7 +316,7 @@ Many people (including this repo) are evaluating Feetech servos as a replacement
 |---|---|
 | 🔴 **The 9 official ONNX policies will most likely stop working** | With different servos, the torque curves, masses and possibly even the gear ratios differ. **Retraining is required** (needs a CUDA GPU or HF jobs) |
 | 🟡 **Bus timing must be measured on real hardware** | Feetech uses its own STS/SCS instruction set (including `0x82 SYNC READ`) with a different packet format. **But do not assume it must be slower** — the official Dynamixel path also has a per-device turnaround delay (see above). The first thing to do on arrival is run a benchmark, with an **FE-URT-1 debug board** |
-| 🟡 **`imu_to_dxl` needs to be repositioned** | The bus protocol changes, so this board either becomes an emulated Feetech slave, or the "on the bus" design is dropped and the IMU connects directly via SPI. **Recommendation: same hardware, dual-protocol firmware** — the physical layers are identical (half-duplex single-wire TTL / 1 Mbps / 3 wires); the differences are in the **packet format** and **factory defaults**; see "Feetech STS/SCS protocol comparison" in [hardware reverse engineering](硬件方案逆向.md) |
+| 🟡 **`imu_to_dxl` needs to be repositioned** | The bus protocol changes, so this board either becomes an emulated Feetech slave, or the "on the bus" design is dropped and the IMU connects directly via SPI. **Recommendation: same hardware, dual-protocol firmware** — the physical layers are identical (half-duplex single-wire TTL / 1 Mbps / 3 wires); the differences are in the **packet format** and **factory defaults**; see "Feetech STS/SCS protocol comparison" in [hardware reverse engineering](hardware-teardown.en.md) |
 | 🟢 **The voltage actually fits better** | The Feetech HD-1910 natively takes 5–8.4 V, so it does not have to run overvolted like the XL330 |
 
 ---
@@ -396,7 +396,7 @@ Microduck's software is open source, and **the code is the datasheet**. Every ad
 | HAT board specs | Measured from Gerber `Edge_Cuts.gm1`; BOM.csv 47 lines / POS.csv 117 lines |
 | Servos on `+BATT` | Schematic Dynamixel page (4/6), note "3A max" |
 | Only one buck | The whole BOM.csv has only one inductor, L4 (FB1/2/3 are ferrite beads) |
-| 12-byte register layout | `robotd` source, see [hardware reverse engineering](硬件方案逆向.md) |
+| 12-byte register layout | `robotd` source, see [hardware reverse engineering](hardware-teardown.en.md) |
 | Camera rotated 90° | `mediad/src/main.rs:82` |
 | 8 ms turnaround delay | `duck-control/src/model.rs:84-86` |
 | LSM6DSV16X pins | **ST DS13510 Rev 1, Table 1, page 10** |

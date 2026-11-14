@@ -1,20 +1,20 @@
-"""假 robotd 里跟「运行和调参」有关的形状（调参方案 v2 T1–T3）。fake_robotd.py 在三个地方调这里：
-- set_posture 之后：after_posture(fake, p) —— 策略开着时补 active_action_scale / active_target_filters / scale_use
-  （录的夹具是策略没开时的，没有这几个：等上鸭子录「策略开着站着 / 在走 / 坐着」三段再换真的）；
-  新姿势 walk_unloaded：照 fork 的真实行为（审查 T-R1）——第 3 步报 success「策略按配置关闭」、loaded_models 为空、
-  槽错误和 change_error 都是空的；
-- fake.set：fake_set(fake, params) 认这几个键：
-    startup {steps:{...}} / null        盖掉按姿势算的启动四步（null = 回到按姿势算），订阅着的连接马上收到通知
-    servo_parameters {kp,kd,torque_limit} / null / "absent"   native.hd1910.servo_parameters（"absent" = 键都没有，像原版板端固件）
-    walk_profile {action_scale,head_lowpass,legs_lowpass}    loaded_models.walk.runtime_execution_profile 改成这样
-    guard {...}                          home_start_guard 里改几项
-    last_enable_refusal "原因" / null
-    slot_error {槽: "原因" / null}       robot.policies 的 slots[].error
-    change_error "原因" / null           robot.policies 的 change_error
-    regs null                            registers_before_arm 变空（没上过力）
-- 连接上收到 robot.startupSubscribe：startup_stream(fake, reader, writer, rid) —— 先回现在的四步，有变化推 robot.startup，
-  客户端发一行或断开就结束（fork robotd main.rs:4671-4686 一样）。errors 里有这个方法就回错（模拟老 robotd 没有它）。
-步骤的原话是我们自己写的近似文字；只有「策略按配置关闭」照抄，startup.py 要认这几个字。
+"""Shapes in the fake robotd related to "Run and tuning" (tuning plan v2 T1–T3). fake_robotd.py calls into here in three places:
+- after set_posture: after_posture(fake, p): while the policy is on, add active_action_scale / active_target_filters / scale_use
+  (the recorded fixtures are from when the policy was off and lack these; swap in real ones after recording three segments on the duck: "policy on, standing / walking / sitting");
+  new posture walk_unloaded: follows the fork's real behavior (review T-R1): step 3 reports success "策略按配置关闭" (policy disabled by configuration), loaded_models is empty,
+  and slot errors and change_error are all empty;
+- fake.set: fake_set(fake, params) recognizes these keys:
+    startup {steps:{...}} / null        overrides the four startup steps computed from posture (null = back to computing from posture); subscribed connections are notified immediately
+    servo_parameters {kp,kd,torque_limit} / null / "absent"   native.hd1910.servo_parameters ("absent" = the key does not exist at all, like the original on-board firmware)
+    walk_profile {action_scale,head_lowpass,legs_lowpass}    changes loaded_models.walk.runtime_execution_profile to this
+    guard {...}                          changes some items in home_start_guard
+    last_enable_refusal "reason" / null
+    slot_error {slot: "reason" / null}       slots[].error of robot.policies
+    change_error "reason" / null           change_error of robot.policies
+    regs null                            registers_before_arm becomes empty (never powered)
+- robot.startupSubscribe received on a connection: startup_stream(fake, reader, writer, rid): first reply with the current four steps, push robot.startup on changes,
+  and end when the client sends a line or disconnects (same as fork robotd main.rs:4671-4686). If errors contains this method, reply with an error (simulating an old robotd without it).
+The step wording is our own approximation; only "策略按配置关闭" (policy disabled by configuration) is copied verbatim, since startup.py must recognize those words.
 """
 import asyncio
 import copy
@@ -37,8 +37,8 @@ def startup_report(fake):
     elif p == "stuck_calib":
         steps = {"1": s1, "2": {"status": "waiting", "detail": fake.bus.get("error")}}
     elif p == "commissioning":
-        # 照 fork feetech_commissioning.rs：开总线前第 2 步 starting / 打不开 waiting；第一次读成功以后四步都成功。
-        # 旧 fork（comm_stuck）四步照样都成功，只是 busStatus 一直回启动报告
+        # Following fork feetech_commissioning.rs: before opening the bus step 2 is starting / waiting if it cannot open; after the first successful read all four steps succeed.
+        # The old fork (comm_stuck) also reports all four steps as successful, but busStatus keeps returning the startup report
         cp = fake.comm_phase() if hasattr(fake, "comm_phase") and fake.mode == "commissioning" else "up"
         if cp == "waiting":
             steps = {"1": s1, "2": {"status": "waiting", "detail": "torque readback at register 40: Feetech Sync Read timeout"}}
@@ -57,7 +57,7 @@ def startup_report(fake):
 def after_posture(fake, p):
     bus = fake.bus
     if not isinstance(bus.get("native"), dict):
-        return                                    # 调试模式 / 等总线：busStatus 里没有这些
+        return                                    # debug mode / waiting for the bus: busStatus has none of these
     b0 = fake._bus0
     if p == "walk_unloaded":
         bus["loaded_models"] = None
@@ -128,7 +128,7 @@ async def startup_stream(fake, reader, writer, rid):
         while True:
             done, _ = await asyncio.wait({line}, timeout=0.1)
             if done:
-                return                            # 客户端发了一行或者断开：跟 robotd 一样结束
+                return                            # the client sent a line or disconnected: end, same as robotd
             cur = startup_report(fake)
             if cur != last:
                 last = cur

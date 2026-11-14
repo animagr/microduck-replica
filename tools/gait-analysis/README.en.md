@@ -3,7 +3,7 @@
 **English** · [简体中文](README.md)
 
 Scripts used on the night of 2026-10-13 into the early hours of 10-14 to analyze "jittery walking" and "foot scuffing". All of them are **read-only**: they only read recording files and do not connect to the duck.
-For how they were used step by step to reach conclusions, see the [2026-10-13 night hardware test log](../../docs/HD1910-20261013-夜-掉电-舵机D与蹭地.md).
+For how they were used step by step to reach conclusions, see the [2026-10-13 night hardware test log](../../docs/HD1910-20261013-night-brownout-servo-D-and-foot-scuffing.en.md).
 
 **Input**: 50 Hz JSONL recorded by [`duck_rec.py`](../radxa/onboard-analysis/duck_rec.py) on the board (joint angles, targets, IMU gravity and gyro, joystick commands, policy state). Copy it to the PC before running.
 **Environment**: Python 3.10+, `numpy`, `scipy`; scripts that take an `MJCF` argument also need `mujoco` and `src/mjlab_microduck/robot/microduck/scene_backlash.xml` from the official `microduck_rl` repo (for forward kinematics).
@@ -23,5 +23,5 @@ For how they were used step by step to reach conclusions, see the [2026-10-13 ni
 
 **Notes**:
 - The `@` syntax cuts out a section by the recording's `wall` (Unix time); use it when parameters were changed within one recording;
-- `foot_clear.py` and others use the IMU's gravity direction to level the body. If the IMU zero is off by 1°, the two feet will differ by about 2 mm in the calculation (foot spacing is about 98 mm). First calibrate the zero following [IMU calibration](../radxa/onboard-analysis/README.md#imu-校准今晚手动做的流程), then compare left and right; the "self-check" row for standing at HOME should be within ±1 mm;
+- `foot_clear.py` and others use the IMU's gravity direction to level the body. If the IMU zero is off by 1°, the two feet will differ by about 2 mm in the calculation (foot spacing is about 98 mm). First calibrate the zero following [IMU calibration](../radxa/onboard-analysis/README.en.md), then compare left and right; the "self-check" row for standing at HOME should be within ±1 mm;
 - Simulation recordings can also be fed in directly (same fields) as a reference.

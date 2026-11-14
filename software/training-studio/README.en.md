@@ -10,7 +10,7 @@ The Action Lab offers two tabs, “训练配方” (Training recipes) and “预
 
 Training details include execution-host resources refreshed about every 3 seconds: GPU model/utilization/temperature/VRAM, CPU model/utilization/temperature, and memory. Linux/WSL uses `/proc`, available CPU temperature sensors and `nvidia-smi` with a timeout; Windows uses system counters and driver tools; no monitoring dependencies need to be installed. Missing fields are left empty with an explanation of why. The resources are overall readings of the current execution host; WSL CPU/memory reflect what the subsystem can see, and cannot be taken as usage exclusive to a single experiment or as historical usage.
 
-The training engine lives in the neighboring [`../training`](../training/README.md), and the robot web console in [`../studio`](../studio/README.md). This directory is a standalone service that uses the existing training project; the robot's system image does not need to be updated.
+The training engine lives in the neighboring [`../training`](../training/README.en.md), and the robot web console in [`../studio`](../studio/README.en.md). This directory is a standalone service that uses the existing training project; the robot's system image does not need to be updated.
 
 ## Try it locally first
 
@@ -27,7 +27,7 @@ Demo mode starts a separate lightweight subprocess that generates **synthetic me
 
 ## Real training
 
-On a prepared Linux NVIDIA GPU machine or in Windows WSL2, use this repo's training project and its locked dependencies. Real mode checks the MuJoCo graphics backend, mjlab 1.3.0, CUDA and the HD1910 task registration; it does not install packages automatically, request a cloud machine, or handle top-ups. For local operation see [Local smoke run](docs/local-smoke.md).
+On a prepared Linux NVIDIA GPU machine or in Windows WSL2, use this repo's training project and its locked dependencies. Real mode checks the MuJoCo graphics backend, mjlab 1.3.0, CUDA and the HD1910 task registration; it does not install packages automatically, request a cloud machine, or handle top-ups. For local operation see [Local smoke run](docs/local-smoke.en.md).
 
 ```sh
 cd software/training
@@ -48,11 +48,11 @@ By default the service listens only on the local machine. If you really need to 
 
 ## A complete practice run
 
-“动作实验室” (Action Lab) in the navigation is a standalone recipe library page (`#/actions`), with an entry kept on the home page. You can search, filter by category, view a model preview or text description, and then start training with a recipe. The existing flat-ground walking, rough terrain and single-leg balance recipes are each labeled with their verification status; for how community contributions are accepted see [Action recipe contribution guide](docs/recipe-contribution.md).
+“动作实验室” (Action Lab) in the navigation is a standalone recipe library page (`#/actions`), with an entry kept on the home page. You can search, filter by category, view a model preview or text description, and then start training with a recipe. The existing flat-ground walking, rough terrain and single-leg balance recipes are each labeled with their verification status; for how community contributions are accepted see [Action recipe contribution guide](docs/recipe-contribution.en.md).
 
 Among them, the experimental **HD1910 单脚平衡** (HD1910 single-leg balance) lets you choose the support foot, the foot lift height (0.5–2 cm) and the hold time (1–5 seconds) without changing code. A full cycle includes preparation, lifting the foot, holding, and putting the foot down to recover. The 3D target illustration does not represent physical balance or a training result. Jumping, precise turning in place and video imitation are not integrated yet.
 
-For step-by-step operation for beginners, judging results, and the development steps for adding new actions, see the [Action Lab getting-started guide](web/custom-actions.md); it can also be opened from the sidebar or the new-training window.
+For step-by-step operation for beginners, judging results, and the development steps for adding new actions, see the [Action Lab getting-started guide](web/custom-actions.en.md); it can also be opened from the sidebar or the new-training window.
 
 1. In “计算环境” (Compute environment), confirm that the checks pass; after installing dependencies you can re-run the checks.
 2. Create a new experiment and pick **HD1910 平地行走** (HD1910 flat-ground walking) first. The first run is a fixed short smoke run with **64 environments and 5 iterations** that checks loading, simulation stepping and the saving pipeline. A smoke run is not a training result.
@@ -79,9 +79,9 @@ Service records are in `state/runs/<id>/` by default, and the engine's raw logs 
 
 The balance task uses a separate `microduck_hd1910_balance` experiment directory and uses `skill.json` for training, continued training, evaluation and export. The export package includes the command convention. Although the policy is still 61-dim observation, 14-dim action, 50 Hz, the meaning of its command slots has changed, so the existing walking deployment side needs to be adapted for phase scheduling; single-leg balance has not been verified on the real robot yet.
 
-Single-leg balance has completed real GPU smoke runs for both the left and right sides, 8-attempt evaluations and ONNX consistency checks. The current 5-iteration policy has a success rate of 0/8, which only proves the pipeline works. See [Action Lab acceptance check](docs/action-lab-verification.md). For the positioning and contribution process of the community action recipe library see the [design notes](docs/action-lab-design.md#后续定位社区动作配方库); sharing and automatic installation are not implemented yet.
+Single-leg balance has completed real GPU smoke runs for both the left and right sides, 8-attempt evaluations and ONNX consistency checks. The current 5-iteration policy has a success rate of 0/8, which only proves the pipeline works. See [Action Lab acceptance check](docs/action-lab-verification.en.md). For the positioning and contribution process of the community action recipe library see the [design notes](docs/action-lab-design.en.md#后续定位社区动作配方库); sharing and automatic installation are not implemented yet.
 
-The HD1910 flat-ground task has completed real 64-environment, 5-iteration training, PT saving, 250-step video evaluation and ONNX export on WSL2 / RTX 5060 Ti, with an independent check of PT/ONNX inference consistency. See the [acceptance record](docs/verification.md). Rough terrain, long training, the target cloud machine and real-robot deployment still need separate acceptance checks; a smoke run does not prove that the action is fully trained.
+The HD1910 flat-ground task has completed real 64-environment, 5-iteration training, PT saving, 250-step video evaluation and ONNX export on WSL2 / RTX 5060 Ti, with an independent check of PT/ONNX inference consistency. See the [acceptance record](docs/verification.en.md). Rough terrain, long training, the target cloud machine and real-robot deployment still need separate acceptance checks; a smoke run does not prove that the action is fully trained.
 
 ## Development verification
 
@@ -96,12 +96,12 @@ The browser acceptance check uses Playwright; the script starts its own isolated
 node dev/browser-check.mjs
 ```
 
-The acceptance output is written to the system temp directory by default; use `BROWSER_CHECK_OUTPUT` to specify a directory. The tests do not connect to cloud platforms, GPUs or robots. For the design and API conventions see [design.md](docs/design.md), for the implementation acceptance checklist see [implementation-plan.md](docs/implementation-plan.md), and for the test and review results of this round see [verification.md](docs/verification.md).
+The acceptance output is written to the system temp directory by default; use `BROWSER_CHECK_OUTPUT` to specify a directory. The tests do not connect to cloud platforms, GPUs or robots. For the design and API conventions see [design.md](docs/design.md), for the implementation acceptance checklist see [implementation-plan.md](docs/implementation-plan.md), and for the test and review results of this round see [verification.md](docs/verification.en.md).
 
 The action guide uses `web/custom-actions.md` as its source file. After editing it, run `python dev/build-guide.py` in a documentation editing environment with Python-Markdown installed, and commit the generated `web/guide.html` together with it. The web page uses the generated file directly; running the training studio does not require installing Markdown or running a build.
 
 ## Attribution
 
-The original code in this directory uses the repo's Apache-2.0 license; documentation follows the repo's corresponding documentation license. Shared models, web libraries and the training engine follow their own licenses; see [NOTICE.md](NOTICE.md).
+The original code in this directory uses the repo's Apache-2.0 license; documentation follows the repo's corresponding documentation license. Shared models, web libraries and the training engine follow their own licenses; see [NOTICE.md](NOTICE.en.md).
 
-For a comparison with similar projects and next-step priorities see [Comparison with the kissqy training console](docs/reference-comparison-2026-10-23.md).
+For a comparison with similar projects and next-step priorities see [Comparison with the kissqy training console](docs/reference-comparison-2026-10-23.en.md).

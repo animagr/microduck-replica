@@ -53,6 +53,6 @@ Frozen runtime source archive SHA256: `1ab2540c55fb0e22e688e52f15e55c4b7a7ee70f0
 
 The local workspace `artifacts/qinmo-imu-20261027/` stores the build script, raw logs, spec sources, independent results and a list of protected files. After the source was frozen, `package-local-adaptation.py` generated versioned maintenance inputs; the actual file names, source commits and SHAs are recorded in `local-delivery.json`, and `files.json` inside the package verifies each file. The package contains the main program and the corresponding source, for controlled maintenance or for building the next image.
 
-The current signed web updater covers Studio/helper/duck-echo and has not been extended to robotd. Maintainers need to install the matching main program and web/helper; reflashing the card is not required. After installation, select the type and calibrate following the [web guide](../../Qinmo-IMU-网页使用.md).
+The current signed web updater covers Studio/helper/duck-echo and has not been extended to robotd. Maintainers need to install the matching main program and web/helper; reflashing the card is not required. After installation, select the type and calibrate following the [web guide](../../Qinmo-IMU-web-usage.en.md).
 
 A real Qinmo board, long-term stability on the shared bus, the actual mounting orientation, standing and walking have not yet passed an acceptance check. The existing public 20261027 image and update package stay at their original version; the next release should create a new version and be re-verified.

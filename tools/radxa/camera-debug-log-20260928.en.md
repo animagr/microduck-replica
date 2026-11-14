@@ -92,11 +92,11 @@ This command writes to the same file repeatedly and keeps the **last frame** whe
 - **Wiring conclusion**: the fault went away after adjusting orientation/contact; reseating the cable and whether the power setup changed were not fully isolated, so this does not prove that a reversed cable was the only factor.
 - **Power caveat**: the user initially powered it as 7.4V → HAT → board; whether the board was later switched to independent USB power was not confirmed. This camera success does not count as an acceptance check of HAT load or of all functions.
 
-Under HAT power, prefer Wi-Fi / SSH. On the V1.12 board, the 40-pin 5V and the VBUS of `5V IN / USB_OTG` are on the same net, so an ordinary USB data cable may introduce a second 5V source; do not combine power sources. The USB 3.0 port is a Host port, so switching to that port will not solve debugging over a computer connection. See the [USB port and power notes](镜像使用说明.md#3-第一次开机) for details.
+Under HAT power, prefer Wi-Fi / SSH. On the V1.12 board, the 40-pin 5V and the VBUS of `5V IN / USB_OTG` are on the same net, so an ordinary USB data cable may introduce a second 5V source; do not combine power sources. The USB 3.0 port is a Host port, so switching to that port will not solve debugging over a computer connection. See the [USB port and power notes](image-user-guide.en.md) for details.
 
 ## References
 
 - [Radxa Camera 8M219 official docs and cable spec](https://docs.radxa.com/accessories/camera/camera-8m-219)
 - [Official ZERO 3 camera connection and usage guide](https://docs.radxa.com/zero/zero3/accessories/camera)
 - [Official board overview and interface description](https://docs.radxa.com/en/zero/zero3)
-- [This project's debug log](../../调试记录.md) · [Pitfalls log](../../踩坑记录.md#主板--hat--摄像头)
+- [This project's debug log](../../DEBUG-LOG.en.md) · [Pitfalls log](../../PITFALLS.en.md)

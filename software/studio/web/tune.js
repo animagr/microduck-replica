@@ -1,7 +1,7 @@
-// 总览下面的「运行和调参」（tuning-plan.md v2 §3）三张只读卡 + 设置页的「模型」。
-// 数从后端的调参卡来（studio/tune.py，{t:'tune'} 每秒推一次），这里只画。这一版不能改
-// （cap.can_edit 一直是 false，改动要等鸭子上装好 root 小助手，调参方案 T4/T5）。
-// 只有设置页的重量表单会写东西，写的是 Studio 自己的 state 目录（duck-body.json），不碰鸭子。
+// The three read-only "Running and tuning" cards under the overview (tuning-plan.md v2 §3) + "Model" on the settings page.
+// Numbers come from the backend's tuning card (studio/tune.py, {t:'tune'} pushed once per second); this only draws them. This version can't edit
+// (cap.can_edit is always false; editing must wait until the root helper is installed on the duck, tuning plan T4/T5).
+// Only the weight form on the settings page writes anything, and it writes Studio's own state directory (duck-body.json), not the duck.
 import { html, useState, useEffect } from './vendor/preact-htm.module.js';
 import { Stepper } from './stepper.js';
 
@@ -95,12 +95,12 @@ if (!document.getElementById('tune-css')) {
   document.head.appendChild(s);
 }
 
-// ---- 格式化 ----
+// ---- Formatting ----
 const num = (v, d = 1) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
 const rnd = (v) => (typeof v === 'number' && isFinite(v) ? String(Math.round(v)) : '—');
 const txt = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
-// ---- 卡 1 运行状态 ----
+// ---- Card 1: running status ----
 function StepMark({ status }) {
   const c = { success: 's', failed: 'f', starting: 'p', waiting: 'w' }[status] || 'w';
   const g = { success: '✓', failed: '✗', starting: '●', waiting: '○' }[status] || '·';
@@ -169,7 +169,7 @@ function RunCard({ run }) {
   </section>`;
 }
 
-// ---- 卡 2 调手感（只读） ----
+// ---- Card 2: feel tuning (read-only) ----
 function FeelCard({ feel, cap }) {
   const [adv, setAdv] = useState(true);
   const walk = feel?.walk || {};
@@ -179,9 +179,9 @@ function FeelCard({ feel, cap }) {
   const cur = pad.current || {};
   const servo = feel?.servo || {};
   const eff = servo.effective || {};
-  // 一行三格：名字 | 值 | 说明（说明格永远在，空着也占位，表才对得齐）
+  // Three cells per row: name | value | description (the description cell is always present, taking space even when empty, so the table aligns)
   const row = (k, v, d, kind) => html`<span class="k">${k}</span><span class="v">${v}</span><span class=${'d ' + (kind || '')}>${d || ''}</span>`;
-  // 走路三项：值 = 主程序在用的（读不到才用文件里的）；文件里写了、又跟在用的不一样，才提醒（文件里没写 = 用默认，不是不一致）
+  // The three walking items: value = what the main program is using (fall back to the file only if that can't be read); warn only if the file sets it and it differs from what's in use (not set in file = default, not a mismatch)
   const wv = (key, label, def) => {
     const x = vals[key] || {};
     const v = x.loaded != null ? x.loaded : x.file;
@@ -221,11 +221,11 @@ function FeelCard({ feel, cap }) {
   </section>`;
 }
 
-// ---- 卡 3 模型（只读） ----
+// ---- Card 3: model (read-only) ----
 function ModelsCard({ models }) {
   const slots = models?.slots || [];
   const rollers = models?.rollers || [];
-  // 名字读不到（鸭子上模型目录里的说明文件没读到）就照实说，后面跟文件指纹；别只写「没读到」（用户 10-19 看不懂）
+  // If the name can't be read (the description file in the model directory on the duck wasn't read), say so plainly, followed by the file fingerprint; don't just write "not read" (user, 10-19, couldn't understand it)
   const what = (s) => (s.name ? `${s.name}${s.rounds ? ` · ${s.rounds} 轮` : ''}` : s.path ? '读不到模型说明' : '没装');
   const rolOn = rollers.filter((r) => r.installed);
   return html`<section class="board card" aria-label="模型">
@@ -247,7 +247,7 @@ function ModelsCard({ models }) {
   </section>`;
 }
 
-// ---- 总览三张卡 ----
+// ---- The three overview cards ----
 export function TuneSection({ tune }) {
   if (!tune || !tune.ready) return html`<div class="board card tune"><h3>运行和调参</h3><div class="cap">还在读鸭子的配置…</div></div>`;
   return html`<div class="tune" id="tune-block">
@@ -257,7 +257,7 @@ export function TuneSection({ tune }) {
   </div>`;
 }
 
-// ---- 设置页 › 模型 ----
+// ---- Settings page › Model ----
 const BODY_FIELDS = [
   ['total_g', '整鸭重量', 'g'],
   ['trunk_g', '躯干', 'g'],

@@ -11,11 +11,11 @@ The public image **has no WiFi name or password**; on first boot, wait about 2�
 
 - For: **Radxa Zero 3W V1.12** (the batch shipped from 2024-11 onward, with AIC8800D80 WiFi); for other batches see Section 6 below
 - Base: Armbian 26.2.1 Trixie vendor kernel 6.1.115 minimal (official, unmodified)
-- Why this happens and how it was tracked down: [pitfalls log](../../踩坑记录.md#软件)
+- Why this happens and how it was tracked down: [pitfalls log](../../PITFALLS.en.md)
 
-> 2026-09-28 camera progress: after adjusting the ribbon cable orientation/contact, Radxa's official B1 detected the IMX219 and completed a 40-frame 1920×1080 short test; a retest on this project's image is planned, and the result on the official system cannot yet be taken as this image's camera acceptance check. See the [wiring diagram and full log](摄像头调试记录-20260928.md). A green LED double-blinking can be the normal `heartbeat` and cannot by itself be used to judge a boot failure.
+> 2026-09-28 camera progress: after adjusting the ribbon cable orientation/contact, Radxa's official B1 detected the IMX219 and completed a 40-frame 1920×1080 short test; a retest on this project's image is planned, and the result on the official system cannot yet be taken as this image's camera acceptance check. See the [wiring diagram and full log](camera-debug-log-20260928.en.md). A green LED double-blinking can be the normal `heartbeat` and cannot by itself be used to judge a boot failure.
 
-> **2026-09-28 networking erratum:** the Sep 20 card-building script left out the DHCP configuration for `wlan0`. Saving the WiFi name and password only completes the authentication configuration, and the default netplan only covers the wired interface. The script has been fixed; for old cards, just add the configuration as described in Section 4, with no need to reflash just for this. The Release attachment `armbian-26.2.1-zero3w-v1.12-bootfix-20260920.img.xz` is still the original file with an unchanged SHA256 and **does not include this DHCP fix**; the `/root/先连WiFi.txt` (connect to WiFi first) file on the card also has the old instructions, so follow this document instead. A personal image with the fix applied, on my own board, was tested on real hardware: it obtained a DHCP address and allowed SSH login, and `networkctl` confirmed that the new configuration was in use; this does not mean the public image has been replaced, nor that every connectivity loss has been solved. See the [networking and HAT hardware test log](联网与HAT调试记录-20260928.md).
+> **2026-09-28 networking erratum:** the Sep 20 card-building script left out the DHCP configuration for `wlan0`. Saving the WiFi name and password only completes the authentication configuration, and the default netplan only covers the wired interface. The script has been fixed; for old cards, just add the configuration as described in Section 4, with no need to reflash just for this. The Release attachment `armbian-26.2.1-zero3w-v1.12-bootfix-20260920.img.xz` is still the original file with an unchanged SHA256 and **does not include this DHCP fix**; the `/root/先连WiFi.txt` (connect to WiFi first) file on the card also has the old instructions, so follow this document instead. A personal image with the fix applied, on my own board, was tested on real hardware: it obtained a DHCP address and allowed SSH login, and `networkctl` confirmed that the new configuration was in use; this does not mean the public image has been replaced, nor that every connectivity loss has been solved. See the [networking and HAT hardware test log](networking-and-HAT-debug-log-20260928.en.md).
 
 > **2026-09-29 update:** the first login must be `root / 1234`; see Section 3. A separate DHCP-fix candidate image is also provided, and the old release is kept; the candidate has been checked offline for DHCP, the first-login mechanism, file differences and privacy items, but **this new build has not yet been flashed to a card and tested on real hardware**. It is still a base system, without the robot runtime, the web debug console or the policy installed.
 
@@ -100,7 +100,7 @@ Erratum (2026-09-28): this section previously described the "USB 3.0 port" as th
 
 The following applies to this project's Armbian base image, which uses `wpa_supplicant` + `systemd-networkd`. If you have since migrated to NetworkManager, change the connection through it instead, and do not enable a second wireless management service at the same time. The base image does not have NetworkManager / `nmtui` installed.
 
-The wireless credentials on this image are not in netplan, so you cannot blindly follow the upstream `migrate-network.sh` network migration steps; before migrating, you need to handle credential import, retiring the old services and recovery from a lost connection. See the [folder README](README.md).
+The wireless credentials on this image are not in netplan, so you cannot blindly follow the upstream `migrate-network.sh` network migration steps; before migrating, you need to handle credential import, retiring the old services and recovery from a lost connection. See the [folder README](README.en.md).
 
 ### WiFi already filled in: only add DHCP
 
@@ -197,7 +197,7 @@ If you find it a hassle and don't want to connect manually every time: use the c
 
 `/dev/ttyS2` is ready (pin 8 TX and pin 10 RX on the 40-pin header), and the login console and kernel logs have both been removed from it.
 
-Note: **the RK3566 UART is full-duplex 3.3 V on two wires, while the Feetech / Dynamixel bus is single-wire half-duplex**; you need a tri-state buffer or an adapter board in between, and direct jumper wiring will not receive any replies. See the [pitfalls log](../../踩坑记录.md#飞线不打-hat-时).
+Note: **the RK3566 UART is full-duplex 3.3 V on two wires, while the Feetech / Dynamixel bus is single-wire half-duplex**; you need a tri-state buffer or an adapter board in between, and direct jumper wiring will not receive any replies. See the [pitfalls log](../../PITFALLS.en.md).
 
 ## 6. If your board is not from this batch
 
@@ -249,6 +249,6 @@ If it still doesn't work, connect the debug serial port on the 40-pin header (3.
 
 - Base: [Armbian official Radxa Zero 3 image](https://www.armbian.com/radxa-zero-3/), 26.2.1 Trixie vendor 6.1.115 minimal, used as is, GPL and respective licenses
 - Bootloader: Radxa [`u-boot-rk2410`](https://radxa-repo.github.io/bookworm/pool/main/u/u-boot-rk2410/) `2017.09-64-39cd993`, taking `idbloader.img` and `u-boot.itb`, GPL-2.0
-- The card-building changes are in [`build-armbian-card.sh`](build-armbian-card.sh), so you can reproduce the card-building process yourself; the current script includes the fixes for DHCP, the first-login notes and SSH host key handling, so its output will not be byte-for-byte identical to the old Release attachments. The 20260929 candidate was made by patching the original public image offline; see the [verification log](镜像离线核验-20260929.md) for details
+- The card-building changes are in [`build-armbian-card.sh`](build-armbian-card.sh), so you can reproduce the card-building process yourself; the current script includes the fixes for DHCP, the first-login notes and SSH host key handling, so its output will not be byte-for-byte identical to the old Release attachments. The 20260929 candidate was made by patching the original public image offline; see the [verification log](image-offline-verification-20260929.en.md) for details
 
 This image is community-made and **has nothing to do with Armbian or Radxa officially**; if something goes wrong, don't go to them, open an issue in this repo.

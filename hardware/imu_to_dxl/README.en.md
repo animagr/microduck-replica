@@ -4,7 +4,7 @@
 
 > ⚠️ **This is a third-party replica part, not the official design.**
 > The official team has never published this board's schematic, Gerbers or outline (zero hits anywhere online; see
-> [Hardware reverse engineering](../../docs/硬件方案逆向.md)). This directory is the result of reverse-engineering from the MJCF model, the official runtime source code
+> [Hardware reverse engineering](../../docs/hardware-teardown.en.md)). This directory is the result of reverse-engineering from the MJCF model, the official runtime source code
 > and the open-source HAT project, plus my own component choices. **It has not been prototyped or verified on real hardware.**
 > If you find a problem, please open an [issue](https://github.com/fanhao375/microduck-replica/issues).
 
@@ -16,12 +16,12 @@
 | [**`imu_to_dxl-交互式BOM.html`**](imu_to_dxl-交互式BOM.html) | **For soldering**: interactive BOM exported from EasyEDA (JLC EDA); download it and open it directly in a browser (works offline). Click a part number and the matching reference designators are highlighted on the board view, so you can tick off each part type as you solder it. Clicking it on the GitHub page only shows the source |
 | [**`firmware/`**](firmware/) | STM32G031 + LSM6DSV16X firmware, Keil project, host tests and a prebuilt HEX; from 0.2.0 on it uses the Feetech SCS/STS protocol (ID 200); not yet tested on a real bus |
 | [**`firmware-1.0.0/`**](firmware-1.0.0/) | Another Feetech protocol firmware, 1.0.0: branched off from 0.1.0 (the Dynamixel version), **tested on a shared bus with real Feetech servos** (slot ordering, reads/writes), with host-side tools for scanning / bus monitoring / IMU plots and a Chinese user guide. Same 15-byte block and model number (0x4D44) as 0.2.0; the main program from replica image 20261021b on recognizes both versions |
-| [**`总线协议.md`**](总线协议.md) | **For firmware writers** (bus protocol): byte-by-byte definition of the 15-byte block, timing requirements, queuing rules, the main controller's acceptance criteria, test vectors, acceptance check method |
-| [`imu_to_dxl-接线表.md`](imu_to_dxl-接线表.md) | Wiring table listing every pin net by net; you can check against it directly |
+| [**`总线协议.md`**](bus-protocol.en.md) | **For firmware writers** (bus protocol): byte-by-byte definition of the 15-byte block, timing requirements, queuing rules, the main controller's acceptance criteria, test vectors, acceptance check method |
+| [`imu_to_dxl-接线表.md`](imu_to_dxl-wiring-table.en.md) | Wiring table listing every pin net by net; you can check against it directly |
 | [`imu_to_dxl.eprj2`](imu_to_dxl.eprj2) | EasyEDA Pro (JLC EDA) project; open and edit it directly |
-| [`../../BOM.md`](../../BOM.md) | Full BOM, including LCSC part numbers and the selection rationale for every component |
+| [`../../BOM.md`](../../BOM.en.md) | Full BOM, including LCSC part numbers and the selection rationale for every component |
 
-**Firmware and attitude viewing entry point:** [`firmware/README.md`](firmware/README.md) documents single-board bring-up, IMU sampling and the validation scope.
+**Firmware and attitude viewing entry point:** [`firmware/README.md`](firmware/README.en.md) documents single-board bring-up, IMU sampling and the validation scope.
 
 **Which of the two firmware versions to choose**: either works when connected to the duck and used with the fork's main program. The main program (from replica image 20261021b on) recognizes this board and, when reading the whole body at once, places it **after the servos**: in testing, with 1.0.0 placed first it answered only 3 times out of 30 (the following servos rush to talk on their own timing and overwrite its checksum byte); placed in the middle or last it scored 30/30. To view the attitude with servo-web over SWD / J-Link, you can only use the 0.2.0 HEX in `firmware/`: the observer checks against its hash and memory addresses and will refuse to read if you switch to 1.0.0. Neither version has run for a long time on the complete robot yet.
 Through [`tools/servo-web`](../../tools/servo-web), the small board's attitude can be overlaid on the 3D duck in the servo debug console: joint angles come from the servos, and the torso quaternion comes from the IMU.
@@ -116,7 +116,7 @@ the only difference is the packet format:
 The official Feetech protocol document states **Length = number of parameters N + 2**, so the minimum is 2 and it is **never 0**;
 the ID range is 0–253. → `FF FF FD 00` can only be V2, so **the detection is unambiguous**.
 
-The firmware locks the protocol when the first packet passes its checksum, and from then on receives and sends according to the locked protocol; **it does not unlock automatically during operation** (the original idea was to "redetect after 100 consecutive failed packets", but a 2026-09-17 review pointed out that bus noise would make the small board go silent for 2 s and the main controller would hold after 3 ticks without readings, so this was changed; see [`software/飞特适配架构.md` §3.5](../../software/飞特适配架构.md)).
+The firmware locks the protocol when the first packet passes its checksum, and from then on receives and sends according to the locked protocol; **it does not unlock automatically during operation** (the original idea was to "redetect after 100 consecutive failed packets", but a 2026-09-17 review pointed out that bus noise would make the small board go silent for 2 s and the main controller would hold after 3 ticks without readings, so this was changed; see [`software/飞特适配架构.md` §3.5](../../software/feetech-adaptation-architecture.en.md)).
 More reliable than a DIP switch (in a walking robot, DIP switch contacts are a vibration failure point).
 
 ### 5. J3 uses 6P to also bring out the serial printf
@@ -156,7 +156,7 @@ The midpoint of the two holes (22.67, 11.05) differs from the board center (22.5
 > so both holes were moved toward the corners and the X spacing became 40 mm.
 > **The cost is that it is no longer compatible with the original clip; the mechanical side changes its clamp bar accordingly.**
 > In any case, the reverse-engineering document's claim that "the clip holds `imu_to_dxl`" was only an inference
-> (see [Hardware reverse engineering](../../docs/硬件方案逆向.md)); the only hard constraint is "the IMU is rigidly fixed to `trunk_base`".
+> (see [Hardware reverse engineering](../../docs/hardware-teardown.en.md)); the only hard constraint is "the IMU is rigidly fixed to `trunk_base`".
 
 Board outline file: `imu_to_dxl-板框-45x22-R2.dxf` (units mm, 8 closed segments: 4 straight edges + 4 90° arcs).
 
@@ -340,7 +340,7 @@ The board is already in production at JLCPCB, so these all count as "what to ver
 
 - 5 boards arrived; on power-up the **3.3 V output is normal** (the F1 → D1 → U4 chain is fine).
 - **The J4/J5 (`B3B-PH-K-S`) housing does not mate with the Feetech cable plug**: the 2.0 mm pitch is right, but the plug's shape does not fit into the PH connector's housing. Review point ⑥ was spot on. On the first boards the connector housing was shaved off, leaving only the pins, which can be plugged into and work. **v2 changes the connector**: match it against a real Feetech cable (ask Feetech for the board-side connector model, or buy several 2.0 mm 3P right-angle connectors and test-fit them).
-- The X1 clock, NRST, IMU supply and SWD continuity have not been measured yet; what the firmware needs to do and all of the main controller's requirements for it are in [`software/飞特适配架构.md` §4](../../software/飞特适配架构.md#4-小板固件方案-a--imu_to_dxl).
+- The X1 clock, NRST, IMU supply and SWD continuity have not been measured yet; what the firmware needs to do and all of the main controller's requirements for it are in [`software/飞特适配架构.md` §4](../../software/feetech-adaptation-architecture.en.md).
 
 ### 2026-09-22 · Firmware is running (ST-LINK/V2)
 
@@ -398,7 +398,7 @@ or vibration noise is high, it will be changed together in v2.
 
 **A more important reminder**: the IMU's position and orientation **in the robot** are fixed by the trained model, and that matters far more than a 7 mm offset
 on the board. That is determined by how the board is mounted in the torso, which has been researched and recorded in
-[`docs/硬件方案逆向.md`](../../docs/硬件方案逆向.md): `trunk = [+raw_z, +raw_y, −raw_x]`,
+[`docs/硬件方案逆向.md`](../../docs/hardware-teardown.en.md): `trunk = [+raw_z, +raw_y, −raw_x]`,
 rotated +90° about the Y axis. Moving parts on the board does not affect this.
 
 ### 2026-09-07 · Leave a control line for `2OE` (R7 + RX_EN)

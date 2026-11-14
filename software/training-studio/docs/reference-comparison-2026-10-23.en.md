@@ -8,7 +8,7 @@ Reference repository: [kissqy/Microduck-kissqy](https://github.com/kissqy/Microd
 
 Our local demo flow has actually passed: create an experiment, smoke run, full demo, pause/resume/stop, persistent records, evaluating a selected checkpoint, download and continued training, and experiment comparison. Linux process control was tested with real CPU subprocesses and signals.
 
-Real training mode has completed, locally on WSL2 / RTX 5060 Ti, 64-environment, 5-iteration training, video evaluation, ONNX export and a PT/ONNX inference consistency check; see the [acceptance record](verification.md). Users can repeat the smoke run locally first; the target cloud GPU, long training and the real robot have not passed acceptance checks yet. Demo models, metrics and replays cannot prove that a policy has learned an action.
+Real training mode has completed, locally on WSL2 / RTX 5060 Ti, 64-environment, 5-iteration training, video evaluation, ONNX export and a PT/ONNX inference consistency check; see the [acceptance record](verification.en.md). Users can repeat the smoke run locally first; the target cloud GPU, long training and the real robot have not passed acceptance checks yet. Demo models, metrics and replays cannot prove that a policy has learned an action.
 
 ## Main gaps
 

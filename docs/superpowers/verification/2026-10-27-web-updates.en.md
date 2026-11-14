@@ -4,7 +4,7 @@
 
 Date: 2026-10-27 (JST). The user asked for online updates through the web console and for the local voice commands "坐下／站起来" (sit down / stand up) to be included in the new image; they then confirmed "暂时关着，先完成本地软件和镜像" (keep it off for now, finish the local software and image first). Free-form AI voice conversation remains paused.
 
-**The software, signed package, first-boot bootstrap package and matching image are complete. The user later authorized pushing and public release; the master source, the 20261027 Latest image and the 2026.10.27 software release are all done, see the [public release record](2026-10-27-web-updates-publication.md). Nothing was deployed to the powered-off duck and no card was flashed; first-boot bootstrapping of the old card and the physical acceptance check of the new image still have to be done after power-on.**
+**The software, signed package, first-boot bootstrap package and matching image are complete. The user later authorized pushing and public release; the master source, the 20261027 Latest image and the 2026.10.27 software release are all done, see the [public release record](2026-10-27-web-updates-publication.en.md). Nothing was deployed to the powered-off duck and no card was flashed; first-boot bootstrapping of the old card and the physical acceptance check of the new image still have to be done after power-on.**
 
 ## Versions and artifacts
 
@@ -69,10 +69,10 @@ The signed package is built from a frozen Git archive, and the existing WSL imag
 - All 304 voice resource file hashes match; Mic3R preparation, explicit ASR path and actions/toggle/duck defaults are consistent, and the actual ARM model load passes.
 - No personal Wi-Fi, SSH host/developer keys, machine ID, web user data, AI key or release private key. The camera is still the test source.
 
-The release private key exists only in a private directory on the build machine; Git/the image/the delivery packages contain only the public key. Artifacts were copied to the Windows directory and their sizes/hashes rechecked. Following the user's later instructions, the source was pushed and the image/software attachments were published; for the public status and anonymous download verification see the [release record](2026-10-27-web-updates-publication.md).
+The release private key exists only in a private directory on the build machine; Git/the image/the delivery packages contain only the public key. Artifacts were copied to the Windows directory and their sizes/hashes rechecked. Following the user's later instructions, the source was pushed and the image/software attachments were published; for the public status and anonymous download verification see the [release record](2026-10-27-web-updates-publication.en.md).
 
 ## Still awaiting physical verification
 
 The duck is off; first-boot bootstrapping of the old card, actual web update/rollback, physical power-loss recovery, real human acoustics, and the complete first-use flow with a new card have not been done. The user previously confirmed the original sit/stand voice commands worked; this image combination still has to be verified on the robot. The QEMU kill/restart recovery does not replace an acceptance check with a real power interruption.
 
-The problem with the head/body actually moving when following the music beat is still to be fixed, and free-form AI voice conversation is not integrated; this release does not count them as done. For usage steps see [Software updates and voice](../../软件更新与语音使用说明-20261027.md).
+The problem with the head/body actually moving when following the music beat is still to be fixed, and free-form AI voice conversation is not integrated; this release does not count them as done. For usage steps see [Software updates and voice](../../software-update-and-voice-guide-20261027.en.md).

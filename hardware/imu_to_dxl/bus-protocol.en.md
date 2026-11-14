@@ -13,7 +13,7 @@ Every tick (50 Hz), the main controller sends one `sync_read` that reads back ID
 - Acceptance check: once the firmware is written, run `python imu200.py check --port COMx`; it sends exactly the packets the main controller sends and judges exactly what the main controller judges
 - The actual main controller code is in the fork's [`duck-control/src/imu.rs`](https://github.com/fanhao375/microduck/blob/feetech/duck-control/src/imu.rs)
   and `bus.rs`; every criterion in this document notes its source
-- For the overall design background, see [Feetech adaptation architecture §4](../../software/飞特适配架构.md)
+- For the overall design background, see [Feetech adaptation architecture §4](../../software/feetech-adaptation-architecture.en.md)
 - **Firmware implementation**: [`firmware/`](firmware/) 0.2.0 (2026-09-22). The host tests and the `check` acceptance on a simulated bus running the real protocol code all pass; **the real bus is yet to be tested on hardware**. Items marked "0.2.0 implementation" below are refinements or corrections to the original spec made while writing the firmware, with the reasons noted alongside
 
 > **Label conventions**: [Manual] = original text of official Feetech documentation; [Source] = a fact readable in the main controller code;

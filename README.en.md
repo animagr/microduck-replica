@@ -10,8 +10,8 @@ Check the model printed on the board. **Radxa ZERO 3W** and **Radxa Cubie A7Z** 
 
 | Board | Image download | First use |
 |---|---|---|
-| **Radxa ZERO 3W** | [ZERO 3W · 20261112 RC4 test image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-zero3w-20261112-rc4) · [Previous stable image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) | [ZERO 3W flashing and setup](software/image/烧录和第一次使用.md) |
-| **Radxa Cubie A7Z** | [Cubie A7Z preview image](https://github.com/Liangjin5437/microduck-replica/releases/tag/a7z-duck-image-20261109-preview1) | [A7Z flashing and setup](radxa-cubie-a7z/image/README.md) |
+| **Radxa ZERO 3W** | [ZERO 3W · 20261112 RC4 test image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-zero3w-20261112-rc4) · [Previous stable image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) | [ZERO 3W flashing and setup](software/image/flashing-and-first-use.en.md) |
+| **Radxa Cubie A7Z** | [Cubie A7Z preview image](https://github.com/Liangjin5437/microduck-replica/releases/tag/a7z-duck-image-20261109-preview1) | [A7Z flashing and setup](radxa-cubie-a7z/image/README.en.md) |
 
 **The Feetech HD-1910 build has passed real hardware validation: standing, walking, a forward roll and standing back up.** Our main build uses **15 Feetech HD-1910 servos**. We provide a **ready-to-flash system image** and the **Microduck Studio web console** for Wi-Fi setup, calibration, and remote control from a phone or computer browser.
 
@@ -38,14 +38,14 @@ Check the model printed on the board. **Radxa ZERO 3W** and **Radxa Cubie A7Z** 
 
 The GIFs are silent previews; the MP4 files include the complete video and audio.
 
-**[Download the image for your board](#download-the-image-for-your-board)** · **[First-use guide (PDF / web)](docs/上手指南/README.md)** · **[CAD and print files](https://github.com/fanhao375/microduck-replica-cad)** · **[Assembly tutorials](#-assembly-videos)** · **[BOM shopping list](BOM/README.md)** · **[Hardware projects](hardware/README.md)**
+**[Download the image for your board](#download-the-image-for-your-board)** · **[First-use guide (PDF / web)](docs/上手指南/README.en.md)** · **[CAD and print files](https://github.com/fanhao375/microduck-replica-cad)** · **[Assembly tutorials](#-assembly-videos)** · **[BOM shopping list](BOM/README.en.md)** · **[Hardware projects](hardware/README.en.md)**
 
 ---
 
 ### Supported builds
 
 - **Feetech HD-1910 + Radxa Zero 3W**: use this repository's system image and Studio web console.
-- **Feetech HD-1910 + Radxa Cubie A7Z (preview)**: [port sources and notes](radxa-cubie-a7z/README.md) · [download the image for your board](#download-the-image-for-your-board). See the release for the preview's hardware validation status.
+- **Feetech HD-1910 + Radxa Cubie A7Z (preview)**: [port sources and notes](radxa-cubie-a7z/README.en.md) · [download the image for your board](#download-the-image-for-your-board). See the release for the preview's hardware validation status.
 - **Dynamixel XL330**: matching CAD and assembly resources are available; use compatible runtime software.
 
 [Choose print files and shopping list](#print-files-and-shopping-list) · [Detailed servo comparison](docs/actuator-selection.en.md)
@@ -100,7 +100,7 @@ Choose print resources for your servo version, then prepare the matching purchas
 |---|---|---|
 | **Print files and CAD** | **Feetech HD-1910** | [Feetech section](https://github.com/fanhao375/microduck-replica-cad#飞特-hd-1910-打印资料): print project, CAD sources and update notes |
 | **Print files and CAD** | **Dynamixel XL330** | [XL330 section](https://github.com/fanhao375/microduck-replica-cad#dynamixel-xl330-打印资料): matching CAD sources and printing instructions |
-| **Assembly shopping list** | **Feetech HD-1910** | **[Online preview](BOM/README.md)** · **[Download Excel](BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**: compiled by 机械行者Robo, dated 2026-10-23, with quantities, materials and purchase links |
+| **Assembly shopping list** | **Feetech HD-1910** | **[Online preview](BOM/README.en.md)** · **[Download Excel](BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**: compiled by 机械行者Robo, dated 2026-10-23, with quantities, materials and purchase links |
 
 Mating parts from the two servo versions are not interchangeable. File versions and update dates are maintained in the respective CAD sections. This shopping list follows the Feetech build; XL330 servos and associated electronics need separate checks.
 
@@ -116,11 +116,11 @@ As of **2026-10-25**, **the Feetech replica, first-use workflow and robot motion
 
 **Replica image 20261027: web software updates and local Mandarin posture commands.** Settings can check, download or upload signed software packages, with rollback on failed installation. Tap R3 to toggle listening for “sit down” and “stand up”; the Mandarin model is included and needs no cloud account. Web motion recording/playback, lively mode and model management are retained. Existing cards need one SSH bootstrap; routine software updates then use the browser without reflashing.
 
-The robot runtime, gait models and bus-ID-200 IMU autodetection are unchanged from 20261023c. Software, signed transactions, browser flows and read-only image checks passed; physical first boot, existing-card upgrades/rollback and live acoustics still need acceptance. Music-driven head/body motion remains unresolved, and spoken AI dialogue is not connected. [Image and checksums](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) · [Software package](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-software-v2026.10.27) · [Update and voice guide](docs/软件更新与语音使用说明-20261027.md) · [Verification scope](docs/superpowers/verification/2026-10-27-web-updates.md)
+The robot runtime, gait models and bus-ID-200 IMU autodetection are unchanged from 20261023c. Software, signed transactions, browser flows and read-only image checks passed; physical first boot, existing-card upgrades/rollback and live acoustics still need acceptance. Music-driven head/body motion remains unresolved, and spoken AI dialogue is not connected. [Image and checksums](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) · [Software package](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-software-v2026.10.27) · [Update and voice guide](docs/software-update-and-voice-guide-20261027.en.md) · [Verification scope](docs/superpowers/verification/2026-10-27-web-updates.en.md)
 
-<p align="center"><a href="software/studio/README.md"><img src="assets/studio-overview-20261025-demo.jpg" alt="Current Microduck Studio interface with simulated device readings" width="920"></a><br><sub>Studio interface demonstration with simulated device readings</sub></p>
+<p align="center"><a href="software/studio/README.en.md"><img src="assets/studio-overview-20261025-demo.jpg" alt="Current Microduck Studio interface with simulated device readings" width="920"></a><br><sub>Studio interface demonstration with simulated device readings</sub></p>
 
-**[Download the image for your board](#download-the-image-for-your-board)** · **[First-use guide](docs/上手指南/README.md)** · **[Studio documentation](software/studio/README.md)**
+**[Download the image for your board](#download-the-image-for-your-board)** · **[First-use guide](docs/上手指南/README.en.md)** · **[Studio documentation](software/studio/README.en.md)**
 
 The image is free for personal non-commercial builds; see the release for component licences. Camera input defaults to a test source; see the release notes for physical camera and ToF verification limits.
 
@@ -135,7 +135,7 @@ The image is free for personal non-commercial builds; see the release for compon
 | **One-stop printing** | **[Bambu MakerWorld (Feetech)](https://makerworld.com.cn/zh/models/2963569-microduck#profileId-3478428)** · [Bambu Studio 3MF project](https://github.com/fanhao375/microduck-replica-cad#打印) |
 | **Models and print resources** | **[Feetech HD-1910 section](https://github.com/fanhao375/microduck-replica-cad#飞特-hd-1910-打印资料)** · **[XL330 section](https://github.com/fanhao375/microduck-replica-cad#dynamixel-xl330-打印资料)** |
 | **Assembly tutorials** | **[Assembly manual PDF](https://github.com/fanhao375/microduck-replica-cad/blob/master/安装说明书/microduck装配安装说明书.pdf)** · **[Episode videos](#-assembly-videos)**; use the matching structural parts for each build |
-| **Shopping list** | **[Online BOM preview](BOM/README.md)** · **[Download Excel](BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**: 2026-10-23 Feetech list; XL330 servos and associated electronics need separate checks |
+| **Shopping list** | **[Online BOM preview](BOM/README.en.md)** · **[Download Excel](BOM/装配BOM-机械行者Robo-2026-10-23-带采购链接.xlsx)**: 2026-10-23 Feetech list; XL330 servos and associated electronics need separate checks |
 
 [CAD repository releases](https://github.com/fanhao375/microduck-replica-cad/releases) · [Build log](BUILD-LOG.en.md)
 
@@ -169,15 +169,15 @@ This repository provides projects for the bus IMU board, servo bus hub and batte
 </tr>
 </table>
 
-The first three images are custom-board design previews; the Radxa and HAT images come from official resources. Click an image for full size; see [image credits](assets/hw/official-board-images.md). Radxa provides schematics, 2D dimensions and 3D models. See the custom projects for EasyEDA Pro files, STEP models and physical validation status.
+The first three images are custom-board design previews; the Radxa and HAT images come from official resources. Click an image for full size; see [image credits](assets/hw/official-board-images.en.md). Radxa provides schematics, 2D dimensions and 3D models. See the custom projects for EasyEDA Pro files, STEP models and physical validation status.
 
-[All hardware projects](hardware/README.md) · [Three-board notes](hardware/新版/README.md) · [Bus IMU firmware](hardware/imu_to_dxl/README.md)
+[All hardware projects](hardware/README.en.md) · [Three-board notes](hardware/新版/README.en.md) · [Bus IMU firmware](hardware/imu_to_dxl/README.en.md)
 
 ---
 
 ## 🧠 Actuator modelling · Feetech's official BAM
 
-[**Feetech's official HD-1910 BAM**](https://gitee.com/ftservo/ftservo-bam) provides actuator models and identified parameters as a reference for simulation training. This repository includes an open-source [training project](software/training/README.md) and [web training workbench](software/training-studio/README.md); see the [parameter notes](docs/HD-1910-M6参数来源.md) for the model configuration and parameter sources used here.
+[**Feetech's official HD-1910 BAM**](https://gitee.com/ftservo/ftservo-bam) provides actuator models and identified parameters as a reference for simulation training. This repository includes an open-source [training project](software/training/README.en.md) and [web training workbench](software/training-studio/README.en.md); see the [parameter notes](docs/HD-1910-M6-parameter-sources.en.md) for the model configuration and parameter sources used here.
 
 ---
 
@@ -185,11 +185,11 @@ The first three images are custom-board design previews; the Radxa and HAT image
 
 We also built **Microduck Training Studio**: create training experiments on a computer, view curves, pause and resume, evaluate checkpoints and export ONNX models through a browser. It runs separately from Studio on the duck.
 
-<p align="center"><a href="software/training-studio/README.md"><img src="assets/training-studio-20261025-demo.jpg" alt="Actual Microduck Training Studio interface showing a 3D model, training controls and synthetic demo metrics" width="920"></a><br><sub>Training workbench in demo mode: the 3D view is a model preview and the curves use synthetic data</sub></p>
+<p align="center"><a href="software/training-studio/README.en.md"><img src="assets/training-studio-20261025-demo.jpg" alt="Actual Microduck Training Studio interface showing a 3D model, training controls and synthetic demo metrics" width="920"></a><br><sub>Training workbench in demo mode: the 3D view is a model preview and the curves use synthetic data</sub></p>
 
 The real-GPU short-run, evaluation-video and model-export pipeline has been verified. Long training and physical validation of our own trained policies remain pending.
 
-**[Training workbench and usage](software/training-studio/README.md)** · **[Action Lab guide](software/training-studio/web/custom-actions.md)** · **[Training engine](software/training/README.md)** · [Verification record](software/training-studio/docs/verification.md)
+**[Training workbench and usage](software/training-studio/README.en.md)** · **[Action Lab guide](software/training-studio/web/custom-actions.en.md)** · **[Training engine](software/training/README.en.md)** · [Verification record](software/training-studio/docs/verification.en.md)
 
 ---
 
@@ -199,10 +199,10 @@ The [tool index](tools/README.en.md) groups utilities by the task you want to pe
 
 | Task | Tools and links |
 |---|---|
-| Flash an image | **[Rufus portable EXE](tools/rufus/rufus-4.15p.exe)** · [Flashing guide](tools/rufus/README.md) |
-| Serial and servo debugging | **[Feetech FD and serial utilities](tools/飞特/README.md)** · [3D servo web console](tools/servo-web/README.md) |
-| Read Feetech references or use an SDK | **[Official manuals, model specifications and SDKs](docs/飞特资料/README.md)**, with official version checks and separate offline snapshot dates |
-| Test servos and investigate motion | [HD1910M tester](tools/FeeTech_HD1910M_Servo/README.md) · [STS3215 tester](tools/sts3215Servo_testtool/README.md) · [Gait analysis](tools/gait-analysis/README.md) |
+| Flash an image | **[Rufus portable EXE](tools/rufus/rufus-4.15p.exe)** · [Flashing guide](tools/rufus/README.en.md) |
+| Serial and servo debugging | **[Feetech FD and serial utilities](tools/飞特/README.en.md)** · [3D servo web console](tools/servo-web/README.en.md) |
+| Read Feetech references or use an SDK | **[Official manuals, model specifications and SDKs](docs/飞特资料/README.en.md)**, with official version checks and separate offline snapshot dates |
+| Test servos and investigate motion | [HD1910M tester](tools/FeeTech_HD1910M_Servo/README.en.md) · [STS3215 tester](tools/sts3215Servo_testtool/README.en.md) · [Gait analysis](tools/gait-analysis/README.en.md) |
 
 ---
 
@@ -213,10 +213,10 @@ This repo is not one person's work. Merged code and bench-verified findings are 
 | Who | What they contributed |
 |---|---|
 | [@yoyojacky](https://github.com/yoyojacky) | **A Rust test tool for Feetech servos** ([PR #27](https://github.com/fanhao375/microduck-replica/pull/27), merged). A minimal STS/SCS protocol implementation of his own (framing, checksum, ping, register read/write, status parsing). The CLI scans the bus with a progress bar, reads status, moves a servo to a position, and runs single or batch tests that report position error, peak current, peak load, voltage and temperature, with a PASS/FAIL verdict — one command gives you a bench acceptance table → [`tools/sts3215Servo_testtool/`](tools/sts3215Servo_testtool/) |
-| [@Abo1ish](https://github.com/Abo1ish) | **IMU board firmware + attitude view in the debug console** ([PR #32](https://github.com/fanhao375/microduck-replica/pull/32), merged). A base STM32G031 firmware for the imu_to_dxl board that Pollen never open-sourced, verified on real hardware, with host-side tests and a [`VALIDATION.md`](hardware/imu_to_dxl/firmware/VALIDATION.md) that is clear about its limits → [`hardware/imu_to_dxl/firmware/`](hardware/imu_to_dxl/firmware/). He also streams the IMU attitude over J-Link into the web debug console, so the 3D duck's body turns with the real board (`--imu-jlink`, or `--imu-demo` with no hardware) → [`tools/servo-web/`](tools/servo-web/) |
-| [@yansis2026](https://github.com/yansis2026) | **Mobile console and offline voice control** ([PR #52](https://github.com/fanhao375/microduck-replica/pull/52), merged). The `/m` console provides a phone gamepad, model management, and a camera view. The phone sends microphone audio to the duck over HTTPS for onboard Vosk recognition, which works offline over the duck's hotspot. The contributor tested the workflow on their own duck. The merged revision passed software regression tests and awaits another hardware run. See the [mobile and offline guide](software/studio/deploy/OFFLINE.md). |
-| [@Liangjin5437](https://github.com/Liangjin5437) | **Radxa Cubie A7Z port and preview image** ([PR #54](https://github.com/fanhao375/microduck-replica/pull/54), merged). Adds hotspot provisioning, UART and grouped bus reads, Studio support, thermal management, and image build tools for Feetech HD-1910 servos and a bus IMU. The contributor tested the port on their own A7Z duck. The available preview image predates the merge fixes. The updated image still needs to be built and tested on hardware. See the [A7Z port and download guide](radxa-cubie-a7z/README.md). |
-| A member of the WeChat group | **Boot recipe for the Radxa Zero 3W V1.12J.** On this batch (WiFi changed to AIC8800DS2), swapping in Radxa's bootloader is not enough. He found by testing that the device tree has to come from Radxa too: **B1 bootloader + B1 DTB + Armbian 6.1.115 kernel + Trixie userland**, and got it booting → written up in the [pitfalls log](踩坑记录.md#软件) and the [image guide](tools/radxa/镜像使用说明.md) (both Chinese) |
+| [@Abo1ish](https://github.com/Abo1ish) | **IMU board firmware + attitude view in the debug console** ([PR #32](https://github.com/fanhao375/microduck-replica/pull/32), merged). A base STM32G031 firmware for the imu_to_dxl board that Pollen never open-sourced, verified on real hardware, with host-side tests and a [`VALIDATION.md`](hardware/imu_to_dxl/firmware/VALIDATION.en.md) that is clear about its limits → [`hardware/imu_to_dxl/firmware/`](hardware/imu_to_dxl/firmware/). He also streams the IMU attitude over J-Link into the web debug console, so the 3D duck's body turns with the real board (`--imu-jlink`, or `--imu-demo` with no hardware) → [`tools/servo-web/`](tools/servo-web/) |
+| [@yansis2026](https://github.com/yansis2026) | **Mobile console and offline voice control** ([PR #52](https://github.com/fanhao375/microduck-replica/pull/52), merged). The `/m` console provides a phone gamepad, model management, and a camera view. The phone sends microphone audio to the duck over HTTPS for onboard Vosk recognition, which works offline over the duck's hotspot. The contributor tested the workflow on their own duck. The merged revision passed software regression tests and awaits another hardware run. See the [mobile and offline guide](software/studio/deploy/OFFLINE.en.md). |
+| [@Liangjin5437](https://github.com/Liangjin5437) | **Radxa Cubie A7Z port and preview image** ([PR #54](https://github.com/fanhao375/microduck-replica/pull/54), merged). Adds hotspot provisioning, UART and grouped bus reads, Studio support, thermal management, and image build tools for Feetech HD-1910 servos and a bus IMU. The contributor tested the port on their own A7Z duck. The available preview image predates the merge fixes. The updated image still needs to be built and tested on hardware. See the [A7Z port and download guide](radxa-cubie-a7z/README.en.md). |
+| A member of the WeChat group | **Boot recipe for the Radxa Zero 3W V1.12J.** On this batch (WiFi changed to AIC8800DS2), swapping in Radxa's bootloader is not enough. He found by testing that the device tree has to come from Radxa too: **B1 bootloader + B1 DTB + Armbian 6.1.115 kernel + Trixie userland**, and got it booting → written up in the [pitfalls log](PITFALLS.en.md) and the [image guide](tools/radxa/image-user-guide.en.md) (both Chinese) |
 
 ---
 
@@ -243,19 +243,19 @@ Paths are relative to this repository's root. Mechanical CAD is maintained in a 
 
 | Project | Repository location | Description and links |
 |---|---|---|
-| First use and assembly | [CAD repository](https://github.com/fanhao375/microduck-replica-cad) · [BOM/](BOM/README.md) | [First-use guide](docs/上手指南/README.md) · [Shopping list](BOM/README.md) · [Assembly videos](#-assembly-videos) |
-| Software and image | [software/](software/README.md) | [Studio](software/studio/README.md) · [Image build](software/image/README.md) |
-| Training workbench and project | [software/training-studio/](software/training-studio/README.md)<br>[software/training/](software/training/README.md) | Browser workbench, simulation environment and model export |
-| Electronics and firmware | [hardware/](hardware/README.md) | [Board projects](hardware/README.md) · [IMU firmware](hardware/imu_to_dxl/README.md) |
+| First use and assembly | [CAD repository](https://github.com/fanhao375/microduck-replica-cad) · [BOM/](BOM/README.en.md) | [First-use guide](docs/上手指南/README.en.md) · [Shopping list](BOM/README.en.md) · [Assembly videos](#-assembly-videos) |
+| Software and image | [software/](software/README.en.md) | [Studio](software/studio/README.en.md) · [Image build](software/image/README.en.md) |
+| Training workbench and project | [software/training-studio/](software/training-studio/README.en.md)<br>[software/training/](software/training/README.en.md) | Browser workbench, simulation environment and model export |
+| Electronics and firmware | [hardware/](hardware/README.en.md) | [Board projects](hardware/README.en.md) · [IMU firmware](hardware/imu_to_dxl/README.en.md) |
 | Debug and analysis tools | [tools/](tools/README.en.md) | [Tool index](tools/README.en.md) · Flashing, serial debugging, Feetech references and analysis |
-| Documentation and records | [docs/](docs/README.en.md) | [All documentation](docs/README.en.md) · [Pitfalls](踩坑记录.md) · [Debug log](调试记录.md) · [Build log](BUILD-LOG.en.md) |
-| History and community | [docs/](docs/README.en.md#research-and-archives) | [Upstream updates (Chinese)](docs/官方更新跟踪.md) · [Update history](docs/update-history.en.md) · [Community contributions](docs/community-contributions.en.md) |
+| Documentation and records | [docs/](docs/README.en.md) | [All documentation](docs/README.en.md) · [Pitfalls](PITFALLS.en.md) · [Debug log](DEBUG-LOG.en.md) · [Build log](BUILD-LOG.en.md) |
+| History and community | [docs/](docs/README.en.md#research-and-archives) | [Upstream updates (Chinese)](docs/official-update-tracking.en.md) · [Update history](docs/update-history.en.md) · [Community contributions](docs/community-contributions.en.md) |
 
 ---
 
 ## Licence and sources
 
-Code, simulation assets and bundled models have separate licences. See [licensing and attribution](NOTICE.md) and the [model terms](software/image/overlay/usr/share/doc/microduck/模型说明.txt); **the replica image is for personal non-commercial builds and must not be distributed with paid products**.
+Code, simulation assets and bundled models have separate licences. See [licensing and attribution](NOTICE.en.md) and the [model terms](software/image/overlay/usr/share/doc/microduck/模型说明.txt); **the replica image is for personal non-commercial builds and must not be distributed with paid products**.
 
 This third-party project is not affiliated with or endorsed by Pollen Robotics.
 

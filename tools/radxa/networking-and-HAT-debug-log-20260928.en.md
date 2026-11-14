@@ -24,7 +24,7 @@ Hardware test on my personal image:
 - `systemd-networkd` and `wpa_supplicant@wlan0` are active; NetworkManager is not enabled; `systemctl --failed` shows no failed services.
 - At the first check, the board had been up for about 6 minutes and the CPU temperature was about 56℃. The kernel log still has warnings about display/GPU, Ethernet and SD tuning during boot, so "SSH works" cannot be taken to mean all hardware is fine.
 
-This proves the fix works with the current board and wireless environment. Repeated cold boots and compatibility with other routers have not been tested, so it cannot be claimed that all networking problems are solved. The old `.img.xz` and checksum in the public Release have not been replaced; users still need to add the configuration following the [user guide](镜像使用说明.md#4-连-wifi).
+This proves the fix works with the current board and wireless environment. Repeated cold boots and compatibility with other routers have not been tested, so it cannot be claimed that all networking problems are solved. The old `.img.xz` and checksum in the public Release have not been replaced; users still need to add the configuration following the [user guide](image-user-guide.en.md).
 
 ## HAT serial test
 
@@ -70,4 +70,4 @@ The raw read-only register snapshots and the consecutive-read statistics are sav
 
 ## Follow-up: head connection and sync read fix
 
-The user then moved HAT DATA to the ID 33 head servo and continued investigating the occasional timeouts. A knock-on misjudgment caused by sync read matching IDs in order was found and independently reproduced; it was fixed to file replies by the actual responding ID, and the board's debug console was updated to 0.15.3. After the fix, all 14 servos were read successfully within 200 frames on the web page; the raw reply-packet experiment still showed occasional missing replies from 31/33, so it cannot be concluded that the physical problem is gone. Power, common ground, interface circuitry and subsequent single-variable tests are in the [detailed investigation log](HAT舵机偶发超时排查-20260928.md).
+The user then moved HAT DATA to the ID 33 head servo and continued investigating the occasional timeouts. A knock-on misjudgment caused by sync read matching IDs in order was found and independently reproduced; it was fixed to file replies by the actual responding ID, and the board's debug console was updated to 0.15.3. After the fix, all 14 servos were read successfully within 200 frames on the web page; the raw reply-packet experiment still showed occasional missing replies from 31/33, so it cannot be concluded that the physical problem is gone. Power, common ground, interface circuitry and subsequent single-variable tests are in the [detailed investigation log](HAT-servo-intermittent-timeout-debug-20260928.en.md).

@@ -3,7 +3,7 @@
 **English** · [简体中文](HD1910-20261015-IMU乱跳根因与陀螺融合上机.md)
 
 **Robot**: unit #1, new card (kissqy V167 / control.43 + our fork's I²C IMU), BNO085 module glued inside the body, connected to the board's I2C4 (0x4B); servos all at defaults (P = 5, D = 0, torque limit 1000, no parameter file); joint Walk model action scale 0.9, head filter 0.5, leg filter 0.7; full silicone soles; whole duck with battery **806 g** (kissqy trained with 820 g).
-**Background**: after fixing the crooked IMU mount on the night of 10-12, the duck could stand and step, but from 10-12 to 10-14 it kept "falling after two or three steps when the stick is pushed". In between we tried changing soles, tuning servo D, tuning filters and scale, and comparing with simulation, none of which solved it (see [10-13 night](HD1910-20261013-夜-掉电-舵机D与蹭地.md), [10-14 daytime](HD1910-20261014-白天-仿真找原因与新版放开参数.md)).
+**Background**: after fixing the crooked IMU mount on the night of 10-12, the duck could stand and step, but from 10-12 to 10-14 it kept "falling after two or three steps when the stick is pushed". In between we tried changing soles, tuning servo D, tuning filters and scale, and comparing with simulation, none of which solved it (see [10-13 night](HD1910-20261013-night-brownout-servo-D-and-foot-scuffing.en.md), [10-14 daytime](HD1910-20261014-day-simulation-diagnosis-and-relaxed-params.en.md)).
 
 **One-line conclusions**:
 1. **Root cause**: the orientation **computed by the BNO085 chip itself** (game rotation vector) jumps 20–60° within 20 ms while walking (about half of the episodes start around foot touchdown), while at the same moment the chip's gyro says the body has barely rotated. The gravity direction the model sees jumps along with it, which amounts to suddenly being told "you're falling"; it corrects, and then it really falls. The chip's gyro itself is fine.
@@ -210,7 +210,7 @@ Next steps, one change at a time: first ask the group member who got it working 
 
 ### 6.2 Whole-board reboot (19:31:42)
 
-The duck was standing in place in walk mode when the logs suddenly cut off with no shutdown sequence, and the recording file ended with a run of null bytes, indicating a brownout or crash. Just before, the battery was at 7.59 V, CPU at 78°C, WiFi normal. It's the same kind as the "whole-board reboot" on [10-13 night](HD1910-20261013-夜-掉电-舵机D与蹭地.md). robotd is an ordinary process, and if it crashed it would just restart itself, not reboot the whole board, so we **infer** it's unrelated to this change. But at the time the raw log was continuously writing to the card and the CPU was at 78°C, two things different from 10-13, which haven't been ruled out. Cause not determined; compare once the 10 A supply arrives.
+The duck was standing in place in walk mode when the logs suddenly cut off with no shutdown sequence, and the recording file ended with a run of null bytes, indicating a brownout or crash. Just before, the battery was at 7.59 V, CPU at 78°C, WiFi normal. It's the same kind as the "whole-board reboot" on [10-13 night](HD1910-20261013-night-brownout-servo-D-and-foot-scuffing.en.md). robotd is an ordinary process, and if it crashed it would just restart itself, not reboot the whole board, so we **infer** it's unrelated to this change. But at the time the raw log was continuously writing to the card and the CPU was at 78°C, two things different from 10-13, which haven't been ruled out. Cause not determined; compare once the 10 A supply arrives.
 
 ### 6.3 Other
 
@@ -220,7 +220,7 @@ The duck was standing in place in walk mode when the logs suddenly cut off with 
 
 ## 7. How to follow along (for BNO085 module users)
 
-1. Wire it up and confirm the IMU orientation per the [replica image getting-started guide](../software/image/烧录和第一次使用.md). Reproducing this page's experiment requires the `hd1910-v167-gyro-fusion` build from that time.
+1. Wire it up and confirm the IMU orientation per the [replica image getting-started guide](../software/image/flashing-and-first-use.en.md). Reproducing this page's experiment requires the `hd1910-v167-gyro-fusion` build from that time.
 2. First stand and walk in the default `chip` mode while recording ([`duck_rec.py`](../tools/radxa/onboard-analysis/duck_rec.py)), and use `judge_block.py` to see how much the chip path jumps.
 3. Switch to `gyro` with the command in section 4.4, `reconnect` (this turns torque off, so hold it), stand still for 5 minutes and watch θ, then walk.
 4. Check the counters before and after each segment (the command in section 4.4), and decide per the rules in §5.5 whether to fall back to `chip`.
@@ -237,4 +237,4 @@ The duck was standing in place in walk mode when the logs suddenly cut off with 
 
 - Recordings, raw logs, counters: private directory on the debugging PC `Radxa-Zero3W/调试记录/陀螺融合上机-20261015/` (not uploaded as a public attachment).
 - Scripts: `judge_block.py` and `ab_blocks.py` in [`tools/radxa/onboard-analysis/`](../tools/radxa/onboard-analysis/).
-- The historical implementation branch is `hd1910-v167-gyro-fusion`, documented in that branch's `trunk-imu-i2c.zh-CN.md`. For public use, start from the [replica image getting-started guide](../software/image/烧录和第一次使用.md).
+- The historical implementation branch is `hd1910-v167-gyro-fusion`, documented in that branch's `trunk-imu-i2c.zh-CN.md`. For public use, start from the [replica image getting-started guide](../software/image/flashing-and-first-use.en.md).

@@ -5,7 +5,7 @@
 The training code, models, parameters, dependency lock file and tests for the Feetech HD-1910 are all maintained in this directory.
 Download or clone `microduck-replica` to get the complete project; there is no need to pull a training branch or initialize submodules.
 
-It uses **[the 1910 BAM M6 parameters published by LuwuDynamics](src/mjlab_microduck/robot/hd1910/README.md)**;
+It uses **[the 1910 BAM M6 parameters published by LuwuDynamics](src/mjlab_microduck/robot/hd1910/README.en.md)**;
 the training framework and the Microduck geometry come from [Pollen Robotics](https://github.com/pollen-robotics/microduck_rl),
 and the actuator model comes from [Rhoban/BAM](https://github.com/Rhoban/bam). The parameters were not identified by this project.
 This project adds the HD1910 task configuration, the state-initialization adaptation for the Feetech controller, and regression checks.
@@ -42,8 +42,8 @@ simulation values; they need to be corrected later against the real Feetech hard
 
 ## Docs and tests
 
-- [Usage, verification records and explanation of the initialization issue](docs/hd1910-baseline.md): what was missing is the Feetech controller's target-angle history; the fix does not change the borrowed M6 parameters.
-- [Sources, pinned versions and license scope](UPSTREAM.md).
+- [Usage, verification records and explanation of the initialization issue](docs/hd1910-baseline.en.md): what was missing is the Feetech controller's target-angle history; the fix does not change the borrowed M6 parameters.
+- [Sources, pinned versions and license scope](UPSTREAM.en.md).
 - [Original training project README](README.upstream.md): keeps the upstream task and tool descriptions; its default task targets the XL330, while the Feetech version uses the HD1910 entry points in the table above.
 
 Run the integration and regression checks in this directory (including GPU stepping):
@@ -62,4 +62,4 @@ verifying the pipeline and are not released as gaits for the real robot.
 
 The code, configuration, parameters and documentation in this training directory are licensed under [Apache-2.0](LICENSE), keeping third-party attribution.
 **The 3D models and meshes follow the upstream CC BY-NC-SA notice** and do not become Apache-2.0 because they were merged into this repo;
-see [UPSTREAM.md](UPSTREAM.md) and the root [NOTICE.md](../../NOTICE.md).
+see [UPSTREAM.md](UPSTREAM.en.md) and the root [NOTICE.md](../../NOTICE.en.md).

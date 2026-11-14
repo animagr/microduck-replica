@@ -8,7 +8,7 @@ The image and the signed package use source `f215b658a4f24b669cf664b6381a559c614
 
 - [20261104 full test image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261104)
 - [2026.11.4 companion software test release](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-software-v2026.11.4)
-- [User update checklist](更新说明-20261104.md), [companion driver update procedure for old cards](native-update-20261104.md)
+- [User update checklist](release-notes-20261104.en.md), [companion driver update procedure for old cards](native-update-20261104.en.md)
 - Native main program commit `eecac1878136d3188370a5f6460b7d0521cf845d` ([release build record](https://github.com/fanhao375/microduck-replica/releases/download/microduck-replica-image-20261104/runtime-provenance.json))
 
 | Attachment | Bytes | SHA256 |

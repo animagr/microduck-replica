@@ -45,4 +45,4 @@ Limitation: the Python standard library's system DNS resolution cannot be interr
 - Evidence: `deployment/apply_frozen_remote.result.json`, `deployment/device-verification.json`, `deployment/stop_before_update_remote.result.json`. This round did not re-flash the image, enable OTA or change Wi-Fi.
 - Without the user's real API Key, Doubao or any other real cloud account was not verified; the microphone/speaker, end-to-end voice and AI action calls are not yet connected.
 
-Notes: [configuration usage guide](../../AI对话接入配置-20261027.md). Evidence is in the root workspace `artifacts/ai-provider-settings-20261026/`; in the software ledger this is F26, and the physical problem with music beat-following still has not passed acceptance per the original record.
+Notes: [configuration usage guide](../../ai-chat-setup-20261027.en.md). Evidence is in the root workspace `artifacts/ai-provider-settings-20261026/`; in the software ledger this is F26, and the physical problem with music beat-following still has not passed acceptance per the original record.

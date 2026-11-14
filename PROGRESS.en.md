@@ -7,7 +7,7 @@
 **Historical progress baseline**: 2026-09-03 (erratum on hardware open-source status: the HAT board has been officially open-sourced)
 **Repo**: https://github.com/fanhao375/microduck-replica (public)
 
-> **Model entry point update (2026-09-28)**: structural parts, CAD and print projects are now all downloaded from [microduck-replica-cad](https://github.com/fanhao375/microduck-replica-cad). The old `print/` and `cad/` STLs in the main repo have been removed, and those directories only keep pointer notes. The analysis batches and counts below are historical records; for the latest physical build progress see the [build log](构建日志.md), and for version checks see the [CAD record](docs/CAD结构件版本核对-20260928.md).
+> **Model entry point update (2026-09-28)**: structural parts, CAD and print projects are now all downloaded from [microduck-replica-cad](https://github.com/fanhao375/microduck-replica-cad). The old `print/` and `cad/` STLs in the main repo have been removed, and those directories only keep pointer notes. The analysis batches and counts below are historical records; for the latest physical build progress see the [build log](BUILD-LOG.en.md), and for version checks see the [CAD record](docs/cad-structural-parts-version-check-20260928.en.md).
 
 ---
 
@@ -37,7 +37,7 @@ This project derives all the information needed for a mechanical replica from th
 | Training | HD1910 project, M6 parameters and short training checks integrated into `software/training` | Calibration of this unit, model checks and gait on real hardware |
 | Public image | Old first-login instructions changed to `root / 1234`, duck is only created after the wizard; new DHCP-fix candidate added | Candidate image only verified offline, not yet flashed to a card and tested; base image does not include the robot runtime |
 
-Sources: [3000-round test summary](tools/radxa/50Hz保持姿势读状态-20260928.md), [image usage instructions](tools/radxa/镜像使用说明.md), [camera record](tools/radxa/摄像头调试记录-20260928.md). The next step is small-range joint-by-joint verification with the robot physically supported, then completing protection, IMU and runtime integration. The early analysis process is kept below; its completed items and to-dos do not replace the current acceptance status on real hardware.
+Sources: [3000-round test summary](tools/radxa/50Hz-hold-pose-read-state-20260928.en.md), [image usage instructions](tools/radxa/image-user-guide.en.md), [camera record](tools/radxa/camera-debug-log-20260928.en.md). The next step is small-range joint-by-joint verification with the robot physically supported, then completing protection, IMU and runtime integration. The early analysis process is kept below; its completed items and to-dos do not replace the current acceptance status on real hardware.
 
 ## Historical analysis baseline (2026-09-03)
 

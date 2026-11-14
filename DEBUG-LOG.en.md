@@ -5,10 +5,10 @@
 > **Current status: the HAT has arrived and is plugged onto the board; the board is currently running Radxa's official B1 image, Wi-Fi / SSH work, and after reseating the camera ribbon cable a 1920×1080 frame has been captured.**
 > Last updated: 2026-09-28. The current official system is used for camera comparison; the project runtime has not been restored yet. The original Armbian has not been retested with the correct wiring.
 
-The [build log](构建日志.md) covers the **mechanical** side: printing, test fitting, tolerances.
+The [build log](BUILD-LOG.en.md) covers the **mechanical** side: printing, test fitting, tolerances.
 This document covers the **electrical and software** side: first a **step-by-step manual** (how to configure, wire and test the parts once they arrive), then a **dated log of the process** (what was done, what was observed, what comes next).
 
-Conclusive pitfalls are collected separately in [Pitfalls](踩坑记录.md). What the boards and chips are, and why they were chosen, is in [Hardware primer](docs/硬件入门.md).
+Conclusive pitfalls are collected separately in [Pitfalls](PITFALLS.en.md). What the boards and chips are, and why they were chosen, is in [Hardware primer](docs/hardware-primer.en.md).
 
 ---
 
@@ -124,7 +124,7 @@ With USB plugged in, the V1 terminal carries 5 V (measured 2026-09-12). On 2026-
 
 ⚠️ Don't exceed 8.4 V; that's the HD-1910's limit, not the URT-2's.
 
-⚠️ **Power-up order: plug in USB first, then power the servos.** The other way round, the bus gets held at 2.1 V and not a single servo responds; see [Pitfalls · Tools](踩坑记录.md#工具).
+⚠️ **Power-up order: plug in USB first, then power the servos.** The other way round, the bus gets held at 2.1 V and not a single servo responds; see [Pitfalls · Tools](PITFALLS.en.md).
 
 **Don't do stall tests on a fully charged 8.4 V battery**: that is the HD-1910's voltage limit, zero margin.
 
@@ -301,7 +301,7 @@ The left/right asymmetry of hip yaw is mirroring: both legs turn 30° outward an
 
 ## No-HAT build · jumper wires to the controller
 
-**Now a separate document → [docs/不打HAT.md](docs/不打HAT.md)**. Many people find getting the HAT fabricated too expensive; that document is the alternative: ¥70 of modules, step-by-step wiring, and which steps can burn something.
+**Now a separate document → [docs/不打HAT.md](docs/no-HAT-build.en.md)**. Many people find getting the HAT fabricated too expensive; that document is the alternative: ¥70 of modules, step-by-step wiring, and which steps can burn something.
 This section only records what happened while doing it.
 
 ---
@@ -330,16 +330,16 @@ Steps and the ID table are in [Servo configuration · step by step once the part
 - Started mounting the Feetech HD-1910s into the mechanical parts
 
 **Problem found**: **the HD-1910 differs structurally from the original XL330** (at the spot where the leg is clamped). A colleague modified the structural parts and reprinted them; after the change they fit.
-Exactly which part, what was changed and by how much: *to be added* (take photos, measure dimensions, write it into the [build log](构建日志.md), and add a line to the HD-1910 section of [Actuator selection](docs/执行器选型.md): "mechanically not a drop-in replacement, parts must be modified").
+Exactly which part, what was changed and by how much: *to be added* (take photos, measure dimensions, write it into the [build log](BUILD-LOG.en.md), and add a line to the HD-1910 section of [Actuator selection](docs/actuator-selection.en.md): "mechanically not a drop-in replacement, parts must be modified").
 
-**The algorithm side sent a pre-training data collection checklist** → the filled-in version is at [docs/HD-1910训练前数据清单.md](docs/HD-1910训练前数据清单.md); everything the repo already has is filled in, and bench items are marked with how to measure them.
+**The algorithm side sent a pre-training data collection checklist** → the filled-in version is at [docs/HD-1910训练前数据清单.md](docs/HD-1910-pre-training-data-checklist.en.md); everything the repo already has is filled in, and bench items are marked with how to measure them.
 
 **Next steps**:
 - Continue mounting servos; after one leg is done, measure its range of motion once
 - Assign IDs: the adapter cables haven't arrived yet, so first cut a servo cable and jumper-wire it per [Step 2 above](#第-2-步--飞线). **Do this first today**
   - ✅ Wire done, DIP switch set to the USB side, 5 V measured across G–V1
   - ✅ Plugged into the PC it shows up as **COM5**; the chip is a **CH343** (not CH340), recognized directly with the built-in Windows driver; Step 1 of the manual has been updated
-- Flashing the controller: **no card reader, can't do it**. The card is microSD, and the board itself can't act as a card reader; if the laptop has no SD slot you need to buy one (USB 3.0). When it arrives, boot per [No-HAT build · Step 1](docs/不打HAT.md#第-1-步--主控点亮什么都别接)
+- Flashing the controller: **no card reader, can't do it**. The card is microSD, and the board itself can't act as a card reader; if the laptop has no SD slot you need to buy one (USB 3.0). When it arrives, boot per [No-HAT build · Step 1](docs/no-HAT-build.en.md)
 
 ---
 
@@ -362,9 +362,9 @@ Exactly which part, what was changed and by how much: *to be added* (take photos
 **What was done**:
 - Powered on the bare Radxa Zero 3W, OK. The pin header is 2.54 mm and matches the hole spacing in the DXF (two rows at y = 25.41 / 27.95 mm).
 - The card reader and 5 V buck module arrived.
-- Flashed Armbian 26.8.1 trixie minimal (sha256 verified). Rufus portable, accepts `.img.xz`, done writing in 2 minutes. Screenshots are in [`assets/flash/`](assets/flash/), and the steps are written up in [No-HAT build · Step 1](docs/不打HAT.md#第-1-步--主控点亮什么都别接).
+- Flashed Armbian 26.8.1 trixie minimal (sha256 verified). Rufus portable, accepts `.img.xz`, done writing in 2 minutes. Screenshots are in [`assets/flash/`](assets/flash/), and the steps are written up in [No-HAT build · Step 1](docs/no-HAT-build.en.md).
 
-**Pitfall hit**: tried to use `wsl --mount` to write `.not_logged_in_yet` into the flashed card; it reported `ERROR_FILE_NOT_FOUND`, WSL can't mount a USB card reader. Switched to **putting the presets into the image before flashing**; the script is in [`tools/radxa/`](tools/radxa/) and needs no admin rights. Recorded in [Pitfalls](踩坑记录.md).
+**Pitfall hit**: tried to use `wsl --mount` to write `.not_logged_in_yet` into the flashed card; it reported `ERROR_FILE_NOT_FOUND`, WSL can't mount a USB card reader. Switched to **putting the presets into the image before flashing**; the script is in [`tools/radxa/`](tools/radxa/) and needs no admin rights. Recorded in [Pitfalls](PITFALLS.en.md).
 
 **Radxa resources**: downloaded the schematic / product brief / 2D DXF / 3D STP / component placement drawing, stored locally in `Radxa-Zero3W/`. **There are no PCB source files**, and neither the placement drawing nor the DXF marks pin 1. Identify pin 1 with a multimeter: power via the OTG port, measure the four corners of the header; the one with 3.3 V is pin 1, and the 5 V one next to it is pin 2.
 
@@ -386,7 +386,7 @@ Exactly which part, what was changed and by how much: *to be added* (take photos
 - Overwrote sectors 64–32767 (idbloader + u-boot.itb) of the Armbian card with those from the Radxa image and added a `/boot/extlinux/extlinux.conf`; **the ninth card booted**. LED: double blink → off → solid; on the LAN at `192.168.0.102`, and a COM5 appeared on the PC.
 - Then followed the official `install-by-hand.md`: extlinux loads `uart2-m0` + `dwc3-peripheral`, console on tty1, mask the getty on ttyS2/ttyFIQ0; WiFi changed to the standard Armbian netplan form; `setup-board.sh` (aic3x codec DKMS, ONNX Runtime 1.28, ToF udev rules) → `migrate-network.sh` (NetworkManager) → reboot → run each once more → `install.sh` (daemon 0.13.0). The board downloads from GitHub through the PC's Clash proxy.
 
-**Pitfalls hit** all went into [Pitfalls](踩坑记录.md): bootloader, GCMP-256, dwc3-peripheral, GitHub proxy, missing variables in the first-boot presets.
+**Pitfalls hit** all went into [Pitfalls](PITFALLS.en.md): bootloader, GCMP-256, dwc3-peripheral, GitHub proxy, missing variables in the first-boot presets.
 
 **Next step**: Step 4, connect the servo bus to the controller (URT-2 over USB, or jumper wires to pin 8/10 using `/dev/ttyS2`), and check the 15 servos with `robotctl health`.
 
@@ -417,7 +417,7 @@ The prototype era (the Raspberry Pi Zero 2 W version) used a BNO055 over I2C, so
 4. The user checked and corrected the orientation of the ribbon cable and powered on again; `Model ID 0x0219` was read successfully, the `imx219` driver bound, and the media pipeline was complete.
 5. A capped GStreamer capture of 40 frames reached a normal EOS after about 4.05 seconds with exit code 0; inspecting the last frame, the 1920×1080 JPEG shows the ceiling, a light and a monitor.
 
-Wiring reference images, the full retest commands, versions and evidence are in the **[camera debug log](tools/radxa/摄像头调试记录-20260928.md)**; a condensed reminder is in **[Pitfalls](踩坑记录.md#主板--hat--摄像头)**.
+Wiring reference images, the full retest commands, versions and evidence are in the **[camera debug log](tools/radxa/camera-debug-log-20260928.en.md)**; a condensed reminder is in **[Pitfalls](PITFALLS.en.md)**.
 
 **Next steps, in order**: the user has decided to switch back to the project's own Armbian, keep the working wiring, first retest detection and frame capture, then restore the project runtime and test sustained video, and after that verify the HAT peripherals and servo bus one by one. The earlier 09-20 base image with Wi-Fi has passed a read-only filesystem check; at the end of this session the board was shut down cleanly, waiting to be powered off so the card can be removed and flashed. That image is not a full backup of the running card from before the official image was flashed; camera enablement and the project software need to be restored. The original Armbian has not been retested with the correct wiring; the camera producing images does not mean the whole robot, the HAT power path or walking have passed acceptance. Whether the earlier suggestion to "remove the HAT and power the board alone over USB" was actually carried out is unconfirmed, and it is not counted as a completed test.
 
@@ -431,7 +431,7 @@ Wiring reference images, the full retest commands, versions and evidence are in 
 
 **Also hit that evening**: the PC couldn't reach the board while Clash TUN was on; the board froze once two minutes after boot (green LED solid), cause unknown.
 
-Per-run data, what each parameter means, and how to run it yourself are in **[2026-10-11 kissqy hardware test](docs/HD1910-20261011-kissqy-walk上机实测.md)**; conclusions have been added to [Pitfalls](踩坑记录.md#策略训练与真机迁移).
+Per-run data, what each parameter means, and how to run it yourself are in **[2026-10-11 kissqy hardware test](docs/HD1910-20261011-kissqy-walk-on-robot-test.en.md)**; conclusions have been added to [Pitfalls](PITFALLS.en.md).
 
 ## 2026-10-12 · First robot switched to kissqy's full stack: official 0.15.1 + R17 + I²C IMU
 
@@ -443,7 +443,7 @@ Per-run data, what each parameter means, and how to run it yourself are in **[20
 
 **Where it got stuck**: board overheating. With no camera connected, mediad kept crashing and restarting and GStreamer scanning saturated one core; the board was at 89°C. Even after disabling mediad and tofd it stayed at 85–92°C, with the CPU locked at 408 MHz the whole time. Pressing Start on the web console's virtual joystick did nothing: the web gamepad service takes 1.7 seconds to start, longer than the 0.6 seconds it waits for padd to acknowledge. The user shut it down to cool off; next step is adding cooling first (vent holes, an airflow duct), then trying the web joystick and walking again.
 
-Commands, numbers and reasons for every step are in **[2026-10-12 kissqy full stack on the robot](docs/HD1910-20261012-kissqy整套上机.md)**; conclusions have been added to [Pitfalls](踩坑记录.md).
+Commands, numbers and reasons for every step are in **[2026-10-12 kissqy full stack on the robot](docs/HD1910-20261012-kissqy-full-stack-on-robot.en.md)**; conclusions have been added to [Pitfalls](PITFALLS.en.md).
 
 ## 2026-10-12 afternoon · Taking apart kissqy's image R1 and making a card that boots on V1.12
 
@@ -467,7 +467,7 @@ Commands, numbers and reasons for every step are in **[2026-10-12 kissqy full st
 
 **Next steps**: flash the modified image onto a blank card and try boot, hotspot network setup and SSH on the first robot (leave the current card alone); ask kissqy when he will publish the V164 source, so the I²C IMU patch can be ported over.
 
-Full evidence is in **[kissqy image R1 analysis](docs/HD1910-20261012-kissqy镜像R1分析.md)**; conclusions have been added to [Pitfalls](踩坑记录.md).
+Full evidence is in **[kissqy image R1 analysis](docs/HD1910-20261012-kissqy-image-R1-analysis.en.md)**; conclusions have been added to [Pitfalls](PITFALLS.en.md).
 
 ## 2026-10-12 night · IMU mounted 8.5° off: after calibration it stands steadily for 70 seconds and starts alternating steps
 
@@ -482,7 +482,7 @@ Full evidence is in **[kissqy image R1 analysis](docs/HD1910-20261012-kissqy镜�
 
 **Still unsolved**: cooling (10 minutes after the model starts running the CPU reaches 85°C and throttles), the mouth servo reaching 60–70°C just while standing, filter settings 1/1/1 vs. 0.9/0.5/0.7 not yet compared, TPU soles and forward distance.
 
-Data for every step, the reasons, and how others can reproduce it: **[2026-10-12 night session record](docs/HD1910-20261012-夜-IMU校准与首次迈步.md)**; analysis scripts and IMU zero-calibration steps: [`tools/radxa/onboard-analysis/`](tools/radxa/onboard-analysis/).
+Data for every step, the reasons, and how others can reproduce it: **[2026-10-12 night session record](docs/HD1910-20261012-night-IMU-calibration-and-first-steps.en.md)**; analysis scripts and IMU zero-calibration steps: [`tools/radxa/onboard-analysis/`](tools/radxa/onboard-analysis/).
 
 ## 2026-10-13 · Following official 0.17: UDP gamepad and automatic sit-down on gamepad disconnect (code complete, not yet on the robot)
 
@@ -492,7 +492,7 @@ Data for every step, the reasons, and how others can reproduce it: **[2026-10-12
 
 **Result**: padd unit tests 79/79, all 14 end-to-end items pass, and the official 0.17.1 decoder can decode every packet we send. The padd and deploy script for the board are ready (the original is backed up first, one-command rollback). **Not yet on the robot**: on the robot, first confirm no regression with the Bluetooth gamepad, then manually try sit-down via D-pad down, then test sit-down on disconnect, and finally test the UDP gamepad.
 
-Why it was done this way, how to use it, and the symptom and cause of every review item: **[2026-10-13 official update and UDP gamepad](docs/HD1910-20261013-官方更新与UDP手柄.md)**.
+Why it was done this way, how to use it, and the symptom and cause of every review item: **[2026-10-13 official update and UDP gamepad](docs/HD1910-20261013-official-update-and-UDP-gamepad.en.md)**.
 
 ## 2026-10-13 night – early 10-14 · New card on the robot, full-robot brownouts, servo D and jitter, foot-scuffing analysis
 
@@ -509,7 +509,7 @@ Why it was done this way, how to use it, and the symptom and cause of every revi
 - **Foot scuffing**: the feet only clear the ground by 3–6 mm, versus 11–12 mm in simulation. During stance the knee doesn't straighten; the model wants to extend it, but on the real robot it stays bent. The left foot appears to scuff more because the left toe points down during swing and the body pitches about 1.5° further forward when the right leg is in stance; both only appeared after D was changed to 0 (not present at D=20), so next try D=5–10 first. Also, according to servo readings the two feet differ by about 1.6°–2.6° in the lateral (roll) direction; not investigated (it was looked into during the day on 10-14, see the next section);
 - **Power**: the 10 A supply arrives 10-16.
 
-Data for every step, the reasons, and how to revert: **[2026-10-13 night session record](docs/HD1910-20261013-夜-掉电-舵机D与蹭地.md)**; gait analysis scripts: [`tools/gait-analysis/`](tools/gait-analysis/); recording service: [`tools/radxa/onboard-analysis/`](tools/radxa/onboard-analysis/).
+Data for every step, the reasons, and how to revert: **[2026-10-13 night session record](docs/HD1910-20261013-night-brownout-servo-D-and-foot-scuffing.en.md)**; gait analysis scripts: [`tools/gait-analysis/`](tools/gait-analysis/); recording service: [`tools/radxa/onboard-analysis/`](tools/radxa/onboard-analysis/).
 
 ## 2026-10-14 daytime · Simulation comparison to find the cause of foot scuffing, soles, new version unlocking P / D / torque (not yet on the robot)
 
@@ -525,4 +525,4 @@ Data for every step, the reasons, and how to revert: **[2026-10-13 night session
 
 **Not yet done**: install the adjustable version on the new card, check which foot lets light through underneath, weigh the robot, change soles, try scale 1.0; power (the 10 A supply arrives 10-16).
 
-Data and reasons for every step: **[2026-10-14 daytime record](docs/HD1910-20261014-白天-仿真找原因与新版放开参数.md)**; new script [`tools/gait-analysis/home_roll.py`](tools/gait-analysis/home_roll.py).
+Data and reasons for every step: **[2026-10-14 daytime record](docs/HD1910-20261014-day-simulation-diagnosis-and-relaxed-params.en.md)**; new script [`tools/gait-analysis/home_roll.py`](tools/gait-analysis/home_roll.py).

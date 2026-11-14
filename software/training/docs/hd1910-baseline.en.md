@@ -4,7 +4,7 @@
 
 This baseline uses **the 1910 BAM M6 dynamics parameters published by [LuwuDynamics/xgoduck_rl](https://github.com/LuwuDynamics/xgoduck_rl)**;
 it is not data identified by this project.
-The [source record](../src/mjlab_microduck/robot/hd1910/README.md) contains the pinned commit, the original file's
+The [source record](../src/mjlab_microduck/robot/hd1910/README.en.md) contains the pinned commit, the original file's
 SHA-256, the accompanying configuration and a copy of the Apache-2.0 license. Thanks to LuwuDynamics,
 [Pollen Robotics](https://github.com/pollen-robotics/microduck_rl) and
 [Rhoban/BAM](https://github.com/Rhoban/bam) for their open-source work.
@@ -50,7 +50,7 @@ has the same issue. The regression checks cover first startup, consecutive compu
 
 ## Getting the code
 
-The training code, models and parameters are all in [software/training of microduck-replica](../README.md).
+The training code, models and parameters are all in [software/training of microduck-replica](../README.en.md).
 Use a Linux CUDA machine or WSL2 with a GPU configured, and run in its terminal:
 
 ```bash
@@ -60,7 +60,7 @@ uv sync --frozen --python 3.12
 ```
 
 If you have already cloned or downloaded this repo, just go into `software/training/`; no submodule or separate training repository is needed.
-For the pinned imported version and licenses see [UPSTREAM.md](../UPSTREAM.md).
+For the pinned imported version and licenses see [UPSTREAM.md](../UPSTREAM.en.md).
 
 ## How to run
 

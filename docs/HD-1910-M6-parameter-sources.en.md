@@ -26,7 +26,7 @@ servo parameters; only new parameters obtained through independent identificatio
 ## How to use
 
 Training code, parameters, models and integration fixes are all in this repo's **[`software/training/`](../software/training/)**;
-clone or download this repo to get the complete project. The [usage notes and verification record](../software/training/docs/hd1910-baseline.md)
+clone or download this repo to get the complete project. The [usage notes and verification record](../software/training/docs/hd1910-baseline.en.md)
 contain the commands, test results, and the cause and fix of the Feetech controller target-history initialization problem.
 
 - The parameter file is kept unchanged, keeping `model: "m6"` and `actuator: "sts3215"`; the latter selects
@@ -44,7 +44,7 @@ The public parameters let us start simulation integration, so building a complet
 This project has not yet verified Luwu's parameter set on real hardware. Our own unit's gain, power supply, response latency, mass and inertia,
 IMU and main controller communication timing still need checking; first compare simulation and hardware with small step responses, then decide whether to re-identify.
 
-For other static and dynamic data requirements, see the [pre-training data checklist](HD-1910训练前数据清单.md).
+For other static and dynamic data requirements, see the [pre-training data checklist](HD-1910-pre-training-data-checklist.en.md).
 The newly added training baseline uses the M6 parameters whose source is noted here.
 
 ## Feetech's official HD-1910 BAM

@@ -2,9 +2,9 @@
 
 **English** · [简体中文](烧录和第一次使用.md)
 
-This page applies to the **Radxa ZERO 3W**. If the board's silkscreen says **Cubie A7Z**, use the [A7Z flashing and network setup guide](../../radxa-cubie-a7z/image/README.md). The download links for both boards are in [Download the image for your board](../../README.md#按主板下载镜像).
+This page applies to the **Radxa ZERO 3W**. If the board's silkscreen says **Cubie A7Z**, use the [A7Z flashing and network setup guide](../../radxa-cubie-a7z/image/README.en.md). The download links for both boards are in [Download the image for your board](../../README.en.md).
 
-> The [20261027 image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) is public and marked as Latest; the build, read-only decompression and release attachment checks are complete, but the physical acceptance check of a fresh card for this version is still pending. It comes preinstalled with web software upgrades and local R3 “坐下／站起来” (sit down / stand up) voice; use them after completing the original calibration/stable-standing flow, see [Software update and voice](../../docs/软件更新与语音使用说明-20261027.md). Existing cards can later keep their own data through component upgrades, with no need to reflash for every web feature.
+> The [20261027 image](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-replica-image-20261027) is public and marked as Latest; the build, read-only decompression and release attachment checks are complete, but the physical acceptance check of a fresh card for this version is still pending. It comes preinstalled with web software upgrades and local R3 “坐下／站起来” (sit down / stand up) voice; use them after completing the original calibration/stable-standing flow, see [Software update and voice](../../docs/software-update-and-voice-guide-20261027.en.md). Existing cards can later keep their own data through component upgrades, with no need to reflash for every web feature.
 
 Follow this to the end and the duck can stand and walk. Everything is done in a browser: no SSH, no typing commands.
 
@@ -67,7 +67,7 @@ You do not have to connect to your home WiFi: you can stay connected to the duck
 **Security reminder**: everyone knows the hotspot password, and Studio has no login password by default, so **anyone nearby who connects to the hotspot can control the duck**.
 Before demonstrating in public, set a login password on Studio's “更多” (More) page.
 
-**Outdoor use without WiFi** (talking through the phone + gamepad): see [Studio's offline notes](../studio/deploy/OFFLINE.md):
+**Outdoor use without WiFi** (talking through the phone + gamepad): see [Studio's offline notes](../studio/deploy/OFFLINE.en.md):
 after connecting the phone to `Microduck-xxxx`, open `https://10.42.0.1:8000/m`, follow the prompts to install the duck's certificate, and you can use the onboard Vosk to recognize “手机说话” (phone voice); the physical gamepad connects directly over Bluetooth and does not need WiFi.
 
 ## 5. Follow the “上手清单” (Getting started checklist)
@@ -148,5 +148,5 @@ The first time you try the forward roll and kicks, leave space around the duck. 
 - **Two default behaviors to know**: when the battery voltage is low it **does not shut down automatically**, it only shows a warning on the page; when you see the warning, stop and charge, and do not drain the battery completely;
   after the duck falls it **does not go limp automatically**; before picking it up, press Select or tap “卸力” (Torque off).
 - **HTTPS certificate / phone microphone**: the first boot generates a local CA (`/etc/microduck/tls/`), and Studio starts with HTTPS automatically.
-  Older ducks can migrate with `sudo microduck-firstboot --tls-only`; how to install the certificate on the phone and how to use it without WiFi is in [Studio's offline notes](../studio/deploy/OFFLINE.md).
-- **What the image contains, and licenses**: the `/usr/share/doc/microduck/` folder on the duck, or the [image build notes](README.md#镜像里有什么).
+  Older ducks can migrate with `sudo microduck-firstboot --tls-only`; how to install the certificate on the phone and how to use it without WiFi is in [Studio's offline notes](../studio/deploy/OFFLINE.en.md).
+- **What the image contains, and licenses**: the `/usr/share/doc/microduck/` folder on the duck, or the [image build notes](README.en.md).

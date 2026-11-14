@@ -61,12 +61,12 @@ The following two images are used as is and keep their own authors and original 
 | `assets/hw/radxa-zero3w-official.webp` | [Radxa ZERO 3 official documentation](https://docs.radxa.com/en/zero/zero3), Radxa Computer (Shenzhen) Co., Ltd. | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `assets/hw/rpi-robot-hat-official.png` | [Pollen Robotics official HAT repo](https://github.com/pollen-robotics/elec_RPI_Robot_HAT), Pollen Robotics | [Apache-2.0](https://github.com/pollen-robotics/elec_RPI_Robot_HAT/blob/main/LICENSE) |
 
-For the original image URLs, pinned versions and checksums, see the [image source record](assets/hw/official-board-images.md).
+For the original image URLs, pinned versions and checksums, see the [image source record](assets/hw/official-board-images.en.md).
 
 ## Bundled training project
 
 [`software/training/`](software/training/) contains the complete training project, so replica builders get
-the code, parameters and simulation models in one download. For the pinned import version and scope of changes, see [UPSTREAM.md](software/training/UPSTREAM.md).
+the code, parameters and simulation models in one download. For the pinned import version and scope of changes, see [UPSTREAM.md](software/training/UPSTREAM.en.md).
 
 - Pollen Robotics' training code, tools and original documentation remain **Apache-2.0**; the HD1910
   tasks, initialization adaptations, tests and notes added in this directory are also Apache-2.0. The full license text is in

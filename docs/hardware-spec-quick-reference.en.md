@@ -6,18 +6,18 @@
 >
 > | Document | Covers | Does not cover |
 > |---|---|---|
-> | [BOM](../BOM.md) | **Master table**: all parts, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
-> | [Electronics purchase list](电控采购清单.md) | **Where to buy** the electronics: main controller / camera / ToF / power / the two PCBs / cables, real Taobao links + pitfalls | Basis for quantities, mechanical parts |
-> | [Mechanical purchase list](机械采购清单.md) | **Where to buy** the mechanical parts: bearings / fasteners / consumables, real Taobao links | Electronics |
+> | [BOM](../BOM.en.md) | **Master table**: all parts, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
+> | [Electronics purchase list](electronics-purchase-list.en.md) | **Where to buy** the electronics: main controller / camera / ToF / power / the two PCBs / cables, real Taobao links + pitfalls | Basis for quantities, mechanical parts |
+> | [Mechanical purchase list](mechanical-purchase-list.en.md) | **Where to buy** the mechanical parts: bearings / fasteners / consumables, real Taobao links | Electronics |
 > | **Hardware spec quick reference** (this one) | **Parameters**: interfaces, voltages, protocols, values the software side must match | Prices and shops |
-> | [print/README](../print/README.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
+> | [print/README](../print/README.en.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
 >
 > The mapping between assembly part numbers and screws is in the [CAD repo](https://github.com/fanhao375/microduck-replica-cad#装配-bom).
 
 
-> 📘 Newcomers should read the [hardware primer](硬件入门.md) first (explains one board at a time); for the full derivation see [hardware reverse engineering](硬件方案逆向.md).
+> 📘 Newcomers should read the [hardware primer](hardware-primer.en.md) first (explains one board at a time); for the full derivation see [hardware reverse engineering](hardware-teardown.en.md).
 
-> The one-page version. For the full derivation and evidence, see [硬件方案逆向.md](硬件方案逆向.md).
+> The one-page version. For the full derivation and evidence, see [硬件方案逆向.md](hardware-teardown.en.md).
 > All data comes from the source code, device trees and config files of `pollen-robotics/microduck` — **the code is the datasheet**.
 
 **In one sentence**: a Radxa Zero 3W (RK3566) running Armbian + one 1 Mbps TTL serial bus carrying 15
@@ -160,7 +160,7 @@ the harness running through a dynamically flexing neck, right next to motor PWM 
 
 ### ② Pollen RPI Robot HAT — officially open sourced, fabricate directly
 
-**65.0 × 30.9 mm, 1.0 mm thick, 4-layer board** (from the official KiCad and Gerbers; see the [BOM](../BOM.md)). The 65.02 × 30.02 × 0.84 measured from the STL mesh is a simulation approximation; **do not use it for ordering**. Plugs onto the 40-pin header.
+**65.0 × 30.9 mm, 1.0 mm thick, 4-layer board** (from the official KiCad and Gerbers; see the [BOM](../BOM.en.md)). The 65.02 × 30.02 × 0.84 measured from the STL mesh is a simulation approximation; **do not use it for ordering**. Plugs onto the 40-pin header.
 
 | Part | I2C address | Notes |
 |---|---|---|
@@ -182,7 +182,7 @@ the harness running through a dynamically flexing neck, right next to motor PWM 
 |---|---|---|---|
 | IMU | **LSM6DSV16X** | Dynamixel bus ID 200 | On-chip SFLP outputs the quaternion; the host runs no fusion |
 | ToF | **VL53L5CX / VL53L8CX** | I2C `0x29` @ i2c3 | 15 Hz, multizone ranging |
-| Camera | **IMX219** (Raspberry Pi Camera v2) | MIPI CSI, I2C `0x10` | **Rotated 90°**, see [hardware reverse engineering](硬件方案逆向.md#七传感器) |
+| Camera | **IMX219** (Raspberry Pi Camera v2) | MIPI CSI, I2C `0x10` | **Rotated 90°**, see [hardware reverse engineering](hardware-teardown.en.md) |
 
 - The camera sensor is pinned to the 1920×1080@30 mode (avoiding the 21 fps cap of the default boot mode),
   with ISP-scaled output, default 720p30 @ 2 Mb/s
@@ -246,12 +246,12 @@ When the battery EMA (about 10 s time constant) drops to 6.6 V → **it automati
 | Part | Status | Notes |
 |---|---|---|
 | Radxa Zero 3W | ✅ Buy directly | Commercially available module |
-| Dynamixel XL330 × 15 | ✅ Buy directly | **The biggest cost, $359–€629** (huge price differences between channels, see the [BOM](../BOM.md)) |
+| Dynamixel XL330 × 15 | ✅ Buy directly | **The biggest cost, $359–€629** (huge price differences between channels, see the [BOM](../BOM.en.md)) |
 | **NP-F550** battery + holder | ✅ Buy directly | Generic camcorder accessory. **Do not buy F970** |
 | Raspberry Pi Camera v2 (IMX219) | ✅ Buy directly | |
 | VL53L8CX module | ✅ Buy directly | Stemma/Qwiic, in stock |
 | **`imu_to_dxl` board** | 🔧 **Draw it yourself** | Protocol fully reconstructed, only 3 parts |
-| **HAT board** | ✅ Download the official Gerbers and fabricate | 4-layer. If you do not need recording/speaker it can be dropped entirely, but **the half-duplex direction circuit must then come from a separate adapter board**; see the [electronics purchase list](电控采购清单.md#六两块-pcb) |
+| **HAT board** | ✅ Download the official Gerbers and fabricate | 4-layer. If you do not need recording/speaker it can be dropped entirely, but **the half-duplex direction circuit must then come from a separate adapter board**; see the [electronics purchase list](electronics-purchase-list.en.md) |
 | Control software | ✅ Official, Apache-2.0 | With the same controller it **runs as is** |
 | Policies | ✅ 9 official ONNX files | Usable as long as the hardware is unchanged |
 
@@ -298,7 +298,7 @@ item by item — the two sides corroborate each other, and each fills in informa
 |---|---|---|---|
 | SoC | RK3566, quad-core A55 @1.8GHz, Mali-G52, NPU **0.8 TOPS** | RK3566 (device tree `compatible`) | ✅ Consistent |
 | **Main controller module** | **Not published** | **Radxa Zero 3W** | 🔍 **Only from reverse engineering** |
-| RAM / storage | **1 GB RAM / 32 GB storage** (does not say eMMC) | No corroboration in the source code | 🆕 **Only from the official specs**.<br>For the replica, a 1G or 2G no-eMMC version + a 32 GB microSD is enough; see the [electronics purchase list](电控采购清单.md#该买哪个配置) (2026-10-12 correction) |
+| RAM / storage | **1 GB RAM / 32 GB storage** (does not say eMMC) | No corroboration in the source code | 🆕 **Only from the official specs**.<br>For the replica, a 1G or 2G no-eMMC version + a 32 GB microSD is enough; see the [electronics purchase list](electronics-purchase-list.en.md) (2026-10-12 correction) |
 | Battery | **NP-F550, 2600 mAh, about 1 hour of runtime** | NP-F550, 2S, 8.2 V full / 6.6 V empty | ✅ Consistent |
 | ToF | **8 × 8** LiDAR | VL53L5CX / VL53L8CX @ `0x29` | ✅ That series is exactly 8×8 |
 | Camera | Front camera with indicator light | **IMX219** (Pi Cam v2), I2C `0x10`, **rotated 90°** | 🔍 Reverse engineering is more detailed |

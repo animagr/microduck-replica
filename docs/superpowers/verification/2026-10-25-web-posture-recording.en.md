@@ -2,7 +2,7 @@
 
 **English** · [简体中文](2026-10-25-web-posture-recording.md)
 
-Date: 2026-10-25 (JST). The user pointed out that recording only sit down/stand up was reported as "没有有效动作" (No valid actions), then replied explicitly "Yes, record sit down and stand up too." This round corrects the original first version's scope, which excluded sit/stand; see the [design](../specs/2026-10-25-web-posture-recording-design.md) and [plan](../plans/2026-10-25-web-posture-recording.md).
+Date: 2026-10-25 (JST). The user pointed out that recording only sit down/stand up was reported as "没有有效动作" (No valid actions), then replied explicitly "Yes, record sit down and stand up too." This round corrects the original first version's scope, which excluded sit/stand; see the [design](../specs/2026-10-25-web-posture-recording-design.en.md) and [plan](../plans/2026-10-25-web-posture-recording.md).
 
 **Result: the original control URL has been updated, and the user confirmed "It saves, and sit/stand playback works too."** This confirmation covers web sit/stand recording, saving and actual playback on this one duck; it does not extend to all model skills or long-duration motion having passed acceptance.
 

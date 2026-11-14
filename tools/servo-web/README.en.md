@@ -4,7 +4,7 @@
 
 > The 3D model on the page is for debugging display only and is still based on the upstream simulation geometry; it **must not be exported and used as the latest Feetech printed parts**. Get structural parts and assembly models from [microduck-replica-cad](https://github.com/fanhao375/microduck-replica-cad).
 
-Connect the serial port, drag sliders in the browser to move the servos, and the 3D duck turns along with them. It is for assembly, zeroing and bench acceptance checks, and it is also the tool for items 0–8 of the bench checklist in the [Feetech adaptation architecture](../../software/飞特适配架构.md).
+Connect the serial port, drag sliders in the browser to move the servos, and the 3D duck turns along with them. It is for assembly, zeroing and bench acceptance checks, and it is also the tool for items 0–8 of the bench checklist in the [Feetech adaptation architecture](../../software/feetech-adaptation-architecture.en.md).
 
 The page UI is in Chinese; button and panel names are quoted below as they appear on screen, with an English gloss.
 
@@ -27,7 +27,7 @@ The page UI is in Chinese; button and panel names are quoted below as they appea
 - Logs are split into 系统 / 总线 / 运动 / 校准 / 寄存器 / 姿态 / 方向 / IMU / 页面 (system / bus / motion / calibration / register / pose / direction / IMU / page); warnings and errors are colored and counted, and you can filter by category, show only warnings and errors, or copy with one click. Each entry is also written to `logs/servo-web-日期.log` (date), with a traceback for errors; calibration writes one line per servo: readings before and after, offsets before and after, and the reply at every step. If something goes wrong, send this file and it can be investigated
 - `sync_read` timing test: reads all 15 at once 200 times and reports min / avg / p99 / max and the failure count
 - Servo health check (command line, **read-only**): `python servo_report.py --port COM5` reads each servo's protection switches (unload conditions 19), status bits, temperature, voltage, current, offset and angle limits, flags red/yellow per step 5 of the 《调试记录》 (debug log), and saves them as `logs/体检-时间.md` (health check, time) and a `.json` with the same name (raw values 0–86). For a single servo use `--ids 21`; if you don't know the ID use `--scan-all`. The serial port must not be held by the debug console or FD at the same time
-- Remote troubleshooting: [`远程排查交接.md`](远程排查交接.md) (remote troubleshooting handoff) is a procedure written for Claude Code on another computer (health check → single-servo troubleshooting → enable protection → folded calibration); over there, say 「先读 tools/servo-web/远程排查交接.md，按里面的流程带我做」 (first read tools/servo-web/远程排查交接.md and walk me through the procedure in it)
+- Remote troubleshooting: [`远程排查交接.md`](remote-troubleshooting-handoff.en.md) (remote troubleshooting handoff) is a procedure written for Claude Code on another computer (health check → single-servo troubleshooting → enable protection → folded calibration); over there, say 「先读 tools/servo-web/远程排查交接.md，按里面的流程带我做」 (first read tools/servo-web/远程排查交接.md and walk me through the procedure in it)
 - Self-test: `python selftest.py`, without servos connected. [`sim_bus.py`](sim_bus.py) is a protocol-level HD-1910 simulator (sends and receives Feetech packets byte by byte, simulating lock, torque, 0x0B, the HD-1910 not accepting 128, offsets and dropouts), letting the real `feetech.py` + `server.py` run through calibration, undo, ID change, register writes and export. If you change code that talks to the servos, run it first before going to the real robot
 - The backend does not depend on the Feetech SDK; [`feetech.py`](feetech.py) sends packets directly according to the 2026 protocol manual ([`docs/飞特资料/`](../../docs/飞特资料/)), a little over a hundred lines
 
@@ -55,7 +55,7 @@ python build_model.py --src <microduck_rl>/src/mjlab_microduck/robot/microduck
 
 ### Board + HAT, debugging over WiFi
 
-First confirm the board has a WiFi address and SSH login works, configured per the [board image guide](../radxa/镜像使用说明.md#4-连-wifi). Put this folder and its dependencies on the board, confirm that programs such as `robotd` are not holding `/dev/ttyS2`, then run:
+First confirm the board has a WiFi address and SSH login works, configured per the [board image guide](../radxa/image-user-guide.en.md). Put this folder and its dependencies on the board, confirm that programs such as `robotd` are not holding `/dev/ttyS2`, then run:
 
 ```bash
 python server.py --port /dev/ttyS2 --ids 20-24,30-33,10-14 --host 0.0.0.0 --http-port 8080
@@ -148,11 +148,11 @@ python -m pytest test_feetech_sync.py test_imu_bridge.py test_imu_server.py test
 node --test test_imu_attitude.cjs
 ```
 
-Node.js is only used for the frontend math tests and is not needed for normal use of the debug console. Firmware host tests and historical real-board records are in [VALIDATION.md](../../hardware/imu_to_dxl/firmware/VALIDATION.md).
+Node.js is only used for the frontend math tests and is not needed for normal use of the debug console. Firmware host tests and historical real-board records are in [VALIDATION.md](../../hardware/imu_to_dxl/firmware/VALIDATION.en.md).
 
 ## Notes
 
-- **Plug the URT-2 into USB first, then power the servos.** In the reverse order the bus level gets stuck at 2.1 V, the scan finds not a single servo, and only broadcasts get back a few 0s; see the [pitfalls log](../../踩坑记录.md#工具).
+- **Plug the URT-2 into USB first, then power the servos.** In the reverse order the bus level gets stuck at 2.1 V, the scan finds not a single servo, and only broadcasts get back a few 0s; see the [pitfalls log](../../PITFALLS.en.md).
 - **Before using ttyS2 on the board, run `sudo systemctl stop robotd` first.** The official daemon opens this port every second to look for servos, and if both sides transmit at once the packets collide. Using the URT-2 via ttyUSB0 doesn't have this problem.
 - **Wiring ttyS2 directly to the servos with jumper wires will not receive any replies.** Radxa's UART is full-duplex 3.3 V on two wires, while the Feetech bus is single-wire half-duplex; in between you need either a tri-state buffer (what the official HAT does) or the chip design taken from a URT-2. Once the adapter board is built, first use the timing test on the page to check for echo: echo shows up as everything being "无应答" (no reply).
 - Center calibration and ID change write EEPROM, and the page pops up a confirmation. When changing an ID, have only that one servo on the bus.

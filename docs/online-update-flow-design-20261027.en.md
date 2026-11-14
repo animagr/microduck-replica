@@ -2,7 +2,7 @@
 
 **English** · [简体中文](在线升级流程方案-20261027.md)
 
-Date: 2026-10-27 (JST). Prompted by the community discussion "add incremental updates to the image so people do not have to reflash repeatedly", the user first had the online update flow reviewed, then authorized implementing it. This document keeps the initial design; on the same day the local software, signed package and matching image were completed, see the [delivery verification](superpowers/verification/2026-10-27-web-updates.md) and the [usage instructions](软件更新与语音使用说明-20261027.md) for the actual results. Later, following the user's instructions, the source was pushed and the image/software package published, see the [release record](superpowers/verification/2026-10-27-web-updates-publication.md); the duck was off, and nothing was deployed or flashed. The "current/future" descriptions below reflect the state at design time and do not override the delivery record.
+Date: 2026-10-27 (JST). Prompted by the community discussion "add incremental updates to the image so people do not have to reflash repeatedly", the user first had the online update flow reviewed, then authorized implementing it. This document keeps the initial design; on the same day the local software, signed package and matching image were completed, see the [delivery verification](superpowers/verification/2026-10-27-web-updates.en.md) and the [usage instructions](software-update-and-voice-guide-20261027.en.md) for the actual results. Later, following the user's instructions, the source was pushed and the image/software package published, see the [release record](superpowers/verification/2026-10-27-web-updates-publication.en.md); the duck was off, and nothing was deployed or flashed. The "current/future" descriptions below reflect the state at design time and do not override the delivery record.
 
 ## Recommended approach
 
@@ -71,10 +71,10 @@ On the current device, updaterd was inactive/disabled in the previous inventory;
 
 ## References
 
-- [Feature and update ledger F21](软件功能与升级总账.md)
-- [Image build and existing distribution flow](../software/image/README.md)
+- [Feature and update ledger F21](software-features-and-upgrades-ledger.en.md)
+- [Image build and existing distribution flow](../software/image/README.en.md)
 - [Upstream updater design](../../Microduck-kissqy/microduck-hd1910/firmware/docs/design/updater-design.md)
 - [Actual updater deployment configuration](../../Microduck-kissqy/microduck-hd1910/firmware/deploy/updater.toml)
-- [Latest single-device web deployment record](superpowers/verification/2026-10-27-ai-provider-settings.md)
+- [Latest single-device web deployment record](superpowers/verification/2026-10-27-ai-provider-settings.en.md)
 
 In the initial design stage only the flow was produced, and the device was not modified. Following the user's later authorization, the local implementation is done: the signing private key stays only on the build machine, and the public key goes into the package/image; the bootstrap input package is prepared, and the device services are still unchanged. The AI voice preference "spoken reply + web text" is kept on a separate draft branch, to be continued later.

@@ -23,4 +23,4 @@ The following two images were saved unchanged from official sources on 2026-10-2
 - License: [original Apache-2.0 file](https://github.com/pollen-robotics/elec_RPI_Robot_HAT/blob/6de86283297e4c49a9da8312cd3395ab83c437e3/LICENSE) · [local copy of the license](RPI-Robot-HAT-LICENSE.txt)
 - SHA-256: `09fb4851b84644df26d13924ed173f7ed163aab8c3f433233ab8758c4153c822`
 
-[Back to the hardware overview](../../hardware/README.md) · [Attribution and sources](../../NOTICE.md)
+[Back to the hardware overview](../../hardware/README.en.md) · [Attribution and sources](../../NOTICE.en.md)

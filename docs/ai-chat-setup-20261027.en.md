@@ -4,7 +4,7 @@
 
 The first version is for saving model connections first, then testing and text trial chat once the service is activated. **The duck's microphone, speaker, real-time voice and AI-triggered actions are not connected yet.** Selecting the current connection does not change the existing R3, the local sit/stand voice commands or the music features.
 
-Installed on duck-0de6 on 2026-10-27; see the [deployment and verification record](superpowers/verification/2026-10-27-ai-provider-settings.md). Without a real account or key, you can save a draft first.
+Installed on duck-0de6 on 2026-10-27; see the [deployment and verification record](superpowers/verification/2026-10-27-ai-provider-settings.en.md). Without a real account or key, you can save a draft first.
 
 ## Starting from the web console
 

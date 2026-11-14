@@ -118,7 +118,7 @@ After writing, close the debug console and rerun the full-robot health check to 
 
 ## 4. Folded calibration (whether to do it, and whether today, is the owner's call)
 
-**Prerequisites**: all 15 online, no red items in the health check, debug console 0.15 or later. For details, see one-click calibration in the [README](README.md) and the section 「缩着能不能当标定基准」 (can the tucked pose serve as the calibration reference) in the 《调试记录》 (debug log).
+**Prerequisites**: all 15 online, no red items in the health check, debug console 0.15 or later. For details, see one-click calibration in the [README](README.en.md) and the section 「缩着能不能当标定基准」 (can the tucked pose serve as the calibration reference) in the 《调试记录》 (debug log).
 
 1. Turn torque off on all servos and lay the duck face down on a flat table. In the 3D overlay, select 「校准用折叠」 (folded for calibration) and pose it to match.
 2. Pose it in this order. Where the knee makes contact depends on the hip angle, so set the hips first:

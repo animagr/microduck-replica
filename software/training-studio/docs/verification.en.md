@@ -63,7 +63,7 @@ The local evidence is stored in the outer `本地记录/training-local-20261023/
 - `policy.onnx`: `673bc7e787a084df1f3a8593a43ce987d2a05472ee12097b393e1ddb7311da57`
 - `rl-video-step-0.mp4`: `e967b6d33b4debc28a10a88fe026dbb2250f3cf51bae44b6c197aa1cc2119f3d`
 
-This result covers one flat-ground smoke run. PT/ONNX consistency is an independent acceptance check for this run and has not yet been added automatically to every export; it does not include hardware tests of GPU long-training pause/resume, rough-terrain training, cloud platforms or real-robot verification. For the steps see [Local smoke run](local-smoke.md).
+This result covers one flat-ground smoke run. PT/ONNX consistency is an independent acceptance check for this run and has not yet been added automatically to every export; it does not include hardware tests of GPU long-training pause/resume, rough-terrain training, cloud platforms or real-robot verification. For the steps see [Local smoke run](local-smoke.en.md).
 
 ## Custom action guide entry · 2026-10-23
 

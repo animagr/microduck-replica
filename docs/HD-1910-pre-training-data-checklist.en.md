@@ -5,7 +5,7 @@
 > The collection checklist from the algorithm side (2026-09-11, single-servo version). This version **fills in all the numbers that already exist in the repo and states their sources**; whatever really needs a test rig is marked **to be measured**.
 > The algorithm side should not receive an empty table: geometry, mass, inertia, joints, servo specs and IMU mounting have long been in the repo.
 
-**Tags**: [MJCF] upstream `robot_walk.xml` · [Spec sheet] Feetech "HD-1910-C001 Serial Type Specification" rev. A/0 · [Source] upstream `duck-control/src/model.rs` · [Reverse eng.] [Hardware reverse engineering](硬件方案逆向.md) · [STL] measured from the repo STLs · **to be measured**
+**Tags**: [MJCF] upstream `robot_walk.xml` · [Spec sheet] Feetech "HD-1910-C001 Serial Type Specification" rev. A/0 · [Source] upstream `duck-control/src/model.rs` · [Reverse eng.] [Hardware reverse engineering](hardware-teardown.en.md) · [STL] measured from the repo STLs · **to be measured**
 
 > ⚠️ **All geometry, mass and inertia values are simulation values for the XL330 version.** After switching to Feetech, at least four things differ:
 >
@@ -64,7 +64,7 @@ The pitch / knee / ankle axes of the left and right legs have **opposite signs**
 | `neck_pitch` | 5.7 | 26.0 / 0.0 / 94.1 | Head and neck │ total **279.9** |
 | `yaw_roll_motion` | 48.6 | 25.8 / −5.0 / 118.9 | Head and neck │ |
 | `jaw_soft` | 188.8 | 40.6 / 1.2 / 120.2 | Head and neck ┘ (includes head shell, camera, and the BMI088 on the HAT) |
-| **Whole robot** | **737.1** | | Consistent with the 737 g in [actuator selection](执行器选型.md) |
+| **Whole robot** | **737.1** | | Consistent with the 737 g in [actuator selection](actuator-selection.en.md) |
 | Battery NP-F550 | *To be weighed* (typically ~100 g; whether it is already included in trunk_base is **to be checked**) | | |
 
 **Moments of inertia** (kg·m², about each rigid body's own center of mass, MJCF `fullinertia` order Ixx Iyy Izz Ixy Ixz Iyz):
@@ -105,7 +105,7 @@ Action index = index into the policy's 14-dimensional output ([Source] `JOINT_NA
 | 12 | `right_knee` | **13** | *To calibrate (+5° check)* | 2048 (after center calibration) | 0 (after calibration) / official `motor.rs` to be read | **+0.3°** | *To measure* | *To measure* | -90° | 90° |
 | 13 | `right_ankle` | **14** | *To calibrate (+5° check)* | 2048 (after center calibration) | 0 (after calibration) / official `motor.rs` to be read | **-26.0°** | *To measure* | *To measure* | -90° | 90° |
 
-**Zero position definition**: the robot standing straight (legs as straight columns, feet flat, neck vertical, head looking level) = all joints 0 = servo 2048. The standing angles are offsets added to the zero position, **not the zero position**. For the calibration steps, see [debug log · step 9](../调试记录.md).
+**Zero position definition**: the robot standing straight (legs as straight columns, feet flat, neck vertical, head looking level) = all joints 0 = servo 2048. The standing angles are offsets added to the zero position, **not the zero position**. For the calibration steps, see [debug log · step 9](../DEBUG-LOG.en.md).
 
 The mouth (ID 34) is not part of the policy: closed −5° / open +30° ([Source] `MOUTH_CLOSED / MOUTH_OPEN`).
 

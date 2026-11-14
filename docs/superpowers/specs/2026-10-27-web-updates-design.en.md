@@ -2,7 +2,7 @@
 
 **English** · [简体中文](2026-10-27-web-updates-design.md)
 
-The user has approved the [online upgrade flow proposal](../../在线升级流程方案-20261027.md), asking for it to be implemented with local voice sit down/stand up included, and for the new image to use the same install package afterwards. Free-form AI voice remains paused, and its drafts are not merged. The scope is the web console, the matching helper and the duck-echo program of the existing HD1910/Radxa Zero3W replica stack; robotd/padd/models/OS stay at the existing verified versions.
+The user has approved the [online upgrade flow proposal](../../online-update-flow-design-20261027.en.md), asking for it to be implemented with local voice sit down/stand up included, and for the new image to use the same install package afterwards. Free-form AI voice remains paused, and its drafts are not merged. The scope is the web console, the matching helper and the duck-echo program of the existing HD1910/Radxa Zero3W replica stack; robotd/padd/models/OS stay at the existing verified versions.
 
 ## Verified engine choice
 

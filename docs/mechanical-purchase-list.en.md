@@ -6,17 +6,17 @@
 >
 > | Document | Covers | Does not cover |
 > |---|---|---|
-> | [BOM](../BOM.md) | **Master list**: all materials, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
-> | [Electronics purchase list](电控采购清单.md) | **Where to buy** electronics: controller / camera / ToF / power / the two PCBs / wiring, real Taobao links + pitfalls | Basis for quantities, mechanical parts |
+> | [BOM](../BOM.en.md) | **Master list**: all materials, quantities (counted from geom references in the MJCF), cost range, unresolved gaps | Which shop to buy from, how to print |
+> | [Electronics purchase list](electronics-purchase-list.en.md) | **Where to buy** electronics: controller / camera / ToF / power / the two PCBs / wiring, real Taobao links + pitfalls | Basis for quantities, mechanical parts |
 > | **Mechanical purchase list** (this one) | **Where to buy** mechanical parts: bearings / fasteners / consumables, real Taobao links | Electronics |
-> | [Hardware spec quick reference](硬件规格速查.md) | **Parameters**: interfaces, voltages, protocols, values the software side must match | Prices and shops |
-> | [print/README](../print/README.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
+> | [Hardware spec quick reference](hardware-spec-quick-reference.en.md) | **Parameters**: interfaces, voltages, protocols, values the software side must match | Prices and shops |
+> | [print/README](../print/README.en.md) | **Printing entry point**: choose version, material and quantity in the CAD repo | Purchasing |
 >
 > The mapping of part numbers to screws for assembly is in the [CAD repo](https://github.com/fanhao375/microduck-replica-cad#装配-bom).
 
 
 > **Snapshot date: 2026-09-04.** Prices and sales numbers change and links may go dead; check prices yourself before ordering.
-> For electronic and electrical parts (controller / camera / ToF / power / PCB / wiring), see the [Electronics purchase list](电控采购清单.md).
+> For electronic and electrical parts (controller / camera / ToF / power / PCB / wiring), see the [Electronics purchase list](electronics-purchase-list.en.md).
 >
 > Quantities are derived from mesh instance counts and hole features in the MJCF `robot_walk.xml`; **they are derived values, not official drawings**.
 
@@ -65,7 +65,7 @@ The list below is for 325 pieces, a **1.37×** margin over the 237 hole position
 | **M2 heat-set insert** | **60** | Recommended for printed parts, much stronger than tapping directly |
 | M2.5×6 | 20 | A few Ø2.7 hole positions |
 
-See [Fastener reconstruction](紧固件反推.md) for the derivation.
+See [Fastener reconstruction](fastener-reconstruction.en.md) for the derivation.
 
 ### Screw assortment kits
 
@@ -117,14 +117,14 @@ Medium-strength threadlocker is recommended on servo output shafts and metal-to-
 | **PLA / PETG** | about 300–500 g | Most structural parts |
 | **TPU** | A small amount | `jaw_soft_软下巴` (soft jaw), `soft_mouth_top_软嘴顶部` (soft mouth top) — soft material suggested, judging from the names and use |
 
-> Printing process and tolerance evaluation have not been done yet; see the risk list in [PROGRESS.md](../PROGRESS.md).
+> Printing process and tolerance evaluation have not been done yet; see the risk list in [PROGRESS.md](../PROGRESS.en.md).
 > **Simulation STL ≠ printable engineering part** — it only guarantees shape and inertia, with no fit tolerances, threaded holes or heat-set insert bosses.
 
 ---
 
 ## 4. Printed parts
 
-**Always check the [CAD repo](https://github.com/fanhao375/microduck-replica-cad#装配-bom) for the latest models, materials and print quantities; do not order based on upstream simulation reference counts.** The mating parts differ between the two servo models; see the [printing entry point](../print/README.md) for details.
+**Always check the [CAD repo](https://github.com/fanhao375/microduck-replica-cad#装配-bom) for the latest models, materials and print quantities; do not order based on upstream simulation reference counts.** The mating parts differ between the two servo models; see the [printing entry point](../print/README.en.md) for details.
 
 <details>
 <summary>Historical upstream model counts and naming errata (for analysis only, not the current print list)</summary>
@@ -166,9 +166,9 @@ the same applies to `ankle_left`/`ankle_right`, `sole_left`/`sole_right` and `fo
 
 | Mesh | What it is | What to do |
 |---|---|---|
-| `xl330` ×15 | Servo | See [Actuator selection](执行器选型.md) |
-| `np_f970` | NP-F battery (**actually F550**) | See the [Electronics purchase list](电控采购清单.md#五电源) |
-| `elec_rpi_robot_hat_pcb` | HAT circuit board | Have it fabricated, see the [Electronics purchase list](电控采购清单.md#六两块-pcb) |
+| `xl330` ×15 | Servo | See [Actuator selection](actuator-selection.en.md) |
+| `np_f970` | NP-F battery (**actually F550**) | See the [Electronics purchase list](electronics-purchase-list.en.md) |
+| `elec_rpi_robot_hat_pcb` | HAT circuit board | Have it fabricated, see the [Electronics purchase list](electronics-purchase-list.en.md) |
 | `pcb__raspberry_pi_zero_2_w` | Controller board placeholder | Buy a Radxa Zero 3W |
 | `lens` / `m12_lens_holder` | Lens and lens holder | ⚠️ Both come from the same Onshape Part Studio;<br>this repo classifies `lens` as a standard part and `m12_lens_holder` as a printed part; **this split is questionable** and awaits a physical re-check |
 | `speaker` | Speaker | 5W, connects to the HAT's Wago terminal |

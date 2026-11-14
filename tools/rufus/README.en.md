@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.md)
 
-[Back to tools index](../README.md) · [Flashing and first use](../../software/image/烧录和第一次使用.md)
+[Back to tools index](../README.en.md) · [Flashing and first use](../../software/image/flashing-and-first-use.en.md)
 
 Used to write the duck image to a microSD card. Provided here is the official, unmodified **Rufus 4.15 portable edition for Windows x64**; no installation needed.
 
@@ -14,7 +14,7 @@ Used to write the duck image to a microSD card. Provided here is the official, u
 2. Open Rufus and under **Device** (「设备」 in the Chinese UI) check the SD card's capacity and drive letter. **Writing erases all data on the selected card.**
 3. Click **SELECT** (「选择」) and choose the image file. If the file filter does not show `.img.xz`, switch it to all files.
 4. Double-check the target card, click **START** (「开始」), wait until the status returns to **READY** (「准备就绪」), then safely eject the card reader.
-5. When Windows asks to format the Linux partition, click **Cancel** (「取消」). Put the card back into the duck and continue with [first boot and network setup](../../software/image/烧录和第一次使用.md#3-第一次开机).
+5. When Windows asks to format the Linux partition, click **Cancel** (「取消」). Put the card back into the duck and continue with [first boot and network setup](../../software/image/flashing-and-first-use.en.md).
 
 ## Source and verification
 

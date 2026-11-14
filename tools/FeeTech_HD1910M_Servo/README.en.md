@@ -18,7 +18,7 @@ cargo build
 
 ## Documentation
 
-For the complete tutorial manual (protocol explanation + Rust concepts + hands-on experiments), see **[TUTORIAL.md](TUTORIAL.md)**.
+For the complete tutorial manual (protocol explanation + Rust concepts + hands-on experiments), see **[TUTORIAL.md](TUTORIAL.en.md)**.
 
 ## The two bundled Feetech datasheets
 
