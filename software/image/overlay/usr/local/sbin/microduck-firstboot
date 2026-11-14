@@ -1,8 +1,8 @@
 #!/usr/bin/python3
-"""Microduck 第一次开机初始化：起名、热点配置、识别躯干 IMU。
+"""Microduck first-boot initialization: naming, hotspot configuration, torso IMU detection.
 
-设计成可以在临时目录里测试：所有绝对路径都相对于 root（默认 /），
-外部命令和 I2C 探测都可以注入。
+Designed to be testable in a temporary directory: all absolute paths are relative to root (default /),
+and external commands and I2C probing can both be injected.
 """
 import argparse
 import ctypes
@@ -21,7 +21,7 @@ from pathlib import Path
 
 try:
     import tomllib
-except ImportError:  # pragma: no cover - 镜像里是 Python 3.13
+except ImportError:  # pragma: no cover - the image has Python 3.13
     tomllib = None  # type: ignore[assignment]
 
 DEFAULT_ROOT = os.environ.get("MICRODUCK_ROOT", "/")
@@ -55,7 +55,7 @@ def _default_run(args, timeout=10):
 
 
 def clean_serial(raw):
-    """去掉 NUL 和空白；不是可打印 ASCII 就返回 None。"""
+    """Strip NUL and whitespace; return None if it is not printable ASCII."""
     if raw is None:
         return None
     value = raw.replace(b"\x00", b"").strip()
@@ -67,11 +67,11 @@ def clean_serial(raw):
 
 
 def hostname_from_seed(seed):
-    """官方 configd identity 的算法：sha256 前 2 字节的十六进制。"""
+    """The official configd identity algorithm: hex of the first 2 bytes of sha256."""
     return "duck-" + hashlib.sha256(seed).digest()[:2].hex()
 
 
-# 兼容一个更直白的名字，测试和外部脚本都能用。
+# Compatibility alias with a plainer name, usable by tests and external scripts.
 duck_name = hostname_from_seed
 
 
@@ -117,7 +117,7 @@ class _I2CRdWr(ctypes.Structure):
 
 
 class _I2CDev:
-    """i2c-dev 节点：打开后 flock，和 robotd 的读法一样。"""
+    """i2c-dev node: flock after opening, the same way robotd reads it."""
 
     def __init__(self, path):
         import fcntl
@@ -152,7 +152,7 @@ class _I2CDev:
 
 
 class _FakeDev:
-    """测试用：同样的 select/register/read4，应答来自 JSON。"""
+    """For tests: the same select/register/read4, with replies coming from JSON."""
 
     def __init__(self, path, spec, counts):
         self.path = path
@@ -225,7 +225,7 @@ def _errno_name(exc):
 
 
 def _lock_holder(path, fake_spec=None):
-    """持有节点 flock 的进程（comm, pid）；不知道就返回 (None, None)。"""
+    """The process holding the node's flock (comm, pid); returns (None, None) if unknown."""
     if fake_spec is not None:
         bus = fake_spec.get(path) or {}
         return (bus.get("held") or {}).get("by"), None
@@ -264,7 +264,7 @@ def _show(seen):
 
 
 def _look(dev, addr, reg):
-    """读两遍，间隔 20 ms -> (state, value, text)。"""
+    """Read twice, 20 ms apart -> (state, value, text)."""
     seen = []
     for attempt in range(2):
         if attempt:
@@ -303,7 +303,7 @@ class Firstboot:
         self.hostname = None
         self._log_warned = False
 
-    # ---- 路径与日志 ----
+    # ---- Paths and logging ----
 
     def path(self, absolute):
         absolute = str(absolute)
@@ -332,10 +332,10 @@ class Firstboot:
             return runner(args)
 
     def _run_allowed(self):
-        # 在临时 root 里不能真的改本机主机名 / 加载模块；注入了 runner 就是测试。
+        # In a temporary root we cannot really change this machine's hostname / load modules; an injected runner means a test.
         return self.root == Path("/") or self.run_cmd is not None
 
-    # ---- 起名 ----
+    # ---- Naming ----
 
     def read_serial(self):
         try:
@@ -440,7 +440,7 @@ class Firstboot:
                          (name, result.returncode, (result.stderr or result.stdout).strip()))
         return name
 
-    # ---- 热点配置 ----
+    # ---- Hotspot configuration ----
 
     @staticmethod
     def _hotspot_text(suffix):
@@ -492,7 +492,7 @@ class Firstboot:
         self.log("已写热点配置：Microduck-Hotspot（SSID Microduck-%s，地址 10.42.0.1/24）" % suffix)
         return target
 
-    # ---- HTTPS 证书（局部 CA） ----
+    # ---- HTTPS certificates (local CA) ----
 
     TLS_DIR = "/etc/microduck/tls"
     TLS_SUBJECT = "/CN=Microduck-Local-CA"
@@ -533,15 +533,15 @@ class Firstboot:
             entry = pwd.getpwnam("radxa")
         except (ImportError, KeyError):
             return
-        # leaf 私钥要能被 Studio（radxa）读；CA 私钥保持 root。
+        # The leaf private key must be readable by Studio (radxa); the CA private key stays root-only.
         try:
             os.chown(directory / "duck.key", entry.pw_uid, entry.pw_gid)
         except OSError as exc:
             self.log("提示：duck.key 属主没改成 radxa：%s" % exc)
 
     def setup_tls(self, name=None, force=False):
-        """生成局部 CA + 服务器证书（SAN 含 hotspot 地址、主机名和 .local）。
-        幂等：ca.crt / duck.crt / duck.key 都在就跳过；旧的自签 leaf 没有 ca.crt 时先备份再重生成。"""
+        """Generate a local CA + server certificate (SAN includes the hotspot address, hostname and .local).
+        Idempotent: skip if ca.crt / duck.crt / duck.key all exist; an old self-signed leaf without ca.crt is backed up first and then regenerated."""
         name = name or self.hostname or self._read_hostname()
         if not name:
             name, _ = self.pick_name()
@@ -601,7 +601,7 @@ class Firstboot:
         return spec
 
     def _detect_i2c(self):
-        """与 imu-module-install.sh 的 probe_i2c 相同的识别规则。"""
+        """Same detection rules as probe_i2c in imu-module-install.sh."""
         events = []
 
         def emit(kind, text):
@@ -892,7 +892,7 @@ class Firstboot:
             raise RuntimeError("；".join(errors))
         return chosen
 
-    # ---- 完成标记与总流程 ----
+    # ---- Completion marker and overall flow ----
 
     def _write_marker(self):
         target = self.path("/var/lib/microduck/firstboot.done")

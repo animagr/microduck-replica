@@ -1,19 +1,19 @@
-"""跟鸭子上的服务说话：robotd 4 条连接 + configd 1 条（review-impl-plan I4）。
+"""Talks to the services on the duck: 4 connections to robotd + 1 to configd (review-impl-plan I4).
 
-| 连接    | 只做什么                                                      |
-| stream  | robot.subscribe {"hz":10}。有人在看才开，最后一个人走了 10 秒后才关 |
-| poll    | hello（一次）、health 2 s、busStatus 1 s（卸力确认时 10 Hz）、policies 2 s、calibration-status（连上时、phase 变成 control 时各一次，只认这次 hello 之后的） |
-| cmd     | 运动命令（S1b 才用）                                           |
-| 卸力    | 只发 robot.relax；每次新开一条连接（不留长连接）                   |
-| 启动步骤 | robot.startupSubscribe：这次 hello 的四步没全成功时开，全成功 / 有一步失败就关（startup.py） |
+| Connection | Only does                                                   |
+| stream  | robot.subscribe {"hz":10}. Opened only while someone is watching; closed 10 s after the last viewer leaves |
+| poll    | hello (once), health 2 s, busStatus 1 s (10 Hz while confirming a relax), policies 2 s, calibration-status (once on connect and once when phase becomes control; only results after this hello count) |
+| cmd     | motion commands (only used from S1b on)                       |
+| relax   | only sends robot.relax; opens a new connection every time (no long-lived connection) |
+| startup steps | robot.startupSubscribe: opened when the four steps of this hello have not all succeeded; closed once all succeed / one step fails (startup.py) |
 | configd | pad.status 5 s、system.info 60 s                               |
 
-为什么分开：robotd 一条连接一次只处理一个请求，卸力不能排在一个 2 秒超时的 busStatus 后面。
-为什么订阅要「有人看才开」：只要有一个订阅者，robotd 的控制线程每拍都要组一帧（跟 hz 无关），
-没人看就别让它白干活（review-tech-v3 T4）。
+Why separate: one robotd connection handles one request at a time, so a relax must not queue behind a busStatus with a 2-second timeout.
+Why the subscription is "open only while someone is watching": as long as there is one subscriber, robotd's control thread has to build a frame every tick (regardless of hz),
+so don't make it do useless work when nobody is watching (review-tech-v3 T4).
 
-所有时间用 time.monotonic()：鸭子开机没联网时墙钟停在 1970（I12）。
-本模块**不 import 任何串口相关的东西**：Studio 的这一版根本没有能打开 ttyS2 的路径（I1）。
+All times use time.monotonic(): when the duck boots without network, the wall clock is stuck at 1970 (I12).
+This module **does not import anything serial-port related**: this version of Studio has no code path at all that can open ttyS2 (I1).
 """
 import asyncio
 import time
@@ -23,7 +23,7 @@ from .log import log_cmd
 from .rpc import Conn, RpcError, Timeout, Unreachable, call_once, encode, open_conn, read_message
 from .startup import StartupTrack, startup_loop
 
-API_VERSION = 42                     # duck-ipc-proto；不一致只记日志，不拒绝
+API_VERSION = 42                     # duck-ipc-proto; a mismatch is only logged, not rejected
 KNOWN_BUILDS = ("1fa8438-feetech-ft6-control.43", "4734cbb-feetech-imu-auto-control.44",
                 "0791fcd-feetech-qinmo-control.45", "0791fcd-feetech-qinmo-control.46",
                 "0791fcd-feetech-qinmo-control.47")
@@ -60,41 +60,41 @@ class Robotd:
         self.hello, self.health, self.bus = Sample(), Sample(), Sample()
         self.policies, self.calib, self.state = Sample(), Sample(), Sample()
         self.pad, self.sysinfo = Sample(), Sample()
-        self.present = None          # robotd 的 socket 在不在；None = 还没试过
+        self.present = None          # whether robotd's socket exists; None = not tried yet
         self.absent_since = None
         self.estop = EStop()
-        self.viewers = 0             # 可见的页面数
+        self.viewers = 0             # number of visible pages
         self.force_subscribe = False
-        self.background_music = False  # 内部动作消费者；不伪装成可见页面
+        self.background_music = False  # internal action consumer; not disguised as a visible page
         self.stream_open = False
         self._last_viewer_at = 0.0
         self._tasks = []
         self._wake_stream = asyncio.Event()
-        self._due = {"health": 0.0, "bus": 0.0, "policies": 0.0}   # 轮询各项下次的时间（monotonic）
-        self._fails = {}             # 轮询各项连续失败的次数
-        self._relax_send = None      # 正在路上的卸力发送（asyncio.Task）
+        self._due = {"health": 0.0, "bus": 0.0, "policies": 0.0}   # next time for each poll item (monotonic)
+        self._fails = {}             # consecutive failure count for each poll item
+        self._relax_send = None      # relax send in flight (asyncio.Task)
         self._relax_send_started = 0.0
-        self._relax_watch = None     # 卸力的补发 / 超时监视
+        self._relax_watch = None     # relax resend / timeout watcher
         self._calib_task = None
-        # 标定状态（calibration-status）只认「这次 hello 之后」读到的（总览重排审查 O5）：robotd 重启以后、
-        # 刚起来还没开总线的那 20 秒，旧的「15 颗都标了」不能当真。None = 还没 hello 过（测试里的假对象也是 None）
+        # Calibration status (calibration-status) only counts if read "after this hello" (overview reorg review O5): after robotd restarts,
+        # during the 20 seconds before it has opened the bus, the old "all 15 calibrated" must not be trusted. None = no hello yet (also None for fakes in tests)
         self.calib_valid_after = None
         self._last_phase = None
-        # 这次连上以后 busStatus 从什么时候起一直报启动阶段（monotonic）；不在启动阶段是 None。超过 30 秒页面改口
-        # 「一直报启动中」（10-20 真机：旧 fork 的标定模式永远报 configuring_bus）
+        # Since when (monotonic) busStatus has kept reporting a startup phase on this connection; None when not in a startup phase. After 30 seconds the page changes to
+        # "keeps reporting starting" (Oct 20 real hardware: the old fork's calibration mode always reports configuring_bus)
         self.starting_since = None
-        self._wake_poll = asyncio.Event()   # 卸力时把轮询从退避的睡眠里叫醒
-        self._loop = None                   # 事件循环：别的线程调 set_paused 时用它叫醒轮询（线程安全）
-        self.paused = None                  # 调舵机时 robotd 按计划停着：轮询暂停，不报「主程序不在」
-        self.startup = StartupTrack()       # 启动四步（startup.py 的 startup_loop 写；调参卡、待办读）
+        self._wake_poll = asyncio.Event()   # on relax, wakes polling from its backoff sleep
+        self._loop = None                   # event loop: used to wake polling when another thread calls set_paused (thread-safe)
+        self.paused = None                  # robotd is stopped on purpose while tuning servos: polling paused, don't report "main program missing"
+        self.startup = StartupTrack()       # the four startup steps (written by startup_loop in startup.py; read by the tuning card and to-do list)
 
-    # ---- 生命周期 ----
+    # ---- Lifecycle ----
 
     def start(self):
         loop = asyncio.get_running_loop()
         self._loop = loop
         if self.addr == "none":
-            # 台架模式：主控没烧、只用调试板在电脑上调舵机，不连主程序
+            # Bench mode: main controller not flashed, only tuning servos from a computer via the debug board, no connection to the main program
             self.log.info("台架模式：不连主程序 robotd", cat="robotd")
             self._tasks = []
             return
@@ -104,7 +104,7 @@ class Robotd:
                        loop.create_task(self._supervise("启动步骤订阅", lambda: startup_loop(self)), name="robotd-startup")]
 
     async def stop(self):
-        # 正在路上的卸力先让它发完（最多等 1 秒），别在关 Studio 时把它掐掉
+        # Let an in-flight relax finish sending first (wait at most 1 second); don't cut it off when Studio shuts down
         if self._relax_send is not None and not self._relax_send.done():
             await asyncio.wait({self._relax_send}, timeout=1.0)
         tasks = [t for t in self._tasks + [self._relax_send, self._relax_watch, self._calib_task]
@@ -113,15 +113,15 @@ class Robotd:
             t.cancel()
         for c in (self.poll, self.cmd, self.cfg):
             c.close()
-        # 取消以后要等任务真的退出：只 cancel 不等，任务可能正好停在「future 已回、下一步还没跑」，
-        # 留下一个永远醒不来的 cancelling 任务，测试 / 退出时就会卡在 _cancel_all_tasks。
-        # 兜底最多等 2 秒：真遇到也不至于让 Studio 退不出去。
+        # After cancelling, wait for the task to actually exit: if we only cancel without waiting, the task may be stopped right at "future returned, next step not yet run",
+        # leaving a cancelling task that never wakes up, and tests / shutdown hang in _cancel_all_tasks.
+        # Fallback: wait at most 2 seconds, so even if that happens Studio can still exit.
         pending = [t for t in tasks if not t.done()]
         if pending:
             await asyncio.wait(pending, timeout=2.0)
 
     async def _supervise(self, name, fn):
-        """后台循环出了任何意外都不能无声停掉（代码审查 #4）：记下完整报错，1 秒后重启。"""
+        """No unexpected error in a background loop may stop it silently (code review #4): log the full error and restart after 1 second."""
         while True:
             try:
                 await fn()
@@ -140,8 +140,8 @@ class Robotd:
         elif not on and self.paused:
             self.log.info(f"恢复跟主程序的轮询（{self.paused}结束）", cat="robotd")
             self.paused = None
-            # 从舵机线程调（关总线前恢复轮询）时不能直接 Event.set：debug 模式下 Future.set_result
-            # 会先把事件置成已完成，再在跨线程调度那一步抛错，等待方就永远醒不过来了。
+            # When called from the servo thread (resuming polling before closing the bus) we can't call Event.set directly: in debug mode Future.set_result
+            # first marks the event done and then raises in the cross-thread scheduling step, so the waiter never wakes up.
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
@@ -164,20 +164,20 @@ class Robotd:
             self.background_music = on
             self._wake_stream.set()
 
-    # ---- 卸力 ----
+    # ---- Relax ----
 
     async def relax(self, by):
-        """按一下卸力，回 (发出去了没有, 原因)。确认由 busStatus 回读完成（estop.on_bus）。
+        """Press relax once; returns (sent or not, reason). Confirmation comes from busStatus readback (estop.on_bus).
 
-        - 发送在独立的任务里跑，调用方（页面连接）断了也不会把它取消（代码审查 #6）；
-        - 同一时间最多一个发送在路上，连按就等同一个；
-        - 监视任务负责 2 秒补发一次、8 秒超时，确认或超时就结束（代码审查 #1）。"""
+        - The send runs in its own task, so it is not cancelled if the caller (page connection) disconnects (code review #6);
+        - At most one send is in flight at a time; repeated presses wait on the same one;
+        - A watcher task resends once at 2 seconds and times out at 8 seconds, ending on confirmation or timeout (code review #1)."""
         now = time.monotonic()
         self.estop.press(by, now)
-        self._due["bus"] = 0.0          # 排在后面的 busStatus 提前：马上开始每 0.1 秒回读
-        self._wake_poll.set()           # 轮询要是正在退避里睡（robotd 刚回来），叫醒它
+        self._due["bus"] = 0.0          # bring the queued busStatus forward: start reading back every 0.1 s immediately
+        self._wake_poll.set()           # if polling is sleeping in backoff (robotd just came back), wake it
         loop = asyncio.get_running_loop()
-        # 在路上的发送刚开始（< 0.3 秒）就跟它；早就开始的（robotd 卡住了）另发一个，不吞掉这次按下（复核 #3）
+        # If the in-flight send just started (< 0.3 s), follow it; if it started long ago (robotd is stuck), send another one so this press isn't swallowed (re-review #3)
         if (self._relax_send is None or self._relax_send.done()
                 or now - self._relax_send_started > JOIN_S):
             self._start_send(by, "卸力")
@@ -191,9 +191,9 @@ class Robotd:
         self._relax_send = asyncio.get_running_loop().create_task(self._send_relax(by, what, started))
 
     async def _send_relax(self, by, what, started):
-        """每次新开一条连接发（代码审查 #2：长期空闲的连接在 robotd 重启后已经死了）。
-        连不上隔 0.1 秒再试一次（robotd 重启时 socket 会短暂不在）。
-        发出之前的每一步都不许失败：日志不抛异常，现场字段只读不算（复核 #1）。"""
+        """Opens a new connection for every send (code review #2: a long-idle connection is already dead after robotd restarts).
+        If it can't connect, retry once after 0.1 s (the socket briefly disappears while robotd restarts).
+        No step before sending may fail: logging doesn't raise, live fields are only read, not computed (re-review #1)."""
         with log_cmd(self.log, what, "robot.relax", who=by,
                      ctx={"mode": self._mode(), "phase": self._phase()}) as t:
             r = None
@@ -211,7 +211,7 @@ class Robotd:
             if isinstance(r, dict) and r.get("accepted") is False:
                 return self._relax_failed(t, started, f"主程序没接受卸力：{r.get('reason') or '没说原因'}", reply=r)
             self.estop.sent(started)
-            self._mark_present(True)        # robotd 回话了：它在（轮询可能还在退避里，没发现它回来）
+            self._mark_present(True)        # robotd replied: it is there (polling may still be in backoff and hasn't noticed it came back)
             note = "已发出，等回读确认"
             if not (isinstance(r, dict) and "accepted" in r):
                 note += "（回执里没有 accepted 字段，以回读为准）"
@@ -237,19 +237,19 @@ class Robotd:
                                         saw_torque_off=self.estop.saw_off, send_error=self.estop.send_error),
                                hint="舵机可能还顶着：用手柄 − 或者关电源；把诊断包发出来")
                 return
-            # 2 秒还没确认，补发一次。回读里已经看到扭矩关了（只差 hd1910 标志）就不补：
-            # 那时别人可能已经用手柄让它站起来了，补发会把它又卸软（复核 #5）
+            # Not confirmed after 2 seconds: resend once. If the readback already shows torque off (only the hd1910 flag missing), don't resend:
+            # by then someone may already have stood it up with the gamepad, and a resend would make it go limp again (re-review #5)
             if el >= RESEND_AT_S and not self.estop.resent and not self.estop.saw_off:
                 self.estop.resent = True
                 if self._relax_send is None or self._relax_send.done():
                     self._start_send(self.estop.last_by, "卸力（2 秒没确认，补发一次）")
             await asyncio.sleep(0.1)
 
-    # ---- 轮询 ----
+    # ---- Polling ----
 
     async def _ask(self, key, method, params=None, timeout=2.0, every=1.0):
-        """问一项。成功了按 every 排下一次；回了错误或超时只影响这一项（代码审查 #5），
-        按退避推迟它，不挡别的项。Unreachable 往上抛（整条连接没了）。"""
+        """Ask one item. On success schedule the next one per `every`; an error reply or timeout only affects this item (code review #5),
+        which is postponed by backoff without blocking the other items. Unreachable is raised (the whole connection is gone)."""
         asked = time.monotonic()
         try:
             r = await self.poll.call(method, params or {}, timeout=timeout)
@@ -260,7 +260,7 @@ class Robotd:
                 self.bus.fail(e)
             n = self._fails[key] = self._fails.get(key, 0) + 1
             self._due[key] = time.monotonic() + BACKOFF[min(n - 1, len(BACKOFF) - 1)] * 2
-            if n in (1, 10) or n % 60 == 0:      # 第 1、10 次和之后每 60 次记一行
+            if n in (1, 10) or n % 60 == 0:      # log one line on the 1st and 10th failure and every 60th after that
                 self.log.warn("主程序没回好这项查询", cat="robotd", step=method, raw=f"{e}（连续第 {n} 次）",
                               hint="偶尔一次不要紧；一直这样，看主板温度和 robotd 日志")
             return None, asked
@@ -273,15 +273,15 @@ class Robotd:
         due = self._due
         fails = 0
         hello_done = False
-        hello_link = None             # hello 那一刻轮询连接的重连计数
+        hello_link = None             # reconnect count of the polling connection at the moment of hello
         while True:
             if self.paused:
                 hello_done = False
                 await self._nap(1.0)
                 continue
             if hello_done and self.poll.reconnects != hello_link:
-                # 轮询连接断过、重连过（某一项超时 rpc 会关掉连接，下次自动重连）：robotd 可能已经是个新进程了，
-                # 当成新连上——重新 hello、作废已经读到的标定（代码审查 C8）
+                # The polling connection dropped and reconnected (an item timing out makes rpc close the connection; it reconnects automatically next time): robotd may be a new process by now,
+                # so treat it as a fresh connection: hello again, invalidate any calibration already read (code review C8)
                 hello_done = False
                 self.log.info("跟主程序的轮询连接重连过：当成新连上，重新 hello、重读标定状态", cat="robotd")
             try:
@@ -289,9 +289,9 @@ class Robotd:
                     self.bus.fail("等待这次连接的总线状态")
                     r = await self.poll.call("hello", {"api_version": API_VERSION}, timeout=2.0)
                     self.hello.set(r)
-                    self.calib_valid_after = self.hello.at    # 这之前读到的标定状态作废（审查 O5）
+                    self.calib_valid_after = self.hello.at    # calibration status read before this is invalid (review O5)
                     self._last_phase = None
-                    self.starting_since = None                # 「一直报启动中」从这次连上重新算
+                    self.starting_since = None                # "keeps reporting starting" is counted again from this connection
                     self._mark_present(True)
                     hello_done = True
                     hello_link = self.poll.reconnects
@@ -304,15 +304,15 @@ class Robotd:
                     self.log.info(f"连上主程序（接口 v{v}，版本 {ver}）", cat="robotd")
                 now = time.monotonic()
                 if now >= due["bus"]:
-                    # 标定模式 10 Hz：IMU 页的实时读数、站着校准都从 last_sample 拿（标定模式没有 robot.state）
+                    # Calibration mode at 10 Hz: the IMU page's live readings and standing calibration both come from last_sample (calibration mode has no robot.state)
                     every = 0.1 if (self.bus.value or {}).get("mode") == "commissioning" else 1.0
                     bus, asked = await self._ask("bus", "robot.busStatus", every=every)
                     if bus is not None:
                         self.bus.set(bus)
                         self._check_build(bus)
-                        # 离开 control（robotd 卡回等总线、换了模式）：已经读到的标定不作数（代码审查 C8）；
-                        # 从「等总线 / 启动中」进了 control（或调试模式的 ready）：标定文件这时才存进 robotd
-                        # （fork main.rs:1535），再问一次（审查 O5）
+                        # Leaving control (robotd fell back to waiting for the bus, or switched mode): the calibration already read no longer counts (code review C8);
+                        # Entering control (or ready in debug mode) from "waiting for bus / starting": only now is the calibration file loaded into robotd
+                        # (fork main.rs:1535), so ask again (review O5)
                         phase = bus.get("phase") if isinstance(bus, dict) else None
                         if self._last_phase == "control" and phase != "control":
                             self.calib_valid_after = time.monotonic()
@@ -350,7 +350,7 @@ class Robotd:
                 await self._nap(BACKOFF[min(fails - 1, len(BACKOFF) - 1)])
                 continue
             except (Timeout, RpcError) as e:
-                # 只有 hello 会走到这里
+                # Only hello gets here
                 fails += 1
                 self.log.warn("主程序没回好 hello", cat="robotd", raw=str(e),
                               hint="主程序可能正在启动；一直这样，看 robotd 日志")
@@ -359,7 +359,7 @@ class Robotd:
             await asyncio.sleep(0.05)
 
     async def _nap(self, seconds):
-        """退避的睡眠，按卸力时会被叫醒。"""
+        """Backoff sleep; woken up when relax is pressed."""
         try:
             await asyncio.wait_for(self._wake_poll.wait(), seconds)
         except asyncio.TimeoutError:
@@ -367,8 +367,8 @@ class Robotd:
         self._wake_poll.clear()
 
     def _ask_calib(self, again=False):
-        """起一次 _calib_once（已经在问就不重复起）。again：phase 刚变成 control，上一轮可能正在「没读到、10 秒后再试」
-        的睡眠里，掐掉它马上重问（标定文件这时才有）。"""
+        """Start one _calib_once (don't start another if one is already asking). again: phase just became control; the previous round may be in the "not read, retry in 10 seconds"
+        sleep, so kill it and ask again right away (the calibration file only exists now)."""
         if again and self._calib_task is not None and not self._calib_task.done():
             self._calib_task.cancel()
             self._calib_task = None
@@ -376,12 +376,12 @@ class Robotd:
             self._calib_task = asyncio.get_running_loop().create_task(self._calib_once())
 
     def calib_fresh(self):
-        """calibration-status 的回包，只要这次 hello 之后读到的；读不到 / 旧的回 None（审查 O5）。"""
+        """Reply to calibration-status, only if read after this hello; returns None if not read / stale (review O5)."""
         return fresh_calib(self)
 
     async def _calib_once(self):
-        """标定状态只在连上时、和 phase 变成 control 时各查一次，用独立连接：它在 robotd 里可能很慢，不能挡住
-        busStatus（复核 #8）。失败最多再试两次，隔 10 秒；还不行就算了（页面上显示不知道）。"""
+        """Calibration status is queried only once on connect and once when phase becomes control, on its own connection: it can be slow inside robotd and must not block
+        busStatus (re-review #8). On failure retry at most twice, 10 seconds apart; if it still fails, give up (the page shows unknown)."""
         for attempt in range(3):
             try:
                 r = await call_once(self.addr, "robot.busCommand", {"action": "calibration-status"},
@@ -422,7 +422,7 @@ class Robotd:
         b = self.bus.value
         return b.get("phase") if isinstance(b, dict) else None
 
-    # ---- 订阅 ----
+    # ---- Subscription ----
 
     def _want_stream(self):
         if self.paused:
@@ -458,7 +458,7 @@ class Robotd:
         self.log.info(f"开始订阅实时状态（{STREAM_HZ} Hz，{self.viewers} 个页面在看）", cat="robotd")
         try:
             try:
-                w.write(encode(1, "robot.subscribe", {"hz": int(STREAM_HZ)}))   # hz 必须是整数（u32）
+                w.write(encode(1, "robot.subscribe", {"hz": int(STREAM_HZ)}))   # hz must be an integer (u32)
                 await w.drain()
             except (ConnectionError, OSError) as e:
                 raise Unreachable(f"订阅请求没发出去：{type(e).__name__}: {e}") from e
@@ -486,8 +486,8 @@ class Robotd:
     # ---- configd ----
 
     async def _configd_loop(self):
-        """system.info 60 s、pad.status 5 s，两项各自出错各自退避（代码审查 #19：以前 system.info
-        一直失败，pad.status 就永远轮不到）。"""
+        """system.info 60 s, pad.status 5 s; each item backs off on its own errors (code review #19: previously, when system.info
+        kept failing, pad.status never got its turn)."""
         due = {"info": 0.0, "pad": 0.0}
         down = {"info": False, "pad": False}
         while True:
@@ -511,11 +511,11 @@ class Robotd:
                                       hint="有的鸭子关掉了 configd；不影响站和走，只是手柄那一栏显示「不知道」")
             await asyncio.sleep(0.5)
 
-    # ---- 只读自检（--selfcheck） ----
+    # ---- Read-only self-check (--selfcheck) ----
 
     async def selfcheck(self):
-        """只读。除了各问一次，还查三个 socket 的权限（上机最容易卡在 robot 组上），
-        以及「不先 hello、新连接直接查询」行不行（卸力每次都是新连接直接发）。"""
+        """Read-only. Besides asking each item once, also checks the permissions of the three sockets (on the robot, the robot group is the most common snag),
+        and whether "query on a new connection without hello first" works (relax always sends directly on a new connection)."""
         import grp
         import os
         import pwd
@@ -556,8 +556,8 @@ def _round(x, nd=2):
 
 
 def fresh_calib(rd):
-    """rd.calib 的值，但只认「这次 hello 之后」读到的（总览重排审查 O5）。rd 没有 calib_valid_after（测试里的假对象）
-    就不挡。不是 dict 的一律 None。"""
+    """The value of rd.calib, but only if read "after this hello" (overview reorg review O5). If rd has no calib_valid_after (fakes in tests)
+    don't block. Anything that is not a dict is None."""
     s = getattr(rd, "calib", None)
     if s is None or not isinstance(s.value, dict) or s.at is None:
         return None

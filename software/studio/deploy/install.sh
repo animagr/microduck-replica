@@ -1,7 +1,7 @@
 #!/bin/sh
-# 装 Studio 的 root 小助手（含固定 imu-recalibrate 会话动词）+ robotd 的保护 drop-in + sudoers 一行。
-# 用法（在鸭子上，deploy 目录里）：sudo sh install.sh [跑 Studio 的用户，默认 radxa]
-# 不重启 robotd，不碰 /dev/ttyS2。说明见 INSTALL.md。
+# Install Studio's root helper (including the fixed imu-recalibrate session verb) + robotd's protective drop-in + one sudoers line.
+# Usage (on the duck, in the deploy directory): sudo sh install.sh [user running Studio, default radxa]
+# Does not restart robotd and does not touch /dev/ttyS2. See INSTALL.md for details.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 user=${1:-radxa}
@@ -13,7 +13,7 @@ esac
 id "$user" >/dev/null 2>&1 || { echo "没有用户 $user" >&2; exit 1; }
 [ -f /etc/systemd/system/robotd.service ] || echo "提醒：/etc/systemd/system/robotd.service 不在，drop-in 装了也没对象" >&2
 
-# 1. 小助手：root:root 0755，路径上每一级都只有 root 能写
+# 1. Helper: root:root 0755, every level on its path writable only by root
 install -o root -g root -m 0755 "$here/microduck-helper" /usr/local/sbin/microduck-helper
 install -d -o root -g root -m 0755 /var/lib/microduck-helper /var/lib/microduck-helper/imu-recalibrate
 for d in /usr /usr/local /usr/local/sbin; do
@@ -25,12 +25,12 @@ for d in /usr /usr/local /usr/local/sbin; do
     fi
 done
 
-# 2. robotd 的保护 drop-in（第 1 步只有 Condition 旗；Environment 那行要到第 3 步验收后手动打开）
+# 2. robotd's protective drop-in (step 1 only has the Condition flag; the Environment line is enabled manually after the step 3 acceptance check)
 install -d -o root -g root -m 0755 /etc/systemd/system/robotd.service.d
 install -o root -g root -m 0644 "$here/zzzz-studio-bus.conf" /etc/systemd/system/robotd.service.d/zzzz-studio-bus.conf
 systemctl daemon-reload
 
-# 3. sudoers：只放行小助手一个全路径；先 visudo -cf 校验再装
+# 3. sudoers: only allow the helper's one full path; validate with visudo -cf before installing
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 {
@@ -40,7 +40,7 @@ trap 'rm -f "$tmp"' EXIT
 visudo -cf "$tmp" >/dev/null
 install -o root -g root -m 0440 "$tmp" /etc/sudoers.d/microduck-studio
 
-# 4. 核对
+# 4. Check
 echo "--- 核对 ---"
 systemctl show robotd -p DropInPaths
 ls -l /usr/local/sbin/microduck-helper /etc/sudoers.d/microduck-studio /etc/systemd/system/robotd.service.d/zzzz-studio-bus.conf

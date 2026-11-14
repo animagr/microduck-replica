@@ -40,7 +40,7 @@ class OverlayStatic(unittest.TestCase):
         self.assertIn("ssh.service", lines)
 
     def test_ssh_generates_missing_host_keys(self):
-        # 10-21 验收卡：sshd-keygen 靠 ConditionFirstBoot，空 machine-id 不算第一次开机，钥匙没生成、sshd 起不来
+        # 10-21 acceptance-check card: sshd-keygen relies on ConditionFirstBoot, an empty machine-id does not count as first boot, so the keys were not generated and sshd would not start
         conf = REAL_OVERLAY / "etc/systemd/system/ssh.service.d/10-microduck-hostkeys.conf"
         lines = [line.strip() for line in conf.read_text(encoding="utf-8").splitlines()
                  if line.strip() and not line.startswith("#")]

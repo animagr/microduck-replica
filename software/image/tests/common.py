@@ -20,7 +20,7 @@ SH = shutil.which("sh")
 
 REF = Path(__file__).resolve().parent / "fixtures"
 
-# 测试要能独立跑；扫描用例需要的第三方作者名在运行期拼接，源码里不出现完整词。
+# Tests must run standalone; the third-party author name needed by the scan cases is concatenated at runtime so the full word never appears in the source.
 THIRD_PARTY_NAME = "kis" + "sqy"
 THIRD_PARTY_WORD = THIRD_PARTY_NAME[:4]
 
@@ -36,7 +36,7 @@ def posix_path(path):
     p = Path(path).resolve()
     if not IS_WINDOWS:
         return str(p)
-    # Git Bash 把系统临时目录挂成 /tmp；从 /c/Users/... 走时 mkdir -p 会被 ACL 拒绝。
+    # Git Bash mounts the system temp directory as /tmp; going through /c/Users/... makes mkdir -p get rejected by ACLs.
     try:
         rel = p.relative_to(Path(tempfile.gettempdir()).resolve())
         return "/tmp/" + rel.as_posix()
@@ -122,7 +122,7 @@ def make_tempdir(prefix):
 
 
 class FakeProject:
-    """一套假 payload / rootfs / studio / overlay，供 apply 测试复用。"""
+    """A set of fake payload / rootfs / studio / overlay, reused by the apply tests."""
 
     def __init__(self, tmp):
         self.tmp = Path(tmp)
@@ -293,7 +293,7 @@ class FakeProject:
         put(root, "opt/robot/feetech-ft5-r5/_model_yaml/x.yaml", "x: 1\n")
         put(root, "opt/robot/feetech-ft5-r5/unused.txt", "remove me\n")
         put(root, "opt/robot/feetech-ft5-r5/models/legacy/policy.onnx", b"legacy-model\n")
-        # 底图里同名模型目录下的训练归档、payload 没有的旧文件
+        # Training archives under the same-named model directory in the base image, and old files not in the payload
         put(root, "opt/robot/feetech-ft5-r5/models/aaa/export-data.zip", b"zip\n")
         put(root, "opt/robot/feetech-ft5-r5/models/aaa/upstream-params/a/b.json", b"{}\n")
         put(root, "opt/robot/feetech-ft5-r5/roller/bbb/training-request.json", b"{}\n")

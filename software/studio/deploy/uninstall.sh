@@ -1,7 +1,7 @@
 #!/bin/sh
-# 卸掉 Studio 的 root 小助手、robotd 的保护 drop-in、sudoers 那一行。
-# 用法：sudo sh uninstall.sh [--purge]   （--purge 连操作记录 /var/lib/microduck-helper 一起删）
-# Studio 正占着舵机总线（旗在）时拒绝：先在 Studio 里交还，或者重启。
+# Remove Studio's root helper, robotd's protective drop-in and the sudoers line.
+# Usage: sudo sh uninstall.sh [--purge]   (--purge also deletes the operation records in /var/lib/microduck-helper)
+# Refuses while Studio holds the servo bus (flag present): hand it back in Studio first, or reboot.
 set -eu
 [ "$(id -u)" -eq 0 ] || { echo "要 root：sudo sh uninstall.sh" >&2; exit 1; }
 if [ -e /run/microduck-helper/bus-held ]; then

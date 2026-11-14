@@ -1,22 +1,22 @@
 #!/usr/bin/python3
-"""Microduck 配网守护：看 wlan0，连不上就开热点，并写 /run/microduck/net.json。
+"""Microduck network daemon: watches wlan0, opens a hotspot if it cannot connect, and writes /run/microduck/net.json.
 
-nmcli 都在 self.run_cmd 里；时间从 tick(now) 传进来，测试可以完全用假 runner / 假时钟。
+All nmcli calls go through self.run_cmd; time is passed in via tick(now), so tests can use a fully fake runner / fake clock.
 
-时间常数（密码错了最快/最慢多久热点回来）：
-- wlan0 真的存在、且 NetworkManager 报 30（disconnected）后，连续 45 秒没连上才开热点。
-  tick 是 3 秒，所以最快约 45~48 秒。
-- 例外：一个 WiFi 都没存过（新卡第一次开机），没有可等的，断网那一拍就开热点（10-21 新卡上热点约 2 分钟才出来）。
-  查已保存的 WiFi 时 nmcli 出错，当成不知道，照旧等 45 秒。
-- NetworkManager 报「正在连」时最多等 120 秒；超时后按「没连上」再等 45 秒。
-- 反复连接 / 断开的旧网络共享连续离线窗口，累计 123 秒仍未连上就触发回退判定。
-  网卡枚举、nmcli 调用和热点实际启动仍可能另外耗时，不是开机后广播可见的硬期限。
-- 热点连续 5 分钟没有客户端才去试已保存的 WiFi；从最后一个客户端离开时算。
-- 开热点失败、关热点失败或尝试 WiFi 失败后，60 秒再试。
-- Studio 正在连 WiFi 的窗口文件必须未到 until，且 mtime 在 180 秒内；期间不插手。
-  因此密码错了但 NetworkManager 很快报 disconnected 时，热点最快约 48 秒回来；
-  如果它一直卡在 connecting，超过 120 秒就直接按没连上处理，约 121~123 秒
-  （最长约 2 分 3 秒）开热点。wlan0 还没被 AIC8800 枚举出来时不开始计时。
+Time constants (how soon at the earliest/latest the hotspot comes back after a wrong password):
+- Only after wlan0 really exists and NetworkManager reports 30 (disconnected), and it stays unconnected for 45 consecutive seconds, is the hotspot opened.
+  tick is 3 seconds, so the fastest is about 45~48 seconds.
+- Exception: if no Wi-Fi has ever been saved (a new card's first boot), there is nothing to wait for, so the hotspot opens on the first offline tick (on the 10-21 new card the hotspot took about 2 minutes to appear).
+  If nmcli errors while querying saved Wi-Fi, treat it as unknown and wait 45 seconds as usual.
+- While NetworkManager reports "connecting", wait at most 120 seconds; after the timeout, treat it as "not connected" and wait another 45 seconds.
+- An old network that keeps connecting / disconnecting shares one continuous offline window; if it is still not connected after 123 seconds in total, the fallback decision triggers.
+  NIC enumeration, nmcli calls and actually starting the hotspot may take extra time, so this is not a hard deadline for the broadcast becoming visible after boot.
+- Only try the saved Wi-Fi after the hotspot has had no clients for 5 consecutive minutes, counted from when the last client left.
+- After failing to open the hotspot, close the hotspot or try Wi-Fi, retry after 60 seconds.
+- Studio's "connecting to Wi-Fi" window file must not be past until, and its mtime must be within 180 seconds; do not interfere during that time.
+  So with a wrong password where NetworkManager quickly reports disconnected, the hotspot comes back in about 48 seconds at the fastest;
+  if it stays stuck in connecting, after more than 120 seconds it is treated as not connected, and the hotspot opens after about 121~123 seconds
+  (at most about 2 min 3 s). Timing does not start while wlan0 has not yet been enumerated by the AIC8800.
 """
 import json
 import os
@@ -79,7 +79,7 @@ def one_line(text):
 
 
 def terse_split(line, maxsplit=-1):
-    """按 nmcli -t 的规则按未转义的冒号切分，并去掉转义反斜杠。"""
+    """Split on unescaped colons per nmcli -t rules, and remove the escaping backslashes."""
     fields = []
     current = []
     escaped = False
@@ -262,7 +262,7 @@ class Netcheck:
         except (OSError, ValueError):
             self.last_written = None
 
-    # ---- 读 wlan0 ----
+    # ---- Read wlan0 ----
 
     def wlan_present(self):
         path = self.path("/sys/class/net/%s" % DEVICE)
@@ -289,7 +289,7 @@ class Netcheck:
                 self.last_client_at = None
             self.log("配网状态：%s -> %s" % (old, mode))
 
-    # ---- 扫描和已保存 WiFi ----
+    # ---- Scanning and saved Wi-Fi ----
 
     def _connection_rows(self):
         result = self._nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"], 10)
@@ -327,7 +327,7 @@ class Netcheck:
                 if kind == "802-11-wireless" and name != HOTSPOT_NAME]
 
     def has_saved_wifi(self):
-        """存没存过家里的 WiFi（热点自己那条不算）：True / False；nmcli 出错回 None，当成不知道。"""
+        """Whether a home Wi-Fi has been saved (the hotspot's own connection does not count): True / False; None if nmcli errors, treated as unknown."""
         result = self._nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"], 10)
         if result.returncode != 0:
             return None
@@ -357,7 +357,7 @@ class Netcheck:
         self.scan_at = float(now)
         return True
 
-    # ---- 热点 ----
+    # ---- Hotspot ----
 
     def _hotspot_values(self):
         ssid = None
@@ -510,7 +510,7 @@ class Netcheck:
         self.last_tick = float(now)
         return True
 
-    # ---- Studio 正在连 WiFi 的窗口 ----
+    # ---- Studio's "connecting to Wi-Fi" window ----
 
     def studio_connecting(self, now):
         path = self.path(STUDIO_CONNECTING_REL)
@@ -544,7 +544,7 @@ class Netcheck:
             return drop("已经过期")
         return until, str(data.get("ssid") or "")
 
-    # ---- 状态文件 ----
+    # ---- Status file ----
 
     def state_dict(self):
         return {
@@ -578,7 +578,7 @@ class Netcheck:
         self.write_count += 1
         return True
 
-    # ---- 主状态机 ----
+    # ---- Main state machine ----
 
     def tick(self, now=None):
         now = float(self.now() if now is None else now)
@@ -606,7 +606,7 @@ class Netcheck:
         raw = self.read_raw_mode()
 
         if raw == "unavailable" and self.mode == "hotspot":
-            # nmcli 暂时读不到网卡时不要把正在用的热点关掉；等它恢复再继续。
+            # When nmcli temporarily cannot read the NIC, do not shut down a hotspot in use; wait for it to recover and continue.
             self.none_accum = 0.0
             self.connecting_since = None
             self.offline_since = None
@@ -650,7 +650,7 @@ class Netcheck:
             else:
                 self.none_accum = 0.0
         elif effective == "connecting":
-            # 正在连：45 秒计时暂停，不清零，也不能算进 45 秒。
+            # Connecting: the 45-second timer pauses without resetting, and this time does not count toward the 45 seconds.
             pass
         else:
             self.none_accum = 0.0

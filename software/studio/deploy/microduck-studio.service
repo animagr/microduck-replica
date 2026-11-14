@@ -1,8 +1,8 @@
-# Microduck Studio 开机自启（用户 10-20 定：不再用 systemd-run 的临时 studio-trial）。
-# 装：sudo install -m 644 microduck-studio.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now microduck-studio
-# 撤：sudo systemctl disable --now microduck-studio && sudo rm /etc/systemd/system/microduck-studio.service && sudo systemctl daemon-reload
-# 资源上限跟试用期一样：Studio 不能跟 robotd 抢 CPU（robotd 是 50 Hz 控制环）。
-# 不等 network-online：Studio 监听 0.0.0.0，网络晚到也接得上；主程序不在时 Studio 自己会等、会重连。
+# Microduck Studio autostart at boot (decided by the user on 10-20: no more temporary studio-trial via systemd-run).
+# Install: sudo install -m 644 microduck-studio.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now microduck-studio
+# Remove: sudo systemctl disable --now microduck-studio && sudo rm /etc/systemd/system/microduck-studio.service && sudo systemctl daemon-reload
+# Resource limits are the same as during the trial: Studio must not compete with robotd for CPU (robotd is a 50 Hz control loop).
+# Does not wait for network-online: Studio listens on 0.0.0.0, so it still accepts connections if the network comes up late; when the main program is absent, Studio waits and reconnects by itself.
 [Unit]
 Description=Microduck Studio（网页控制台，8000 端口）
 After=network.target

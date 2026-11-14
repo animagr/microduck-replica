@@ -199,3 +199,86 @@ A Windows computer with Clash's system proxy running cannot open `duck-xxxx.loca
 - If the computer has Clash's TUN mode on and still cannot open it: set the LAN (192.168.0.0/16) to direct connection in Clash.
 
 The “更多” (More) page has a “这只鸭子的地址” (This duck's addresses) block listing the currently usable IP (`ip4` from configd's `net.status`; 10.42.0.1 in hotspot mode), `duck-xxxx` and `duck-xxxx.local`, each copyable; hovering over the duck's name in the overview top bar also shows the IP. The duck's own hotspot is filtered out of the Connect WiFi list (by `hotspot_ssid` in net.json; if missing, by "starts with `Microduck-` and saved").
+
+**Automatically jumping to the duck's new address after connecting to WiFi** (user, 10-21: "连 WiFi 弄了三下" (it took three tries to connect to WiFi)): after you tap connect, the page records the addresses to look for, `http://duck-xxxx:8000/` and `http://duck-xxxx.local:8000/` (the hostname comes from net.json, the port matches `--listen`).
+Once the page's connection to the duck drops (the WebSocket closes, or no message for 5 seconds), the card changes to “鸭子正在连『家里 WiFi』……请把这台设备连回『家里 WiFi』（电脑插着网线的不用管），找到鸭子会自动打开” (The duck is connecting to "home WiFi"… please connect this device back to "home WiFi" (no need if the computer is on a network cable); it will open automatically once the duck is found), listing these two addresses (clickable) and “找不到时：去路由器设备列表找 duck-xxxx 的 IP” (If not found: look up duck-xxxx's IP in the router's device list).
+Every 2 seconds it loads `<address>probe.svg?t=<time>` with `new Image()` (`web/probe.svg`, which like other static files needs no login and is not cached; cross-origin image loading needs no CORS), and jumps to whichever loads first; each probe waits at most 6 seconds, and the same address is not probed again until it answers.
+It searches for at most 3 minutes; if nothing is found, it switches back to the original per-device instructions. When the page reconnects to the original address (the hotspot came back, meaning the connection failed), probing stops and the failure reason is shown as before.
+
+**When there is no WiFi** (outdoors, at a show): the duck opens its own hotspot; after the phone connects to `Microduck-xxxx`, open `https://10.42.0.1:8000/m` to use “手机说话” (phone voice), recognized locally by the onboard Vosk; the physical gamepad connects directly over Bluetooth, independent of WiFi. The certificate is generated automatically on first boot (local CA, `/etc/microduck/tls/`); when Studio finds `duck.crt` / `duck.key` it starts with HTTPS, and the addresses on the page and in `net.view()` change to `https://` accordingly. The full steps for installing the CA on the phone, switching from the hotspot back to home WiFi, and troubleshooting are in [deploy/OFFLINE.md](deploy/OFFLINE.md).
+
+## In the image vs. manual installation
+
+The “连 WiFi” (Connect WiFi) card depends on a few things in the replica image that Studio does not bring itself:
+
+- the network setup status `/run/microduck/net.json` written by netcheck;
+- the `Microduck-Hotspot` hotspot profile in NetworkManager;
+- configd running with `--allow-user btd,radxa`, so that Studio has permission to call `net.scan` / `net.connect` / `net.forget`;
+- mDNS configuration, so that phones can find the duck via `duck-xxxx.local`.
+
+A duck with Studio and the root helper installed manually following `deploy/INSTALL.md`, but without the replica image overlay, lacks these, so the page does not show the “连 WiFi” (Connect WiFi) card; overview, gamepad, servos, IMU and logs work as usual.
+
+## Contract between the page and Studio (WebSocket `/ws`)
+
+Host and Origin are checked during the handshake, and the handshake is rejected if they are wrong (the browser only sees 1006, and the reason is written to the log); clients that are not logged in are accepted first and then closed with 4401, and when the page sees 4401 it jumps to the login page.
+
+| Direction | Message | Notes |
+|---|---|---|
+| Studio → page | `{"t":"hello","version","duck"}` | Sent once on connect |
+| | `{"t":"state", …}` | 10 Hz while the page is visible; fields are in `summarize` in `studio/state.py` |
+| | `{"t":"hb"}` | 1 Hz while the page is in the background (it does not subscribe to robotd's live status then, saving CPU) |
+| | `{"t":"log","entry":{…}}` | New log entry |
+| | `{"t":"result","id","ok","reason","data"}` | Command ack; data such as the WiFi scan's network list goes in `data` |
+| | `{"t":"pad", …}` | Gamepad snapshot: 10 Hz while the gamepad section is on screen, 1 Hz otherwise (used by the overview's gamepad tile); when long lists have not changed it carries `lists_same` and omits the lists |
+| Page → Studio | `{"t":"hb","seq","visible","route","pad_visible"}` | Once per second; sent again immediately on entering or leaving the gamepad section. `pad_visible` = the gamepad section is on screen (#/pad is just an anchor on the overview) |
+| | `{"t":"cmd","id","name","args"}` | relax, servo.*, imu.op, calib.op (`preview` / `commit`: step 3 of the getting-started checklist), pad.op, onboard.op (getting-started checklist `done` done, `skip` skip, `undone` / `unskip` cancel, `{step, confirmed}`: only the second of the two required clicks carries `confirmed: true`; the old `confirm_servo` is still accepted), net.op (`scan` / `connect` / `forget`) |
+
+Servo session fields in `state` (used by the banner at the top of every page): `servo_session` (present only while open: `holding` how many are holding, `unknown` how many have unreadable torque,
+`restored` whether Studio took over again after a restart), `servo_handback_s` (present from handback until the main program connects), `servo_orphan` (open at the last exit and not taken over this time),
+`servo_conflict_s` (robotd was started manually during the session, within 10 minutes). `servo.close {if_idle:true}` (leaving the servo page) only hands back if the torque of all 15 is read as 0 right then,
+no other page is on the servo page, and no calibration / motion is in progress; `servo.close {}` (clicking “交还主程序” (Hand back to main program)) first waits for in-flight servo operations to finish, then turns torque off and hands back.
+
+`state.starting_s` / `state.starting_long`: how many seconds the main program has continuously reported a startup phase since this connection, and whether it exceeded 30 seconds (used by the overview header, top bar and to-dos to switch to "keeps reporting Starting").
+
+`state.net` is the network setup status: `known=false` means there is no net.json (the whole WiFi section is hidden); otherwise it has `mode` (wifi / hotspot / none), the current `ssid` / `signal` / `ip4`, `hostname`,
+`url_local` (`duck-xxxx.local`, port matching `--listen`), `url_host` (the dotless `duck-xxxx`), `ip_now` (the currently usable IP: the hotspot address in hotspot mode),
+`urls` (the rows of “这只鸭子的地址” (This duck's addresses): `{kind: ip / host / local, url, note}`), the duck's hotspot `hotspot {ssid, ip, psk}`, the last result `last_try`, and `busy`. `net.op scan` filters out the duck's own hotspot. `net.op connect` first replies "switching started" (the page takes `url_host` / `url_local` as the addresses to look for later), and the actual hotspot shutdown and configd call happen in the background;
+the result is written to `net-last-try.json` in the state folder (without the password). The home WiFi password is only passed once from the page to configd, and never goes into logs, state or diagnostic bundles.
+
+Saved encrypted networks also need the password every time: the official configd replies `unsupported` for an encrypted network without a password. If the password is wrong, it first `net.forget`s the profile this attempt wrote incorrectly, then immediately reopens the hotspot;
+`timeout`, `other`, and Studio's own timeout waiting for configd also reopen the hotspot immediately. When Studio waits 60 seconds without a reply, it is logged separately as “鸭子的配网程序 60 秒没回话” (the duck's network setup program did not reply for 60 seconds), not mixed with configd's `timeout`.
+Before turning off the hotspot, the helper writes `/run/microduck/studio-connecting.json` (netcheck stays out for 90 seconds), and deletes it after the hotspot is reopened successfully.
+
+The page judges "cannot connect" only by the interval between received messages (gray after 1 second, alarm after 3 seconds), not by the two clocks (the duck's clock may be in 1970).
+
+## Logs
+
+`logs/studio-YYYY-MM-DD.log`, kept for 14 days and no more than 50 MB in total. One event per line:
+
+```
+2026-10-18T00:41:56.194+09:00 [命令] → 卸力（电脑 127.0.0.1） · 步骤：robot.relax
+2026-10-18T00:41:56.197+09:00 [命令] ← 卸力 成功 · 3 ms · 已发出，等回读确认 · 步骤：robot.relax · 原文：{"accepted": true}
+```
+
+(The log lines are in Chinese: `[命令]` = [command], `卸力` = torque off, `电脑` = computer, `步骤` = step, `成功` = success, `已发出，等回读确认` = sent, waiting for read-back confirmation, `原文` = raw text.)
+
+On errors it writes “卡在：哪一步 · 原文：… · 建议：… · 现场：{…}” (stuck at: which step · raw text: … · suggestion: … · context: {…}). Passwords and tokens are masked automatically. The same message repeated within 1 minute is logged only once, noting how many times it was merged.
+The “日志” (Logs) page shows the latest 500 entries and can also export a diagnostic bundle (logs + the status at that time + robotd's raw responses + versions + robotd's system log) for asking for help in the group.
+
+Every command in the log records the send and the ack, with duration and context; the code is our own.
+
+## Testing
+
+```bash
+py -3.13 -I run_tests.py               # computer
+python3 -I run_tests.py                # duck
+```
+
+Targeted regression for the bus IMU integration (including headless Edge pages; browser items are skipped without Edge / Node >=22):
+
+```bash
+py -3.13 -I -c "import sys;sys.path[:0]=['deps','.','dev'];import unittest;unittest.main(module=None,argv=['x','tests.test_imu_backend','tests.test_commit','tests.test_helper_calib','tests.test_helper_imu_redo','tests.test_imu_bus_ui','tests.test_imu_wizard_e2e'])"
+```
+
+Coverage:
+- Login: sessions, backoff after 5 wrong passwords, logout requires CSRF; Host 421, Origin matrix; unauthenticated WebSockets receive 4401;

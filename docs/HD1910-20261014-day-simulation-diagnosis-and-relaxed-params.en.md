@@ -51,7 +51,7 @@
     [EXTRA_MASS_G=83] [FRICTION=0.3] [HEAD_LOWPASS=0.5 LEGS_LOWPASS=0.7] \
     python infer_policy_kq_cmp.py --walking walk/policy.onnx --new-cmd-obs \
       --lin-vel-x 0.2 --kp-fw 4 --action-scale 0.83 \
-      --scene src/mjlab_microduck/robot/microduck/scene_backlash.xml --save-csv 输出.csv
+      --scene src/mjlab_microduck/robot/microduck/scene_backlash.xml --save-csv output.csv
   ```
 - **How we compare**: the simulation recordings are converted into the same format as the real-robot recordings and analyzed with the same [`tools/gait-analysis/`](../tools/gait-analysis/) scripts;
 - **Real-robot reference**: the P4 / D0 / 681 set with the IMU corrected, from the early morning of 10-14 ([10-13 night §5.2](HD1910-20261013-夜-掉电-舵机D与蹭地.md#52-几组参数对比每组走-842-秒)). Note it only walked for 12 seconds (the report script recommends 15 seconds or more for reliability), and the torque limit was 681, not 700.
@@ -206,3 +206,103 @@ When kissqy's model was trained, each simulation environment's sole friction coe
 
 10-13 night [§6](HD1910-20261013-夜-掉电-舵机D与蹭地.md#6-imu-横滚零点往回补-114) left an open question: according to the servo readings, the two soles aren't in the same plane laterally. Today we broke it down joint by joint with the new script [`home_roll.py`](../tools/gait-analysis/home_roll.py):
 
+| Segment (standing at HOME / holding after stopping) | Roll difference between feet (relative to HOME) | Left hip roll actual − target | Right hip roll actual − target | Which side is lower with the torso level (simulation geometry) |
+|---|---|---|---|---|
+| 10-13 afternoon P5 / D20 | −0.86° | +0.5° | −0.3° | Both feet's outer edges lower by 1.9–2.0 mm |
+| P5 / D0 / 850, 3 segments | −9.76°, −5.02°, −4.93° | +4.7°, +3.0°, +2.9° | −5.1°, −1.9°, −2.0° | Segment 1: both feet's inner edges lower by 1.2–1.6 mm; the other two: outer edges lower by 0.1–0.9 mm |
+| P3 / D0 / 681, 5 segments | −3.72°, −3.81°, −3.81°, **−13.08°**, −1.30° | +1.4°, +1.6°, +1.5°, +6.9°, +0.2° | −2.3°, −2.2°, −2.3°, −6.0°, −1.1° | Mostly outer edges lower by 0.6–2.1 mm; in the −13° segment both feet's inner edges lower by 2.2–2.9 mm |
+| 10-14 early morning, 5 segments | −0.60°, −2.60°, −1.65°, −2.54°, −1.56° | +0.3°, +2.2°, +1.0°, +0.3°, +1.3° | −0.3°, −0.3°, −0.6°, −2.2°, −0.3° | Both feet's outer edges lower by 0.6–2.1 mm |
+
+These segments are all "holding HOME" frames, some right after standing up, some after stopping from a walk (in the P3 −13° segment the gyro was still swinging). The "6 times, 0.4°–2.6°" in 10-13 night §6 used a different sample and a different method (computing body roll separately with the left foot flat and the right foot flat), so the ranges don't match.
+
+**What's certain**:
+- The roll difference between the feet **comes entirely from the left and right hip roll joints**: hip yaw is off by at most 0.4°, and the other joints don't affect the lateral direction;
+- Both hip roll joints miss the HOME target every time, and the offset direction is **always left +, right −**, with a different size each time (0.2°–6.9°).
+
+**The zero position can't be seen**: the script compares "servo reading − HOME target", and the reading and the target share the same zero. So this method simply can't see how far off the zero is; the 10-13 night §6 guess of "a 1–2° hip roll zero offset" is neither confirmed nor ruled out. All we can say is that the part that differs each time isn't the zero.
+
+**Why it deviates in this direction** (a guess, with a geometric basis): in the simulation model, the hip roll axis is 17.5 mm from the body centerline and the sole center is 40.7 mm from the centerline, so the ground reaction force on the foot lands about 23 mm outside the axis, producing a torque that turns the left hip toward + and the right hip toward −, i.e. the legs splay outward, as if pressed by body weight. How the amount relates to P can't be seen in the data (the P5 / D0 segments actually deviate more than most of the P3 segments). When the policy stands in simulation, the hip roll also has a tracking error in the same direction (left +1.6°, right −1.8°), and on the real robot it's mostly 0.2°–2.3°, the same order of magnitude; only P5 / D0 segment 1 and the P3 −13° segment clearly exceed it.
+
+**Which edge touches the ground**: in the simulation model at the HOME pose with the torso level, the two soles already have **their outer edges about 2.3 mm lower** (foot width 44 mm, about 3° each; the difference between the two soles is 5.97°, the number in the script's self-check line at the start). When the legs splay outward the outer edges rise, and at about +2.9° / −2.9° of splay the feet are flat; any more and the inner edges become lower. The simulated foot is a simplified collision box, and the real duck's foot plus sole isn't exactly the same, so **which edge actually lifts has to be checked on the real thing**: standing at HOME, look at the two soles from the front at tabletop level and see whether light shows under the inner or outer edge.
+
+**Correction**: on the morning of 10-14 we said verbally that "the sole rests on its inner edge and the outer edge lifts"; in 12 of the 14 segments it's exactly the opposite (only the 2 segments above have the inner edge lower); this section takes precedence. That statement was intuition, not calculation; the temporary script written afterwards took "the lowest 4 corners" as the sole, which picks the wrong ones as soon as the sole tilts fore-aft, so `home_roll.py` in the repo was changed to find the bottom face along the collision box's thinnest direction.
+
+---
+
+## 8. Unlocking P / D / torque limit and head/leg filters in the new version (V164) (local, not yet on the robot)
+
+### 8.1 Why
+
+First, naming: kissqy calls both the 1.0.146 and 1.0.164 web consoles R17. In this repo, "R17" means the stack on the old card (web console 1.0.146, R17 on the board), and "V164" means the new stack (web console 1.0.164, control.40 on the board).
+
+- Found on the night of 10-13: kissqy's new version (V164, running on the new card) only writes P (5 from the model contract) at torque-on, leaving D and torque limit at the servos' factory D=40, 1000 ([10-13 night §4.2](HD1910-20261013-夜-掉电-舵机D与蹭地.md#42-舵机的-p--d--转矩限制r17-能设v164-不能)). D has a big effect on the jittery walk (§5 of the same page);
+- The "高级参数" (Advanced parameters) page of V164's matching web console (1.0.164) **doesn't have the P / D / torque fields at all**, only a joint scale slider; head/leg filters are display-only. The fields exist in the old web console that goes with R17 (1.0.146);
+- The "parameter file → written at torque-on → restored at torque-off" code from his R17 is still in V164, just not wired up (he removed it deliberately in v1.0.154, without giving a reason);
+- The user wants to use kissqy's new version (he maintains it actively, and future models will be released for it), so we unlock these settings in the new version.
+- **Addendum (10-14 evening)**: on 10-14 kissqy released V167 / control.43 (web console 1.0.167), described as "fixing body shaking": at every HOME torque-on, D in the RAM of all 15 servos is written to 0 and torque limit to 1000, while P still uses the model's 5; these two values are fixed and can't be adjusted in the web console; at torque-off only P is restored, and D stays at 0 until the servo loses power. So he has solved D; what the adjustable version still offers is adjustable P, torque limit and head/leg filters (e.g. the P3 / 700 we use). The adjustable version is still built on V164 and hasn't been merged into V167 yet (both sides changed the same torque-on code, so it needs careful merging).
+
+### 8.2 What we did
+
+- **robotd on the board**: wired R17's parameter file back in. The file is `/etc/robot/feetech-ft5/servo-test-parameters.json`, read by robotd **before opening the servo serial port**; if the file is corrupt, robotd stays at "waiting for bus" and reports an error without touching the servos;
+- **Install package script**: `service.sh` gets three commands: `servo-parameters P D 转矩限制` (P D torque-limit), `servo-parameters-clear`, and `joint-filters 模型标识 头部滤波 腿部滤波` (model ID, head filter, leg filter). The sequence is always: validate → torque off and **confirm the original values have been written back** → stop robotd → write file → restart → read back and verify. If writing fails or robotd won't stop, robotd is brought back up. In calibration mode it only saves. The torque-off confirmation step only happens while robotd is in the control phase of motion mode; if robotd isn't responding, is waiting for the bus, or is in calibration mode, it just stops it;
+- **Web console on the PC (1.0.164)**: added two blocks to the "高级参数" (Advanced parameters) page: "舵机参数" (Servo parameters: P, D, torque limit, with "应用" (Apply) and "恢复默认" (Restore defaults)) and "联合模型滤波" (Joint model filters: head, leg). Scale uses kissqy's existing slider. Filtering only changes the head and leg entries in the current joint model package's `deployment-execution.json`; on the first change the original is saved as `.orig`;
+- **Ranges are tighter than the registers allow**: P 1–32, D 0–64, torque limit 200–1000, all integers; filters 0.10–1.00, two decimal places;
+- **Safeguards**: P above 10 requires confirming twice (P10 once dragged down the bench supply); a torque limit below 500 shows a warning that it may not be able to stand; when the web console is connected to our board, "安装 / 升级固件" (Install / upgrade firmware) is blocked (§8.4);
+- **With no parameters set, behavior is exactly the same as stock V164**.
+
+### 8.3 How the servo parameters take effect: written to RAM, not EEPROM
+
+- **Set once and it stays in effect**: parameters are stored in a file on the board and survive power loss and reboots, so there's no need to reset them each time;
+- At every HOME torque-on: robotd first reads the current torque limit, P and D (registers 48–51) of all 15 servos and records them, then writes the file's values into the servos' **RAM**, reads back to verify, and refuses torque-on if they don't match;
+- At every torque-off: writes the recorded original values back and reads back to verify;
+- How to confirm it took effect: `robot.busStatus` → `native.hd1910.servo_parameters` holds the values robotd loaded, and `temporary_gains_applied: true` means they were written and verified by readback. `registers_before_arm` holds the original values read before torque-on, which should normally be the factory D40 / 1000, not the values you set;
+- **Why not EEPROM**: after a servo loses power, RAM reloads from EEPROM (HD-1910 factory values are P32 / D40 / I0, torque limit 1000). kissqy's R17 and V164 do the same; V164 writes P=5 to RAM at every torque-on. This way EEPROM isn't repeatedly erased and rewritten, and if anything goes wrong, power-cycling the servos once returns them to factory values.
+
+### 8.4 Two things to watch out for
+
+1. **If robotd is restarted while torque is on, the test parameters stay in the servos**. The original values are only kept in robotd's memory and are lost when the process restarts. V164 (including our adjustable version) and R17 go about it differently, with the same result:
+   - **V164 / adjustable version**: robotd turns off torque on all 15 servos as soon as it starts, so **the duck collapses on the spot** (hold it). At the next HOME, it records the leftover test values in the servos as the "original values", so what it writes back at torque-off is still the test values;
+   - **R17**: doesn't turn off torque at startup. The newly started robotd sees the servos already have torque on and only checks whether the values match the file: if they match it carries on and doesn't record another set of original values; if not, it refuses HOME (the same thing as "if another program turned on torque and you then switch to kissqy, HOME is refused" in the [pitfall log](../踩坑记录.md#策略训练与真机迁移)). There are then no original values to write back at torque-off;
+   - If you keep using adjustable parameters, it doesn't matter: every HOME writes from the file as usual;
+   - After clicking "恢复默认" (Restore defaults) and going back to stock behavior (only P written, D and torque untouched), D and torque stay at the recent test values, not the factory D40 / 1000. In that case **power-cycle the servos once** (or press D-pad right on the gamepad, "重启舵机" (restart servos)) so RAM reloads from EEPROM;
+   - Changing parameters normally from the web console can't cause this: the script first confirms torque is off and the originals have been written back before stopping robotd. What does cause it are accidents like a robotd crash, a manual `systemctl restart`, or installing software while torque is on.
+2. **If you've installed a modified robotd, don't click "安装 / 升级固件" (Install / upgrade firmware) in the web console**. It reinstalls the robotd bundled in kissqy's install package, wiping out both our I²C IMU patch and the adjustable version; his install script also deletes the parameter file (deliberately, to clear out manual parameters from old versions). Only our local web console blocks this button, and only for boards with the adjustable version; connecting with kissqy's stock web console, or connecting to the old card (R17 plus our I²C IMU patch) with the old web console, nothing blocks it. If you really want to go back to stock, install with kissqy's stock web console and power-cycle the servos once afterwards.
+
+### 8.5 Tests and review (not yet on the robot)
+
+- Rust: all 189 `duck-control` tests pass, including 3 new ones (including writing all 15 then restoring, and still restoring after an error midway through writing); `robotd` test results are identical to unmodified V164 (20 tests fail on stock as well, due to our PC environment);
+- Python: the install package's existing 48 test files give the same results as stock; all 15 new tests pass; 1 UI test suite passes;
+- The design and the code each went through one round of independent review (a separate AI session doing a read-only review). It found 1 must-fix issue (after the parameter file is corrupted, the web console's "恢复默认" (Restore defaults) is grayed out and can't be clicked) and a few suggestions, all addressed;
+- The UI was checked with screenshots using simulated data and displays correctly.
+
+### 8.6 On-robot plan and rollback
+
+- Boot the new card with the duck lying down and torque off → **read-only** check of the calibration (the new card's IMU quaternion is known to still be the 10-12 value, without the 1.14° roll correction from 10-14), show the differences to the user and change them only with approval → install the adjustable version (originals backed up as `*.bak-20261014-tunable`) → start once without parameters set and confirm it behaves like stock → set P3 / D0 / 700, read registers after HOME to confirm they were written, confirm they're restored after torque-off → walk and produce a report;
+- Rollback: restore the backups, or simply switch back to the old card (R17, which can set P / D / torque anyway);
+- The code is only on the local branch `hd1910-v164-tunable`, **not public, and no PR to kissqy**: his web console is under a personal non-commercial license. This page only records the approach and the pitfalls.
+
+---
+
+## 9. What kissqy said in the group chat (as of the morning of 10-14; his statements, not verified item by item)
+
+- The new web console moved data parsing to the PC, with the Zero only forwarding raw bytes; the web gamepad now uses a persistent SSH connection, and he says he hasn't seen conflicts or timeouts;
+- **"修复手柄连接" (Fix gamepad connection) only recognizes the GameSir Nova 2 Lite**: we checked this one in the code (`console/gamepad_repair.py`). It's written specifically for the GameSir Nova 2 Lite: the gamepad name is hard-coded, and it goes through gamesir-xboxd to become a virtual Xbox gamepad; any other gamepad is rejected outright, and it won't delete the G50 Pro's pairing, so it does nothing for the G50 Pro. For why the G50 Pro can't connect on the new card see [10-13 night §1.2](HD1910-20261013-夜-掉电-舵机D与蹭地.md#12-g50-pro-配对上又被断开) (No Bonding); still pair manually following the procedure there;
+- Soles: §6.2;
+- Mouth servo running hot: he says "the mouth is at -5", so it's constantly clamping with force (in our calibration table the mouth is −5° closed, +30° open); it's also closest to the board and gets baked by the board's heat; constant clamping only gets it to about 40°C, so the servo isn't broken. On the night of 10-12 we measured the mouth servo at 60–70°C just standing ([10-12 night §8](HD1910-20261012-夜-IMU校准与首次迈步.md#8-还没解决的)), higher than he says;
+- IMU: always calibrate the IMU after HOME, the same as we do ([pitfall log](../踩坑记录.md#策略训练与真机迁移), "IMU mounted 8.5° off");
+- He's training a new model, not yet released;
+- His repo had only one documentation commit on 10-14 (`7a52d29`, adding a link to his IMU DIY video); release packages unchanged: web console R17 V164 (1.0.164), board-side control.40, training console R1.5.27.
+
+Also, we agreed with our partner to fix the IMU with screws: after falls and bumped wiring the IMU reading has drifted by more than 3° ([pitfall log](../踩坑记录.md#策略训练与真机迁移), "IMU readings drift"). Once it's fixed in place, recalibrate the zero.
+
+---
+
+## 10. Tonight's test list / next steps (one change at a time)
+
+1. Switch to the new card and install the adjustable version (§8.6). Note the new card's V164 joint scale defaults to 1.0 while the old card's R17 is 0.9; record this when comparing with old-card data;
+2. Standing at HOME, look at the two soles from the front and see whether light shows under the inner or outer edge (§7);
+3. Weigh the whole duck (§4);
+4. P3 / D0 / 700, stick pushed fully, walk 20 seconds on the same tabletop; then try D5 and D10 ([10-13 night §7.5](HD1910-20261013-夜-掉电-舵机D与蹭地.md#75-下一步一次只改一样));
+5. Once power is stable, walk one set each with joint scale 0.9 and 1.0 (§2);
+6. When the 85A / anti-slip pads arrive, with the same parameters on the same tabletop, walk one set before and after changing soles and compare jitter and clearance (§6);
+7. When training our own: which servo parameters to use (do single-joint step responses first), foot lift target 25–30 mm, use the measured whole-duck mass, make the sole friction randomization range cover our soles, and include the scale and filtering the real robot will use already during training.

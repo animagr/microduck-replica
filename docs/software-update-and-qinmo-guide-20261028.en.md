@@ -1,0 +1,37 @@
+# 2026.10.28 Software Update and Qinmo Guide
+
+**English** · [简体中文](软件更新与Qinmo使用说明-20261028.md)
+
+Existing cards do not need the SD card reflashed. This release has two steps: first install the web console / voice in the existing "设置 → 软件更新" (Settings → Software update), then, on the same page after reconnecting, explicitly confirm the optional main program update. The web console version changing to `2026.10.28` does not mean the main program has been updated.
+
+For the software package and the one-time bootstrap attachments, see the [2026.10.28 Release](https://github.com/fanhao375/microduck-replica/releases/tag/microduck-software-v2026.10.28). The image is still the original 20261027; there is no new image this time. Existing boards such as the regular FT6 and IMU-to-DXL keep "自动识别（现有板卡）" (Auto-detect (existing boards)), and there is no need to force-install the main program just to keep the original usage.
+
+## Cards that already have the "软件更新" (Software update) entry point
+
+1. Open the duck's usual control URL, go to "设置 → 软件更新" (Settings → Software update), and set and log in with the web console password.
+2. Click "检查更新 → 下载更新" (Check for updates → Download update). When offline, first download `2026.10.28.software-update.tar` on a computer, then click "上传离线包" (Upload offline package) on the same page. You need the complete signed software package; an ordinary source archive cannot replace it.
+3. **The first step still uses the old updater's standing conditions**: stop activity, stand the robot up following the original procedure, turn off the locomotion policy, turn off voice listening and music, end servo sessions, calibration, recording, replay and action tasks, and keep the battery sufficiently charged. If the conditions are not met after downloading, follow the reasons shown on the page and click "重新验证" (Verify again).
+4. Once verification passes, click "立即更新" (Update now). This stage only switches the web console, the matching helper and voice; it does not install or restart the main program, nor change the default IMU type. The web console will disconnect briefly; wait for it to reconnect and check that the web console / voice version is `2026.10.28`.
+5. If you need Qinmo, **for the second step first support the duck by hand or with a stand and release torque**, and confirm that the policy is off and voice, music and sessions are stopped. The second step does not require standing up again or returning to HOME. The "主程序更新（可选）" (Main program update (optional)) section below shows separately whether the package includes the main program, whether the actual running identity has been verified, and the transaction progress.
+6. After checking "我已扶稳承托鸭子、确认卸力……" (I have steadied and supported the duck and confirmed torque is released…), click "确认安装主程序" (Confirm main program installation). Only verified, supported installations are allowed to install; viewing settings, the first-stage update, or keeping auto-detection do not substitute for this confirmation.
+7. Wait for verification of the main program's actual running identity to finish; if the web console disconnects, reopen the same page to check. Go to the IMU page, select `Qinmo · Feetech` for "总线 IMU 类型" (Bus IMU type), click "保存类型并重新连接" (Save type and reconnect), and complete the stillness, forward-tilt sampling and leveling, and head-down direction verification as the page instructs. The type is saved for subsequent boots, so you do not have to choose it every time. For detailed steps see [Qinmo IMU web console usage](Qinmo-IMU-网页使用.md).
+
+Automatic main program update only supports **this project's known 20261027 native baseline** (and the case where it is verified to already be this release's target). Custom robotd, other builds and unknown startup methods require the maintainer to verify; no forced installation is offered. If first-time calibration has not been completed, the old version cannot read back health status, or the factory state is unknown, the first stage may also refuse the preparation check; ask the maintainer to confirm compatibility and the first-use flow first. Do not fake the state, skip checks, or force the robot to stand and walk just to pass the upgrade. Supported startup recovery states are judged by the main program updater and handed back to the first-time calibration flow; the page will not describe unknown real torque as measured to be released.
+
+## Interruption, failure and rollback
+
+Installation is performed by a separate helper; closing the browser or a web console service restart does not cancel it. After reconnecting, rely on the actual running verification and the persistent transaction record; do not just look at the web console version or click repeatedly.
+
+If the main program fails, it will try to restore and verify the old binary. If "主程序更新未完成" (Main program update not completed) is shown, keep the robot supported with torque released, check the confirmation again on the same page, and click "恢复未完成的主程序更新" (Resume the incomplete main program update). While recovery is incomplete, motion, recording, replay, music, servo and IMU writes remain prohibited; the e-stop, space-bar torque release, and turning off voice / music remain available. If recovery is refused, preserve the on-site information and ask the maintainer to check; do not delete protection files or start the control service manually.
+
+"退回上一版网页 / 语音" (Roll back to the previous web console / voice) only rolls back this software layer; it does not downgrade an installed main program. A later voluntary downgrade of the main program is outside the scope of this release.
+
+## Old cards without the update entry point
+
+Install a compatible upgrade entry point and external resources once over SSH, then return to the web console flow above. Download `microduck-bootstrap-20261028.tar.gz`, the corresponding SHA256 and `2026.10.28.software-update.tar` from the same Release, and check resources and compatibility against the Release's `bootstrap-README.txt` and the README inside the package before proceeding. The bootstrap package contains the release public key, the ARM64 upgrade executor, and voice dependency / Chinese model resources; the public key is still the original `microduck-release-20261027.pub`, and the root of trust is not changed. The bootstrap installation itself is still subject to the original preparation checks; on real devices, do not add the offline build parameters. Do not copy only the web console files, and do not use a source archive as the bootstrap package. The first time requires the maintainer's help to check the card's origin and state; after that, everyday software updates do not need SSH.
+
+Software updates keep your own models, Wi-Fi, gamepad pairing, actions, calibration and AI keys, and the main program update does not rewrite existing parameters or calibration bytes. Flashing a new image over an old card is not a software update method that preserves personal data.
+
+## Verification scope
+
+This release has not yet completed a physical upgrade, standing, walking or Qinmo physical acceptance check; software, simulated service and browser verification cannot replace these real-hardware confirmations. Head and body following the music beat still awaits a fix, and free-form AI voice conversation is not yet integrated. For the existing local "坐下 / 站起来" (sit down / stand up) and R3 behavior, see the [20261027 voice guide](软件更新与语音使用说明-20261027.md).

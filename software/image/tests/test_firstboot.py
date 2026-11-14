@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""microduck-firstboot：起名、热点 keyfile、IMU 识别、TOML 追加。"""
+"""microduck-firstboot: naming, hotspot keyfile, IMU detection, TOML append."""
 import importlib.machinery
 import importlib.util
 import io
@@ -48,7 +48,7 @@ class Run:
 
 
 class TlsRun(Run):
-    """假 openssl：按 -out 参数造占位文件；调用 x509 时顺手记下 extfile 内容。"""
+    """Fake openssl: creates placeholder files per the -out argument; also records the extfile content when x509 is called."""
 
     def __init__(self, returncode=0, stderr=""):
         super().__init__(returncode=returncode, stderr=stderr)
@@ -153,7 +153,7 @@ class HostnameTests(unittest.TestCase):
             root = make_tree(tmp)
             run = Run()
             fb = make_fb(root, run=run)
-            # 临时 root 下默认不调用 hostname；显式注入 runner 后才调用。
+            # Under a temporary root hostname is not called by default; only called once a runner is explicitly injected.
             fb.setup_hostname()
             self.assertEqual((root / "etc/hostname").read_text(encoding="utf-8"), "duck-c51b\n")
             self.assertEqual(run.calls, [(["hostname", "duck-c51b"], 5)])
@@ -407,7 +407,7 @@ class FlowTests(unittest.TestCase):
     def test_failure_in_hotspot_step_does_not_stop_others(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_tree(tmp)
-            # 把 NetworkManager 变成普通文件，热点 keyfile 必然写不进去。
+            # Turn NetworkManager into a regular file so the hotspot keyfile can never be written.
             nm = root / "etc/NetworkManager"
             shutil.rmtree(nm)
             nm.write_text("not a directory\n", encoding="utf-8")
@@ -484,7 +484,7 @@ class HotspotOnlyTests(unittest.TestCase):
 
 
 class TlsTests(unittest.TestCase):
-    """首次开机生成局部 CA + 服务器证书；旧的自签 leaf 迁移时先备份。"""
+    """First boot generates a local CA + server certificate; an old self-signed leaf is backed up first when migrating."""
 
     def tls(self, tmp, *, run=None):
         root = make_tree(tmp, hostname="duck-c51b")
@@ -500,7 +500,7 @@ class TlsTests(unittest.TestCase):
             self.assertEqual(cert, directory / "duck.crt")
             for name in ("ca.key", "ca.crt", "duck.key", "duck.crt"):
                 self.assertTrue((directory / name).exists(), name)
-            self.assertFalse((directory / "duck.csr").exists())      # 中间文件不留下
+            self.assertFalse((directory / "duck.csr").exists())      # intermediate files are not left behind
             self.assertFalse((directory / "duck.ext").exists())
             self.assertIn("已生成 HTTPS 证书", log.getvalue())
             run = fb.run_cmd
@@ -544,7 +544,7 @@ class TlsTests(unittest.TestCase):
             run = fb.run_cmd
             before = len(run.calls)
             fb.setup_tls("duck-c51b")
-            self.assertEqual(len(run.calls), before)               # 没有再次调用 openssl
+            self.assertEqual(len(run.calls), before)               # openssl was not called again
             self.assertIn("已存在，不覆盖", log.getvalue())
 
     def test_old_leaf_without_ca_is_backed_up_and_regenerated(self):
@@ -614,7 +614,7 @@ class TlsTests(unittest.TestCase):
 
 
 class PythonFinderTests(unittest.TestCase):
-    """三个 shell 脚本都要跳过 3.10，找到带 tomllib 的解释器。"""
+    """All three shell scripts must skip 3.10 and find an interpreter with tomllib."""
 
     def _extract(self, script):
         text = (BASE / script).read_text(encoding="utf-8")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""microduck-netcheck：45 秒规则、开热点前扫描、重试、热点空闲关断、net.json。"""
+"""microduck-netcheck: 45-second rule, scan before opening the hotspot, retries, idle hotspot shutdown, net.json."""
 import importlib.machinery
 import importlib.util
 import io
@@ -165,7 +165,7 @@ class NetcheckTests(unittest.TestCase):
         self.assertEqual(len(fake.calls_of("connection", "up")), 1)
 
     def test_no_saved_wifi_opens_the_hotspot_at_once(self):
-        # 10-21：新卡一个 WiFi 都没存，热点也要等 45 秒才开，白等
+        # 10-21: a new card with no Wi-Fi saved still waited 45 seconds before opening the hotspot, for nothing
         root, fake, nc, log = self.make()
         fake.connections = [("Microduck-Hotspot", "802-11-wireless"), ("Wired", "802-3-ethernet")]
         nc.tick(0)
@@ -188,13 +188,13 @@ class NetcheckTests(unittest.TestCase):
         root, fake, nc, log = self.make()
         nc.tick(0)
         nc.tick(30)
-        self.assertEqual(nc.mode, "none")            # Home 存着：照旧等 45 秒
+        self.assertEqual(nc.mode, "none")            # Home is saved: wait 45 seconds as usual
         fake.connections = [("Microduck-Hotspot", "802-11-wireless")]
         fake.up_rc = 1
-        nc.tick(33)                                   # 刚删光：马上开，但开失败
+        nc.tick(33)                                   # just deleted them all: open immediately, but opening fails
         self.assertEqual(len(fake.calls_of("connection", "up")), 1)
         fake.up_rc = 0
-        nc.tick(36)                                   # 失败后 60 秒内不重试
+        nc.tick(36)                                   # no retry within 60 seconds after a failure
         self.assertEqual(len(fake.calls_of("connection", "up")), 1)
         nc.tick(93)
         self.assertEqual(nc.mode, "hotspot")

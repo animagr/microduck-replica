@@ -78,7 +78,7 @@ class test_apply_full(ApplyTestBase):
                              env_extra={"STUDIO_VERSION": "env-9.9.9"})
         out = result.stdout + "\n" + result.stderr
 
-        # ---- 1. Studio 的 state.py / logs.py 必须保留 ----
+        # ---- 1. Studio's state.py / logs.py must be kept ----
         self.assertTrue((root / "home/radxa/studio-dev/studio/state.py").exists())
         self.assertTrue((root / "home/radxa/studio-dev/studio/logs.py").exists())
         self.assertTrue((root / "home/radxa/studio-dev/run.py").exists())
@@ -90,7 +90,7 @@ class test_apply_full(ApplyTestBase):
                     "studio/__pycache__", "deploy/__pycache__"]:
             self.assertFalse((root / "home/radxa/studio-dev" / rel).exists(), rel)
 
-        # ---- 出厂标定模式 drop-in ----
+        # ---- Factory calibration-mode drop-in ----
         commissioning = (root / "etc/systemd/system/robotd.service.d/"
                          "zzzz-zz-microduck-commissioning.conf")
         self.assertEqual(commissioning.read_bytes(), (
@@ -106,7 +106,7 @@ class test_apply_full(ApplyTestBase):
             if hasattr(os, "geteuid") and os.geteuid() == 0:
                 self.assertEqual((commissioning_stat.st_uid, commissioning_stat.st_gid), (0, 0))
 
-        # ---- 3. padd 不经过 startup_gate.py ----
+        # ---- 3. padd does not go through startup_gate.py ----
         dropins = sorted(p.name for p in (root / "etc/systemd/system/padd.service.d").iterdir())
         self.assertEqual(dropins, ["zzzz-replica-netpad.conf", "zzzz-replica-padd.conf"])
         gate_hits = [p for p in (root / "etc").rglob("*") if p.is_file() and b"startup_gate" in p.read_bytes()]
@@ -116,7 +116,7 @@ class test_apply_full(ApplyTestBase):
         self.assertIn("RuntimeDirectory=padd", padd_conf)
         self.assertIn("RestartPreventExitStatus=78", padd_conf)
 
-        # ---- 4. 另一个作者的服务和名字 ----
+        # ---- 4. The other author's services and name ----
         for rel in [
             "etc/systemd/system/microduck-setup.service",
             "etc/systemd/system/multi-user.target.wants/microduck-setup.service",
@@ -145,7 +145,7 @@ class test_apply_full(ApplyTestBase):
         ]:
             self.assertFalse(os.path.lexists(root / rel), rel)
 
-        # 官方声卡初始化必须保留；enabled 链接和脚本都不能动。
+        # The official sound card initialization must be kept; neither the enabled links nor the scripts may be touched.
         for rel in [
             "etc/systemd/system/aic3104-init.service",
             "etc/systemd/system/multi-user.target.wants/aic3104-init.service",
@@ -161,9 +161,9 @@ class test_apply_full(ApplyTestBase):
         self.assertIn("var/lib/alsa/asound.state", out)
         extlinux = (root / "boot/extlinux/extlinux.conf").read_bytes()
         expected_extlinux = replace_first_menu_title(ref_text("boot/extlinux/extlinux.conf"))
-        self.assertEqual(extlinux, expected_extlinux)  # 只改了第一行 menu title
+        self.assertEqual(extlinux, expected_extlinux)  # only the first line, menu title, was changed
 
-        # ---- 5. 标定 ----
+        # ---- 5. Calibration ----
         cal = root / "etc/robot/feetech-ft5/hd1910-calibration.toml"
         self.assertEqual(cal.read_bytes(), CALIB.read_bytes())
         if not IS_WINDOWS:
@@ -201,7 +201,7 @@ class test_apply_full(ApplyTestBase):
         self.assertIn("未发现重新打开", out)
         self.assertNotIn("sshd_config.d/10-microduck.conf", result.stdout)
 
-        # ---- 13. 个人痕迹 ----
+        # ---- 13. Personal traces ----
         self.assertEqual((root / "var/log/syslog").read_bytes(), b"")
         self.assertEqual(list((root / "var/log/journal").iterdir()), [])
         self.assertEqual((root / "var/log.hdd/syslog").read_bytes(), b"")
@@ -244,12 +244,12 @@ class test_apply_full(ApplyTestBase):
         hwclock = (root / "etc/fake-hwclock.data").read_text(encoding="utf-8").strip()
         self.assertRegex(hwclock, r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
 
-        # ---- 15. Studio 的镜像 drop-in ----
+        # ---- 15. Studio's image drop-in ----
         image_conf = (root / "etc/systemd/system/microduck-studio.service.d/10-image.conf").read_text(encoding="utf-8")
         self.assertIn("ExecStart=/usr/bin/python3 -I run.py --listen 0.0.0.0:8000", image_conf)
         self.assertNotIn("二号鸭", image_conf)
 
-        # ---- 16. 模型说明 ----
+        # ---- 16. Model notes ----
         doc = (root / "usr/share/doc/microduck/模型说明.txt").read_text(encoding="utf-8")
         self.assertIn("本镜像 /opt/robot/feetech-ft5-r5/models/ 和 roller/ 下列出的全部模型", doc)
         self.assertNotIn("本目录中当前五个自训练策略", doc)
@@ -260,7 +260,7 @@ class test_apply_full(ApplyTestBase):
         self.assertNotIn("models/legacy", doc)
         self.assertNotIn("@@MODEL_LIST@@", doc)
 
-        # ---- 19. Studio 版本 ----
+        # ---- 19. Studio version ----
         manifest = (root / "usr/share/doc/microduck/镜像清单.txt").read_text(encoding="utf-8")
         self.assertTrue(manifest.startswith("Microduck 复刻镜像清单\n"))
         self.assertIn("Studio 版本：env-9.9.9", manifest)
@@ -276,7 +276,7 @@ class test_apply_full(ApplyTestBase):
         confirm = manifest.split("待人工确认", 1)[1].split("SSH 配置警告", 1)[0]
         self.assertNotIn("local.dev.pub", confirm)
 
-        # overlay 的 enable.list 不能进镜像；overlay 文件权限 0644
+        # The overlay's enable.list must not go into the image; overlay file permissions are 0644
         self.assertFalse((root / "enable.list").exists())
         self.assertFalse((root / "modes.list").exists())
         self.assertTrue((root / "usr/local/bin/demo-tool").exists())
@@ -288,13 +288,13 @@ class test_apply_full(ApplyTestBase):
                         "usr/share/doc/microduck/开源许可.txt"]:
                 self.assertEqual(stat.S_IMODE((root / rel).stat().st_mode), 0o644, rel)
 
-        # payload 里的 netpad 保留了
+        # The netpad in the payload was kept
         self.assertTrue((root / "etc/systemd/system/padd.service.d/zzzz-replica-netpad.conf").exists())
-        # 旧 opt 目录的东西清掉了
+        # The old opt directory contents were cleaned out
         for rel in ["opt/robot/feetech-ft5-r5/gamepad-r7", "opt/robot/feetech-ft5-r5/service.sh",
                     "opt/robot/feetech-ft5-r5/_model_yaml", "opt/robot/feetech-ft5-r5/unused.txt"]:
             self.assertFalse((root / rel).exists(), rel)
-        # models/、roller/、onnxruntime/ 跟 payload 一模一样：多出来的文件和空目录都删了
+        # models/, roller/, onnxruntime/ are identical to the payload: extra files and empty directories were deleted
         opt = root / "opt/robot/feetech-ft5-r5"
         for sub in ["models", "roller", "onnxruntime"]:
             files = sorted(p.relative_to(root).as_posix() for p in (opt / sub).rglob("*") if p.is_file())
@@ -306,7 +306,7 @@ class test_apply_full(ApplyTestBase):
         self.assertEqual((root / "opt/robot/feetech-ft5-r5/robotd").read_bytes(), self.fx.robotd)
 
     def test_reshape_failed(self):
-        # ---- 11. 第一次开机自动扩容的断言 ----
+        # ---- 11. Assertions for automatic expansion on first boot ----
         payload = self.fx.make_payload()
         root = self.fx.make_rootfs()
         studio = self.fx.make_studio()
@@ -359,7 +359,7 @@ class test_apply_permissions(ApplyTestBase):
         after = {rel: stat.S_IMODE(os.stat(root / rel).st_mode)
                  for rel in [".", "etc", "usr", "usr/share/doc"]}
         self.assertEqual(before, after)
-        # Windows / Git Bash 只能表达只读位，目录模式恒为 0777；POSIX 上才断言具体位。
+        # Windows / Git Bash can only express the read-only bit, and directory mode is always 0777; specific bits are asserted only on POSIX.
         if not IS_WINDOWS:
             self.assertEqual(after["etc"], 0o750)
             self.assertEqual(after["usr"], 0o751)
@@ -705,7 +705,7 @@ class test_media_source(ApplyTestBase):
         self.assertLess(lines.index("[media]"), hits[0])
         self.assertLess(hits[0], lines.index("[audio]"))
         self.assertNotIn('# source = "camera"', lines)
-        # 别的段里同名的注释不动。
+        # Same-named comments in other sections are left alone.
         self.assertIn('# source = "mic"', lines)
         self.assertIn('# quality = "720p30"', lines)
 
@@ -860,7 +860,7 @@ class test_residual_scan_more(ApplyTestBase):
         self.assertIn("悬空", text)
 
     def test_masked_unit_is_not_dangling(self):
-        # systemctl mask 留下的 -> /dev/null 链接：挂载的 rootfs 里没有 /dev/null，也不算悬空
+        # -> /dev/null links left by systemctl mask: the mounted rootfs has no /dev/null, but they do not count as dangling
         payload = self.fx.make_payload()
         root = self.fx.make_rootfs()
         os.symlink("/dev/null", root / "etc/systemd/system/serial-getty@ttyS2.service")
