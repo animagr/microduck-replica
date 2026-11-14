@@ -1,9 +1,9 @@
-# 出厂通用标定（选项 A）：所有关节方向取 -1，零位 2048，都还没有逐台标定。
-# 这组值只保证主程序能读到编码器；要在 Studio 的上手清单里标定、核对 IMU 方向后，
-# 用「写进主程序」写入真实的零位、方向和限位。在那之前主程序只读数，不上力。
+# Generic factory calibration (option A): every joint direction is -1, zero position 2048, nothing calibrated per unit yet.
+# These values only ensure the main program can read the encoders; after calibrating and checking the IMU orientation in Studio's getting-started checklist,
+# use "写进主程序" (Write to main program) to write the real zero positions, directions and limits. Until then the main program only reads and does not apply torque.
 motion_enabled = false
 imu_mount_verified = false
-# [w, x, y, z]，传感器到躯干的旋转，官方 +90 度绕 Y；装机后必须核对方向。
+# [w, x, y, z], rotation from sensor to torso, official +90 degrees about Y; the orientation must be checked after assembly.
 imu_mount_quat = [0.7071067811865476, 0.0, 0.7071067811865476, 0.0]
 
 units_verified = false

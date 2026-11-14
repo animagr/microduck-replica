@@ -54,7 +54,7 @@ class SpeechTests(unittest.TestCase):
         self.assertEqual(self.echoed, [])
 
     def test_merged_utterance_runs_every_command_in_order(self):
-        # 端点检测把连说的几句并成一段时的实际形态（2026-11-01 上机实录）
+        # What it actually looks like when endpoint detection merges several sentences spoken in a row into one segment (recorded on the robot, 2026-11-01)
         control = self.make(FakeRecognizer('鸭 鸭 点头 鸭 鸭 摇头 鸭 鸭 歪头', 0.80))
         control.submit(b'pcm')
         self.assertTrue(control.idle.wait(1))
@@ -76,11 +76,11 @@ class SpeechTests(unittest.TestCase):
         self.assertTrue(control.ready.wait(1))
         control.submit(b'pcm')
         self.assertTrue(control.idle.wait(1))
-        # 第一条做不成，后面的就不做了——省得在半截状态下继续动作
+        # If the first one cannot be done, the rest are skipped, so it does not keep moving from a half-finished state
         self.assertEqual(self.executor.commands, ['nod', 'shake'])
         view = control.last_view()
         self.assertFalse(view['accepted'])
-        # 失败原因要带给手机页 / 桌面（robotd 的公开理由，不含识别原话）
+        # The failure reason must reach the phone page / desktop (robotd's public reason, without the recognized raw phrase)
         self.assertEqual(view['reason'], 'robot is sitting; stand up first')
 
     def test_explicit_stop_takes_priority_over_other_commands_in_a_merged_utterance(self):

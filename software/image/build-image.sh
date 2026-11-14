@@ -1,5 +1,5 @@
 #!/bin/sh
-# 在 WSL / Linux 里以 root 运行：复制底图、挂载 p1、应用改动、缩容、压缩。
+# Run as root in WSL / Linux: copy the base image, mount p1, apply changes, shrink, compress.
 set -eu
 LC_ALL=C
 export LC_ALL
@@ -74,7 +74,7 @@ run_e2fsck() {
     return "$rc"
 }
 
-# sfdisk -d 的输出 → 改写 p1 size 的那一行。GPT / MBR 通用。
+# sfdisk -d output → rewrite the line with p1's size. Works for both GPT and MBR.
 new_p1_line() {
     dump=$1
     size=$2
@@ -338,7 +338,7 @@ if [ -n "$LOOP" ]; then
     LOOP=
 fi
 DATE=$(date +%Y%m%d)
-# IMAGE_TAG：同一天出第二版时用（比如 20261021b），不给就是日期
+# IMAGE_TAG: used for a second build on the same day (e.g. 20261021b); defaults to the date
 case "${IMAGE_TAG:-}" in
     ''|*[!0-9a-z]*) [ -z "${IMAGE_TAG:-}" ] || fail "IMAGE_TAG 只能是数字和小写字母：$IMAGE_TAG" "比如 20261021b。" ;;
 esac

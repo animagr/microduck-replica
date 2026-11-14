@@ -36,7 +36,7 @@ class AudioControl:
         if voice is not None and hasattr(voice, 'last_view'):
             try:
                 last = voice.last_view()
-                # 太久以前的指令不再往外说：手机页看到的是「刚刚听到了什么」，不是历史
+                # Commands from too long ago are no longer reported: the phone page shows "what was just heard", not history
                 if isinstance(last, dict) and last.get('age', 0) > 30:
                     last = None
             except Exception:

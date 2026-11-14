@@ -1,5 +1,5 @@
 #!/bin/sh
-# 在二号鸭上以 root 运行，只读源文件；输出一个可核验的 payload tgz。
+# Run as root on duck #2, reading source files only; outputs a verifiable payload tgz.
 set -eu
 LC_ALL=C
 export LC_ALL
@@ -74,9 +74,9 @@ with open(sys.argv[1], 'rb') as fh:
 PY
 }
 
-# 独立的 TOML 清理函数：只删已经能确定的标定 / IMU 安装键。
-# 对含义不确定、但名字看起来相关的键只记录，不删除。
-# 段名可能带引号（["bus"]），比较前先去引号；跨行的值（数组、内联表）连续行一起处理。
+# Standalone TOML cleanup function: only deletes calibration / IMU mounting keys that are known for certain.
+# Keys whose meaning is uncertain but whose names look related are only logged, not deleted.
+# Section names may be quoted (["bus"]), so strip quotes before comparing; multi-line values (arrays, inline tables) are handled together with their continuation lines.
 sanitize_robotd_toml() {
     src=$1
     dst=$2
@@ -382,7 +382,7 @@ KERNEL=$(uname -r)
     printf '\n  ]\n}\n'
 } > "$TMP/stage/payload.json"
 
-# 清单自身也做一次可读性检查，避免包打好了才发现 JSON 坏了。
+# Also check that the manifest itself is readable, so we do not find a broken JSON only after the package is built.
 "$PYTHON" -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$TMP/stage/payload.json" \
     || fail "payload.json 不是合法 JSON" "保留现场并检查路径里是否有异常字符。"
 

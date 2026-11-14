@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""从 Microduck 的 MJCF 导出「已装配」的 STL。
+"""Export "assembled" STLs from the Microduck MJCF.
 
-上游仓库里的 47 个 STL 都是零件自身坐标系的，直接导进 CAD 会全部堆在原点。
-仅用于上游仿真模型分析，不生成最新实物 CAD 的打印件。
-默认输出 analysis-output/cad-upstream/，不写入主仓模型下载入口。
-本脚本读取 MJCF 的运动学树，把每个网格按 world transform 变换到正确位置，
-再按刚体分组导出，得到可以直接在 CAD / 切片软件里打开的装配体。
+The 47 STLs in the upstream repo are all in each part's own coordinate frame, so importing them directly into CAD piles them all up at the origin.
+Only for analyzing the upstream simulation model; does not generate printed parts for the latest physical CAD.
+Default output is analysis-output/cad-upstream/; nothing is written to the main repo's model download entry.
+This script reads the MJCF kinematic tree, transforms each mesh to its correct position by its world transform,
+then exports grouped by rigid body, giving an assembly that can be opened directly in CAD / slicer software.
 
-用法:
-    python scripts/export_assembly_stl.py <上游 microduck_rl 路径> [输出目录]
+Usage:
+    python scripts/export_assembly_stl.py <upstream microduck_rl path> [output directory]
 """
 import sys, os, struct, json
 import numpy as np
@@ -26,7 +26,7 @@ CN = {
 
 
 def write_stl(path, tris):
-    """写二进制 STL。tris: (N,3,3) 顶点数组，单位 mm。"""
+    """Write a binary STL. tris: (N,3,3) vertex array, in mm."""
     with open(path, 'wb') as f:
         f.write(b'\0' * 80)
         f.write(struct.pack('<I', len(tris)))
@@ -41,7 +41,7 @@ def write_stl(path, tris):
 
 
 def geom_tris(m, d, g):
-    """取单个 geom 的三角面，变换到世界坐标，单位转 mm。"""
+    """Take the triangles of a single geom, transform them to world coordinates, and convert units to mm."""
     mid = m.geom_dataid[g]
     if mid < 0:
         return None
@@ -69,7 +69,7 @@ def main():
     m = mujoco.MjModel.from_xml_path(path)
     d = mujoco.MjData(m)
     d.qpos[:] = 0
-    d.qpos[3] = 1.0          # 自由关节单位四元数 —— 零位基准姿态
+    d.qpos[3] = 1.0          # free-joint unit quaternion: zero-position reference pose
     mujoco.mj_forward(m, d)
 
     names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(m.nbody)]
@@ -78,7 +78,7 @@ def main():
     for b in range(1, m.nbody):
         tris, srcs = [], []
         for g in range(m.ngeom):
-            if m.geom_bodyid[g] != b or m.geom_group[g] != 2:   # group 2 = 视觉网格
+            if m.geom_bodyid[g] != b or m.geom_group[g] != 2:   # group 2 = visual meshes
                 continue
             t = geom_tris(m, d, g)
             if t is None:

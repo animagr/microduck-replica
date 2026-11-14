@@ -109,17 +109,17 @@ def motion_lease(marker=UPDATE_MARKER,lock=None):
         if descriptor is not None:os.close(descriptor)
 
 
-# ---------------- 语音能做的动作 ----------------
-# 名字跟手机中控 web/m/actions.js 保持一致：板载这条路的识别结果（audio.last.command）
-# 直接就是这里的键，页面拿去查 CMD_CN 显示中文。
+# ---------------- Actions voice can perform ----------------
+# Names are kept consistent with the phone web console's web/m/actions.js: the onboard path's recognition result (audio.last.command)
+# is directly a key here, and the page looks it up in CMD_CN to display the Chinese name.
 SKILL_COMMANDS = {'roulade': 'roulade', 'ground_pick': 'ground_pick'}   # robot.do {skill}
 SOUND_COMMANDS = {'chirp': 'chirp', 'greet': 'greet'}                   # robot.sound {tag}
-HEAD_COMMANDS = ('nod', 'shake', 'tilt')                                # robot.head 通知
+HEAD_COMMANDS = ('nod', 'shake', 'tilt')                                # robot.head notifications
 ALL_COMMANDS = ('sit', 'stand', 'walk', 'stop', 'roulade', 'ground_pick',
                 'chirp', 'greet', 'nod', 'shake', 'tilt')
 
-# 用户在 Studio「模型」页上传的裸 ONNX：指令名 → robotd 技能名（custom_xxxxxxxx）。
-# 模型库就在本机的 state 目录；读不到就当没有，别让语音整条挂掉。
+# Bare ONNX files the user uploaded on Studio's "Model" page: command name → robotd skill name (custom_xxxxxxxx).
+# The model library is in this machine's state directory; if it cannot be read, treat it as absent rather than taking the whole voice pipeline down.
 CUSTOM_MODELS = Path('/var/lib/microduck-studio/models')
 _CUSTOM_TTL_S = 1.0
 _custom_cache = {'at': -1e9, 'value': {}}
@@ -157,18 +157,18 @@ def custom_skills():
         _custom_cache['value'] = found
     return dict(found)
 
-# 点头 / 摇头 / 歪头的幅度和快慢：照搬手柄页 studio/pad_combo.py 的取值（那里标了「推测，要上机核」）。
-# 头的指令进的是策略的观测，不直接写舵机，所以幅度是「意向」不是角度。
-HEAD_TICK_S = 0.04                       # 25 Hz，跟 pad_combo.TICK_S 一样
+# Amplitude and speed of nod / shake / tilt: copied from the gamepad page's studio/pad_combo.py values (marked there as "guesses, to be checked on the robot").
+# Head commands go into the policy's observations rather than writing to the servos directly, so the amplitude is an "intent", not an angle.
+HEAD_TICK_S = 0.04                       # 25 Hz, same as pad_combo.TICK_S
 NOD_AMP, NOD_PERIOD_S, NOD_TIMES = 0.5, 0.7, 2
 SHAKE_AMP, SHAKE_PERIOD_S, SHAKE_TIMES = 0.6, 0.8, 2
 TILT_AMP, TILT_S, TILT_RAMP_S = 0.4, 1.2, 0.25
 HEAD_ZERO = {'neck_pitch': 0.0, 'head_pitch': 0.0, 'head_yaw': 0.0, 'head_roll': 0.0}
 
-# robot.enable 只是收下「启动策略」的请求：fork robotd 的原话是 "the policy starts when it is ready"，
-# 真正的启动在控制循环里做。刚站起来时 IMU 还在收敛，home_start_guard 会连续拒几次
-# （不能进入保持：正在确认实际 HOME 和直立姿态…；舵机反馈不完整或不新鲜…）。
-# 所以发一次不算数：在窗口里反复确认 policy_enabled，失败时把主程序给的原因原样报出来。
+# robot.enable only accepts the "start policy" request: the fork robotd's own words are "the policy starts when it is ready",
+# and the real start happens in the control loop. Right after standing up the IMU is still converging, and home_start_guard refuses several times in a row
+# (不能进入保持：正在确认实际 HOME 和直立姿态… (cannot enter hold: confirming actual HOME and upright posture…); 舵机反馈不完整或不新鲜… (servo feedback incomplete or stale…)).
+# So sending once is not enough: repeatedly confirm policy_enabled within a window, and on failure report the main program's reason verbatim.
 POLICY_START_S = 3.0
 POLICY_RETRY_S = 0.5
 _POLICY_SETTLING = ('不能进入保持', '确认实际 HOME', '实际 HOME', '关节实际位置', '舵机反馈',
@@ -176,12 +176,12 @@ _POLICY_SETTLING = ('不能进入保持', '确认实际 HOME', '实际 HOME', '�
 
 
 def _policy_settling(reason):
-    """这个拒绝是不是「还在等姿态 / 反馈稳定」——值得过一会儿再试。别的（没装策略、更新）立刻报。"""
+    """Whether this refusal is "still waiting for posture / feedback to settle", worth retrying in a moment. Others (no policy installed, updating) are reported immediately."""
     return any(word in reason for word in _POLICY_SETTLING)
 
 
 def _policy_refusal(bus):
-    """主程序为什么没把策略开起来：busStatus 的 last_enable_refusal / home_start_guard.reason。"""
+    """Why the main program did not start the policy: busStatus's last_enable_refusal / home_start_guard.reason."""
     if not isinstance(bus, dict):
         return None
     why = bus.get('last_enable_refusal')
@@ -196,7 +196,7 @@ def _policy_refusal(bus):
 
 
 def head_seconds(command):
-    """这个头部动作要做多久（秒）。"""
+    """How long this head action takes (seconds)."""
     if command == 'nod':
         return NOD_PERIOD_S * NOD_TIMES
     if command == 'shake':
@@ -207,7 +207,7 @@ def head_seconds(command):
 
 
 def head_frame(command, t):
-    """第 t 秒头应该在哪（照 pad_combo.head_at）。不是头部动作返回 None。"""
+    """Where the head should be at second t (per pad_combo.head_at). Returns None if not a head action."""
     if command == 'nod':
         pitch = NOD_AMP * math.sin(2 * math.pi * t / NOD_PERIOD_S)
         return {'neck_pitch': 0.0, 'head_pitch': pitch, 'head_yaw': 0.0, 'head_roll': 0.0}
@@ -222,33 +222,33 @@ def head_frame(command, t):
     return None
 
 
-# 同一句「站起来」实测有时只有 0.54，动作仍要求整段匹配。
+# The same "站起来" (stand up) sometimes scores only 0.54 in hardware tests; actions still require a whole-segment match.
 MIN_CONFIDENCE = 0.50
 
 EXACT = {
     '坐下': 'sit', '坐下来': 'sit', '坐': 'sit',
     '站起来': 'stand', '站起': 'stand', '起立': 'stand', '起来': 'stand', '站': 'stand',
-    # 识别步进口令，给出换用手机或手柄的提示；板载语音没有方向盘租约。
+    # Recognize step commands and give a hint to use the phone or gamepad instead; onboard voice has no steering-wheel lease.
     '走一小步': 'walk', '走一步': 'walk', '向前走': 'walk', '往前走': 'walk', '走': 'walk',
     '停': 'stop', '停下': 'stop', '停下来': 'stop', '停住': 'stop', '站住': 'stop', '停步': 'stop',
-    # 技能：robot.do {skill}。要站好、策略在跑才做（手柄页的规矩），做不成会原样报理由
+    # Skills: robot.do {skill}. Only performed when standing properly with the policy running (the gamepad page's rule); if it cannot be done, the reason is reported verbatim
     '前滚翻': 'roulade', '翻跟头': 'roulade', '翻个跟头': 'roulade', '打个滚': 'roulade',
     '滚一个': 'roulade', '前翻': 'roulade', '滚翻': 'roulade', '翻身': 'roulade', '打滚': 'roulade',
     '低头捡东西': 'ground_pick', '捡东西': 'ground_pick', '低头捡': 'ground_pick',
     '捡个东西': 'ground_pick', '捡一下东西': 'ground_pick', '低头': 'ground_pick',
-    # 叫一声：robot.sound {tag}。不动关节，卸力时也能叫（robotd main.rs:4300-4307）
-    # 「叫一下」会被「一下」剥成「叫」，所以单字也要认
+    # Quack: robot.sound {tag}. Moves no joints, so it works even when relaxed (robotd main.rs:4300-4307)
+    # "叫一下" (quack once) gets stripped by "一下" down to "叫", so the single character must be recognized too
     '叫一声': 'chirp', '叫一下': 'chirp', '叫叫': 'chirp', '嘎一声': 'chirp',
     '嘎一下': 'chirp', '叫唤': 'chirp', '叫': 'chirp',
     '打招呼': 'greet', '打个招呼': 'greet', '问好': 'greet', '问个好': 'greet',
-    # 点头 / 摇头 / 歪头：robot.head 通知，按顺序发完再回正（头是锁存的，不回正就一直歪着）
+    # Nod / shake / tilt: robot.head notifications, sent in order and then recentered (the head is latched; without recentering it stays tilted)
     '点头': 'nod', '点点头': 'nod', '点一下头': 'nod', '点个头': 'nod',
     '摇头': 'shake', '摇摇头': 'shake', '摇一下头': 'shake', '摇个头': 'shake',
     '歪头': 'tilt', '歪歪头': 'tilt', '歪一下头': 'tilt', '歪个头': 'tilt', '歪脑袋': 'tilt',
 }
 
 NEGATIVE_WORDS = ('不', '别', '甭', '勿')
-# 「复读 坐下」「他说 站起来」是把指令当话转述，不是在命令
+# "复读 坐下" (repeat: sit down) and "他说 站起来" (he said stand up) relay a command as speech; they are not commands
 QUOTED_PREFIXES = ('复读', '他说', '她说', '我说', '你说')
 SEQUENCE_WORDS = ('再', '然后', '接着', '之后')
 ADDRESSES = ('小鸭子', '鸭子', '鸭鸭')
@@ -256,7 +256,7 @@ MAX_COMMANDS_PER_UTTERANCE = 3
 
 
 def _squash(text):
-    """把「起立起立起立」压成「起立」。实测连着说两遍会被端点检测并成一句。"""
+    """Collapse "起立起立起立" into "起立" (stand). In hardware tests, saying it twice in a row gets merged into one sentence by endpoint detection."""
     while len(text) > 2:
         shrunk = False
         for cut in range(2, len(text) // 2 + 1):
@@ -276,7 +276,7 @@ def _match_clause(text):
         return None
     for phrase in (text, text.removesuffix('一下')):
         phrase = _squash(phrase)
-        # 单独的「鸭」也是称呼。它后面只接受完整的内置口令。
+        # A lone "鸭" (duck) is also a form of address. Only a complete built-in command may follow it.
         command = EXACT.get(phrase) or EXACT.get(phrase.removeprefix('鸭').removeprefix('请'))
         if command:
             return command
@@ -286,13 +286,13 @@ def _match_clause(text):
 
 
 def parse_command(text, confidence):
-    """一段文字 → 一个动作（认不出返回 None）。"""
+    """A piece of text → one action (returns None if not recognized)."""
     commands = parse_commands(text, confidence)
     return commands[0] if len(commands) == 1 else None
 
 
 def parse_commands(text, confidence):
-    """允许用称呼分隔完整口令。任何一段未认清，整次不执行。"""
+    """Allow complete commands to be separated by forms of address. If any segment is not recognized, nothing is executed."""
     if (not isinstance(text, str) or not isinstance(confidence, (int, float))
             or not math.isfinite(confidence) or confidence < MIN_CONFIDENCE):
         return []
@@ -301,7 +301,7 @@ def parse_commands(text, confidence):
             or re.search(r'''unk|["'“”‘’「」『』?？]''', text, re.IGNORECASE)):
         return []
     clauses = re.split('|'.join(ADDRESSES), text)
-    # 称呼可在开头或结尾出现。两个称呼之间缺少口令则拒绝。
+    # A form of address may appear at the start or the end. Reject if there is no command between two forms of address.
     if not clauses[0]:
         clauses = clauses[1:]
     if clauses and not clauses[-1]:
@@ -319,11 +319,11 @@ def parse_commands(text, confidence):
 
 
 class RobotClient:
-    """robotd 的 JSON-RPC。请求（init / enable / do / sound / stop / policies / busStatus）走 call，
-    每次新开一条连接、等回话；通知（head / move / mouth）走 notify，一条常驻连接、写完就走。
+    """robotd JSON-RPC. Requests (init / enable / do / sound / stop / policies / busStatus) go through call,
+    opening a new connection each time and waiting for the reply; notifications (head / move / mouth) go through notify, one persistent connection, write and go.
 
-    通知不带 id、也不回话（duck-ipc-proto lib.rs:522-529），拿 call 去发会一直等到超时——
-    点头每帧卡 1.5 秒，整个动作就没法做了。跟 Studio 的 RobotPort 一个做法。
+    Notifications carry no id and get no reply (duck-ipc-proto lib.rs:522-529); sending them via call would wait until timeout,
+    stalling each nod frame for 1.5 seconds and making the whole action impossible. Same approach as Studio's RobotPort.
     """
 
     def __init__(self, path='/run/robotd.sock', timeout=1.5, opener=None):
@@ -333,7 +333,7 @@ class RobotClient:
         self._notify_lock = threading.Lock()
 
     def notify(self, method, params=None):
-        """发一条通知：断了就丢掉这条连接重连一次，第二次还不行才抛。"""
+        """Send a notification: if the connection is broken, drop it and reconnect once; only raise if the second attempt also fails."""
         line = (json.dumps({'jsonrpc': '2.0', 'method': method, 'params': params or {}},
                            separators=(',', ':')) + '\n').encode()
         with self._notify_lock:
@@ -341,7 +341,7 @@ class RobotClient:
                 try:
                     if self._notify_socket is None:
                         client = self._opener()
-                        self._notify_socket = client   # 先挂上：连不上时 _close_notify 也收得掉
+                        self._notify_socket = client   # attach first: so _close_notify can clean it up if the connection fails
                         client.settimeout(self.timeout)
                         client.connect(self.path)
                     self._notify_socket.sendall(line)
@@ -379,9 +379,9 @@ class RobotClient:
 
 
 class PostureCommands:
-    """语音能做的一切：坐 / 站 / 走一小步 / 停 / 前滚翻 / 低头捡 / 叫一声 / 打招呼 / 点头 / 摇头 / 歪头。
+    """Everything voice can do: sit / stand / take a small step / stop / forward roll / head down to pick up / quack / greet / nod / shake head / tilt head.
 
-    类名沿用旧名字，避免动 import 和既有测试。
+    The class keeps its old name to avoid touching imports and existing tests.
     """
     def __init__(self, robot, timeout=5, sleep=time.sleep,guard=updates_allowed,lease=motion_lease,
                  clock=time.monotonic):
@@ -399,14 +399,14 @@ class PostureCommands:
         return policies, bus
 
     def _require_driving(self, policies, bus, request=None, allowed=None):
-        """技能、头部动作的前置：站着、上着劲、回过中、策略在跑。
+        """Preconditions for skills and head actions: standing, powered, centered, policy running.
 
-        跟手柄页的 need_drive 一致（studio/pad_drive.py:1592-1603）；头的指令进的是策略的观测，
-        策略没在跑时发了也不动（pad_combo.py 文件头）。
+        Consistent with the gamepad page's need_drive (studio/pad_drive.py:1592-1603); head commands go into the policy's observations,
+        so sending them while the policy is not running does nothing (pad_combo.py file header).
 
-        站好、上劲、回过中之后策略往往还是停的；以前要人工点「开始走策略」。
-        这时跟那个按钮用同一套 stop → enable 自己把策略开起来，开不起来才报错，
-        理由原样报给手机页。坐着 / 没上劲 / 没回过中仍然直接拒绝。
+        After standing, powering and centering, the policy is often still stopped; previously someone had to click "start walking policy" manually.
+        Now the same stop → enable sequence as that button starts the policy automatically, and only reports an error if it cannot start,
+        with the reason reported verbatim to the phone page. Sitting / not powered / not centered are still rejected outright.
         """
         torque = bus.get('native', {}).get('torque_state_confirmed') is True
         homed = policies.get('homed') is True or bus.get('homed') is True
@@ -420,13 +420,13 @@ class PostureCommands:
             self._ensure_policy(request, allowed or (lambda: True))
 
     def _ensure_policy(self, request, allowed):
-        """站起来之后把「走策略」自己开起来（等同手机页的「开始走策略」按钮）。
+        """After standing up, start the "walking policy" automatically (equivalent to the phone page's "start walking policy" button).
 
-        robot.enable 的回执不代表策略真的启动了：fork robotd 会先把请求收下，等 IMU 收敛后
-        才在控制循环里启动；站姿 / 反馈还没稳定时它连续拒（不能进入保持：…）。所以这里在
-        一个窗口里反复 enable + 回读 policy_enabled，可恢复的拒绝就再等一会儿；窗口用完仍
-        没起来，就把主程序给的原因（last_enable_refusal / home_start_guard.reason）原样报出去，
-        让用户知道要回 HOME、扶正。
+        robot.enable's acknowledgment does not mean the policy actually started: the fork robotd accepts the request first and only
+        starts it in the control loop after the IMU converges; while posture / feedback has not settled it refuses repeatedly (不能进入保持：… (cannot enter hold: …)). So here,
+        within a window, repeat enable + read back policy_enabled, and wait a bit longer on recoverable refusals; if it still has not started when the window runs out,
+        report the main program's reason (last_enable_refusal / home_start_guard.reason) verbatim,
+        so the user knows to return to HOME and straighten it up.
         """
         deadline = self.clock() + POLICY_START_S
         next_try, last, bus = 0.0, None, None
@@ -451,11 +451,11 @@ class PostureCommands:
             self.sleep(0.1)
 
     def _play_head(self, command, allowed):
-        """发一串 robot.head 通知把点头 / 摇头 / 歪头做完，结束时一定回正。
+        """Send a series of robot.head notifications to complete a nod / shake / tilt, always recentering at the end.
 
-        robot.head 是通知（不回话），走 RobotClient.notify；它的目标也不过期
-        （fork robotd intents.rs:569-588，最后一次发的值一直留着），所以「做完」「被打断」
-        「出错」三条路都要补一次全 0，否则头就一直歪着。
+        robot.head is a notification (no reply) and goes through RobotClient.notify; its target never expires either
+        (fork robotd intents.rs:569-588, the last value sent stays in place), so all three paths, "finished", "interrupted"
+        and "error", must send all zeros once more, otherwise the head stays tilted.
         """
         total = max(0.2, float(head_seconds(command)))
         start = self.clock()
@@ -469,13 +469,13 @@ class PostureCommands:
                 self.robot.notify('robot.head', head_frame(command, elapsed) or dict(HEAD_ZERO))
                 left = total - (self.clock() - start)
                 if left <= 1e-6:
-                    # 到点了。留一微秒的余量：剩下的时间小到浮点加不上去时，sleep(0) 会让
-                    # elapsed 永远差一点、死循环（真机时钟和测试的假时钟都会这样）。
+                    # Time is up. Keep one microsecond of margin: when the remaining time is too small for floating-point addition to register, sleep(0) would leave
+                    # elapsed forever slightly short and loop forever (both the real clock and the tests' fake clock do this).
                     break
                 self.sleep(min(HEAD_TICK_S, left))
             return {'accepted': True, 'head': command}
         finally:
-            # 回正不看 allowed：头已经动了，必须收回去
+            # Recentering ignores allowed: the head has already moved and must be brought back
             try:
                 self.robot.notify('robot.head', dict(HEAD_ZERO))
             except OSError:
@@ -510,27 +510,27 @@ class PostureCommands:
                 if result.get('accepted') is not True:
                     raise RuntimeError(str(result.get('reason', method + ' was refused')))
 
-            # 叫一声 / 打招呼：robot.sound 不动关节，卸力着也能叫（robotd main.rs:4300-4307）。
-            # 标 quiet：做完不再补一声「收到了」的提示音，不然叫一声会连着响两下。
+            # Quack / greet: robot.sound moves no joints, so it works even when relaxed (robotd main.rs:4300-4307).
+            # Marked quiet: no extra "got it" beep afterwards, otherwise a quack would sound twice in a row.
             if command in SOUND_COMMANDS:
                 request('robot.sound', {'tag': SOUND_COMMANDS[command]})
                 return {'accepted': True, 'sound': SOUND_COMMANDS[command], 'quiet': True}
 
-            # 技能（前滚翻 / 低头捡东西）：跟手柄页的技能按钮一个规矩，站好、策略在跑才做
+            # Skills (forward roll / head down to pick something up): same rule as the gamepad page's skill buttons, only when standing properly with the policy running
             if command in SKILL_COMMANDS:
                 self._require_driving(policies, bus, request, allowed)
                 skill = SKILL_COMMANDS[command]
                 request('robot.do', {'skill': skill})
                 return {'accepted': True, 'skill': skill}
 
-            # 自定义 ONNX 技能：跟内置技能一个规矩（站好、策略在跑才做）
+            # Custom ONNX skills: same rule as built-in skills (only when standing properly with the policy running)
             if command in custom:
                 self._require_driving(policies, bus, request, allowed)
                 skill = custom[command]
                 request('robot.do', {'skill': skill})
                 return {'accepted': True, 'skill': skill}
 
-            # 点头 / 摇头 / 歪头：robot.head 通知一路发完，最后一定回正（见 _play_head）
+            # Nod / shake / tilt: send robot.head notifications all the way through, always recentering at the end (see _play_head)
             if command in HEAD_COMMANDS:
                 self._require_driving(policies, bus, request, allowed)
                 return self._play_head(command, allowed)

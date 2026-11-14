@@ -1,50 +1,50 @@
-"""总览上的「上手清单」，顺带主板温度格的回差、Studio 自己读的主板温度（总览重排 §5、审查 O4–O8、O14、O15）。
+"""The "上手清单" (onboarding checklist) on the overview, plus the hysteresis for the board-temperature cell and the board temperature Studio reads itself (overview reshuffle §5, review O4–O8, O14, O15).
 
-清单照 overview-merge-review.md 末尾「清单每一步的最终判法」表，按 §5 O14 改成 6 行（任务 11 加了第 3 步）：
-    卡片头（不编号）连上鸭子
-    1 舵机零位   2 IMU 方向   3 写进主程序   4 配手柄   5 测急停   6 站起来、走几步（记录还是两条：stood、walked）
-每一步五种状态：ok ✓ 完成 · skip ↷ 跳过了 · todo ● 该做 / 要重做 · no ○ 没做 · unk ? 读不到。
-「现在该做」= 第一个 ● / ○ 的步（跳过的、标了已完成的都算完成）。后面的不锁，照样能做。
+The checklist follows the "final criteria for each checklist step" table at the end of overview-merge-review.md, changed to 6 rows per §5 O14 (task 11 added step 3):
+    card header (unnumbered) "连上鸭子" (Connect to the duck)
+    1 servo zero positions   2 IMU orientation   3 write to the main program   4 pair gamepad   5 test e-stop   6 stand up, walk a few steps (still two records: stood, walked)
+Each step has five states: ok ✓ 完成 (done) · skip ↷ 跳过了 (skipped) · todo ● 该做 / 要重做 (to do / redo) · no ○ 没做 (not done) · unk ? 读不到 (unreadable).
+"Do now" = the first ● / ○ step (skipped ones and ones marked done all count as done). Later steps aren't locked and can still be done.
 
-**每一行任何时候都能「去做」「已完成」「跳过」**（用户 10-20 真机验收：「这个逻辑绝对有问题，允许人家直接跳过」
-「可能有人之前做过重新走一遍」；10-18 就定过每步都能跳。二号鸭零位早校过，以前却被锁着逼重校）：
-- 「已完成」= 我以前做过：记 done.<步> = {at, by, fp}，这一行 ✓、写「你标了已完成（时间）」；
-- 「跳过」= 先不做：记 skipped.<步> = {at, by, fp}，这一行 ↷；
-- 两种互斥（标一种就删掉另一种）；标过的行给「重新做」+「取消」，Studio 自己有记录的 ✓ 只给「重新做」。
-fp 跟这一步的正式记录绑同样的东西（舵机：关节指纹；IMU：芯片 + 方向；写进主程序、站走：标定指纹；测急停：
-手柄 MAC + 主程序 build；配手柄：不绑）。指纹变了标的作废、那行回 ●（记录留着，指纹变回来又算）；
-标的时候指纹读不到就先记 null，tick 第一次读到时绑上（照 C2：读不到不作废）。
-**不再锁，但有后果的要点两次**：主程序明说没做完（hard：标定没做完、IMU 方向没确认、不让上力）、读不到（?）、
-测出了问题（found：IMU 站着核过差 8.5°、急停测过但现在不管用、两套零位打架，第三批代码审查 D5）、测急停（审查 D11）、
-指纹读不到、调舵机时（清单冻着，标了要交还以后才显示）——点「已完成」「跳过」都是两步，第二下按钮上写后果
-（「确定跳过？主程序说标定没做完：跳过了鸭子也站不起来」这种），后端没收到 confirmed 也拒。
-记录里的 ack 记下第二下确认过哪几种：没确认过 hard 的标记在主程序明说不行时不算（「标的不管用」）；
-没确认过 found 的标记在测出问题以后作废、从记录里删掉（以前「跳过」以后会一直显示「你说以前做过」，把问题藏起来）。
-✓ 和跳过了的行都能「重新做」：就是那一步的「去做」，旧记录留着，新结果出来才替换。
-第 1 步标了已完成 / 跳过：第 3 步准备情况里「舵机零位」算满足（commit.py 读 user_mark）；第 2 步标了、主程序里方向没确认、
-IMU 页也没新校准：第 3 步按默认装法写正在用的那颗 IMU 并标成已确认（任务 17，commit.py 的 _default_imu）。
+**Every row can be "去做" (Go do it), "已完成" (Done), or "跳过" (Skip) at any time** (user's real-hardware acceptance check on 10-20: "this logic is definitely wrong, let people skip directly",
+"someone may have done it before and is going through again"; on 10-18 we already decided every step can be skipped. Duck #2's zero positions were calibrated long ago, yet it used to be locked and forced to recalibrate):
+- "Done" = I did it before: record done.<step> = {at, by, fp}, the row shows ✓ and says "你标了已完成（时间）" (you marked it done (time));
+- "Skip" = not now: record skipped.<step> = {at, by, fp}, the row shows ↷;
+- the two are mutually exclusive (marking one deletes the other); marked rows offer "重新做" (Redo) + "取消" (Cancel), and a ✓ backed by Studio's own record only offers "Redo".
+fp is bound to the same things as the step's formal record (servos: joint fingerprint; IMU: chip + orientation; write to main program, stand/walk: calibration fingerprint; test e-stop:
+gamepad MAC + main program build; pair gamepad: not bound). When the fingerprint changes the mark is void and the row goes back to ● (the record is kept, and counts again if the fingerprint changes back);
+if the fingerprint can't be read when marking, record null first and bind it the first time tick reads it (per C2: unreadable doesn't void).
+**No longer locked, but consequential cases need two clicks**: the main program explicitly says it's not done (hard: calibration not finished, IMU orientation not confirmed, torque not allowed), unreadable (?),
+a problem was found (found: IMU standing check off by 8.5°, e-stop tested but not working now, two sets of zero positions conflicting, third-round code review D5), test e-stop (review D11),
+fingerprint unreadable, while tuning servos (the checklist is frozen, a mark only shows after handback) —— clicking "Done" or "Skip" takes two steps, and the second button states the consequence
+(like "确定跳过？主程序说标定没做完：跳过了鸭子也站不起来" (Really skip? The main program says calibration isn't finished: even if skipped, the duck can't stand up)), and the backend also refuses without confirmed.
+The ack in the record notes which kinds the second click confirmed: a mark that didn't confirm hard doesn't count while the main program explicitly says no ("the mark doesn't help");
+a mark that didn't confirm found is voided and deleted from the record once a problem is found (previously after "Skip" it would keep showing "you said you did it before", hiding the problem).
+Both ✓ and skipped rows can "Redo": that's the step's "Go do it"; the old record is kept and only replaced when a new result comes in.
+Step 1 marked done / skipped: "servo zero positions" counts as satisfied in step 3's readiness (commit.py reads user_mark); step 2 marked, orientation not confirmed in the main program,
+and no new calibration on the IMU page: step 3 writes the IMU in use with the default mounting and marks it confirmed (task 17, commit.py's _default_imu).
 
-**主程序的字段只当「没完成」的证据**（审查 O4）：fork 的运动模式要 15 颗都标了、IMU 也 verified 才肯开总线
-（fork robotd main.rs:1510-1519），所以 control 阶段这两个字段恒为 true；而这个 true 可能是安装脚本拿一号鸭的种子值
-补上的（fork packaging/rebuild-config.py:75-99），也可能是手写的（二号鸭 10-17 手写了 verified = true）。
-「完成」要靠 Studio 自己的记录：舵机页标定留下的 servo-calib/eeprom-*.json、用户点过的「已经校过，核对一下」（老接口，
-页面现在不给这个按钮了）、IMU 页站着完整校过一次且跟主程序用的方向差 < 2°；或者用户自己标的「已完成」。
+**The main program's fields only count as evidence of "not done"** (review O4): the fork's motion mode only opens the bus if all 15 servos are calibrated and the IMU is verified
+(fork robotd main.rs:1510-1519), so in the control phase these two fields are always true; and that true may have been filled in by the install script with Duck #1's seed values
+(fork packaging/rebuild-config.py:75-99), or written by hand (on 10-17 Duck #2 had verified = true written by hand).
+"Done" has to come from Studio's own records: servo-calib/eeprom-*.json left by servo-page calibration, the user having clicked "已经校过，核对一下" (Already calibrated, check it) (old API,
+the page no longer shows this button), one complete standing calibration on the IMU page differing < 2° from the orientation the main program uses; or the user's own "Done" mark.
 
-记录存 state_dir/onboarding.json（审查 O6）：先写临时文件再改名；文件坏了改名成 .bad 留着、当空的，记一行 warn。
-每条记录带「它成立的条件」，条件变了显示「要重做」，记录本身不删：
-    急停     {at, ms, mac, name, build}      换了手柄（MAC 不同）、主程序升级（build 不同）→ 再测一次
-    站 / 走  {at, fp}                        fp = 标定指纹（15 颗 zero_raw / direction + 现在用的 IMU 方向）
-    舵机核对 {at, fp}                        fp = 关节指纹（只看 15 颗 zero_raw / direction）
-    IMU 核对 {at, source, mount_fp, ...}     芯片或方向改过 → 再核一次
-    已完成 / 跳过 done.<步> / skipped.<步> = {at, by, fp, ack?}   fp 变了 → 不算；ack 见上
-时间存 time.time()（墙钟，给人看的）；鸭子开机没联网时墙钟停在 1970，页面上年份 < 2024 写「时间不准」。
-换卡：state 目录跟着卡走，新卡上自然是空的（舵机 EEPROM 里的零位还在，第 1 步点「已完成」）；
-重装 Studio 不动 /var/lib 就留着；换主板不清（零位在舵机和卡上，不跟主板走）。
+Records are stored in state_dir/onboarding.json (review O6): write a temp file first, then rename; if the file is broken rename it to .bad and keep it, treat as empty, log a warn.
+Each record carries "the conditions under which it holds"; when the conditions change it shows "redo", but the record itself isn't deleted:
+    e-stop       {at, ms, mac, name, build}      gamepad changed (different MAC), main program upgraded (different build) → test again
+    stand / walk {at, fp}                        fp = calibration fingerprint (15 servos' zero_raw / direction + the IMU orientation in use)
+    servo check  {at, fp}                        fp = joint fingerprint (only the 15 servos' zero_raw / direction)
+    IMU check    {at, source, mount_fp, ...}     chip or orientation changed → check again
+    done / skip  done.<step> / skipped.<step> = {at, by, fp, ack?}   fp changed → doesn't count; ack: see above
+Time is stored as time.time() (wall clock, for humans); when the duck boots without network the wall clock is stuck at 1970, and the page says "时间不准" (time inaccurate) for years < 2024.
+Card swap: the state directory goes with the card, so a new card is naturally empty (zero positions are still in the servo EEPROM; click "Done" on step 1);
+reinstalling Studio without touching /var/lib keeps it; swapping the board doesn't clear it (zero positions live in the servos and on the card, not with the board).
 
-只在后端一处判：app 的小任务每 0.5 秒调一次 tick()，summarize 只读 view()（每个页面每秒 10 次，不能在那里写盘）。
-读文件（servo-calib 目录、/sys/class/thermal）在线程里做（io()，代码审查 C9），tick 只用缓存：SD 卡一卡不能挡住同一个
-事件循环里的卸力。记录文件读进来逐条校验，坏的那一条丢掉、记一行 warn，别的照用；判清单整体出错时清单写「?」和原因，
-主板温度的回差单独算、不受它影响（代码审查 C1）。
+Judged in only one place in the backend: app's small task calls tick() every 0.5 seconds, and summarize only reads view() (10 times per second per page, can't write to disk there).
+File reads (servo-calib directory, /sys/class/thermal) are done in a thread (io(), code review C9), and tick only uses the cache: a stalled SD card must not block relaxing
+in the same event loop. The record file is validated entry by entry when read in; a bad entry is dropped with a warn logged, the others are used; when judging the whole checklist fails, the checklist shows "?" and the reason,
+and the board-temperature hysteresis is computed separately and isn't affected by it (code review C1).
 """
 import hashlib
 import json
@@ -61,19 +61,19 @@ from .state import JOINT_CN, MAX_AGE, STILL_STARTING, posture, starting_secs
 from .startup_status import startup_wait
 
 ONBOARD_FILE = "onboarding.json"
-SERVO_IDS = (20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 10, 11, 12, 13, 14)   # 跟 servo.IDS 一样（这里不 import servo：它带串口）
-STOOD_S = 3.0             # 站着（holding / policy / walking 且扭矩确认开着）连续这么久算「站起来过」（审查 O6）
-WALKED_S = 2.0            # walking 累计这么久算「走过」
-CPU_WARN_C = 80.0         # 跟 state.CPU_WARN_C 一样：这块板待机就 77–78 °C
-CPU_CLEAR_C = 77.0        # 回差：降到这以下才收（审查 O8：没有回差，仪表带和待办会来回跳、把下面的控件推上推下）
-STUDIO_SCAN_S = 10.0      # servo-calib 目录多久重新扫一次
+SERVO_IDS = (20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 10, 11, 12, 13, 14)   # same as servo.IDS (servo isn't imported here: it brings in the serial port)
+STOOD_S = 3.0             # standing (holding / policy / walking with torque confirmed on) continuously this long counts as "has stood up" (review O6)
+WALKED_S = 2.0            # walking accumulated this long counts as "has walked"
+CPU_WARN_C = 80.0         # same as state.CPU_WARN_C: this board already idles at 77–78 °C
+CPU_CLEAR_C = 77.0        # hysteresis: only cleared once it drops below this (review O8: without hysteresis, the gauge band and to-do item flip back and forth, pushing the controls below up and down)
+STUDIO_SCAN_S = 10.0      # how often to rescan the servo-calib directory
 THERMAL_ROOT = "/sys/class/thermal"
-# robotd 读的配置：fork 是 --params /etc/robot/feetech-ft5/robotd.toml（fork packaging/runtime.py:28、123），官方默认 /etc/robot/robotd.toml
+# Config read by robotd: the fork uses --params /etc/robot/feetech-ft5/robotd.toml (fork packaging/runtime.py:28, 123); the official default is /etc/robot/robotd.toml
 ROBOTD_CONFIGS = ("/etc/robot/feetech-ft5/robotd.toml", "/etc/robot/robotd.toml")
-ROBOTD_CFG_S = 30.0       # 多久重读一次
+ROBOTD_CFG_S = 30.0       # how often to reread it
 CPUFREQ_ROOT = "/sys/devices/system/cpu/cpufreq"
 STAND = ("holding", "policy", "walking")
-# 运动模式卡在「等总线」时报的是这一句（fork main.rs:1546-1552；feetech.rs:1011-1049）：标定没过、IMU 没过都报它
+# What motion mode reports when stuck "waiting for the bus" (fork main.rs:1546-1552; feetech.rs:1011-1049): reported both when calibration and when IMU fails
 CALIB_ERR = re.compile(r"calibrat|motion_enabled|calibration file|IMU mounting", re.I)
 
 TIPS = {
@@ -86,20 +86,20 @@ TIPS = {
 }
 TITLES = {"servo": "舵机零位", "imu": "IMU 方向", "commit": "写进主程序", "pad": "配手柄", "estop": "测急停", "walk": "站起来、走几步"}
 ORDER = ("servo", "imu", "commit", "pad", "estop", "walk")
-GO = {"servo": "servos", "imu": "imu", "commit": "commit", "pad": "pad_wizard", "estop": "estop", "walk": "remote"}   # 每一步的「去做」/「重新做」
+GO = {"servo": "servos", "imu": "imu", "commit": "commit", "pad": "pad_wizard", "estop": "estop", "walk": "remote"}   # each step's "Go do it" / "Redo"
 SKIP_CHANGED = {"servo": "舵机零位", "imu": "IMU 方向（或芯片）", "commit": "标定", "estop": "手柄（或主程序版本）", "walk": "标定"}
 COMMIT_TEXT = "把舵机零位、方向、IMU 方向写进主程序。出厂镜像是标定模式；写完会切到运动模式并重启（约 20 秒），以后开机直接就能站、能走，不开网页也行。"
 
-# 「已完成」「跳过」（用户 10-20）：页面上的动作 → 记录里的键；两种互斥
+# "Done" / "Skip" (user on 10-20): page action → record key; the two are mutually exclusive
 KINDS = {"done": "done", "skip": "skipped"}
 OTHER = {"done": "skip", "skip": "done"}
 MARKED_TEXT = {"done": "你标了已完成", "skip": "跳过了（先不做）"}
 MARKED_WORD = {"done": "标了已完成", "skip": "点过跳过"}
 CHANGED_WORD = {"done": "标了已完成", "skip": "跳过"}
-# 要点两次的第二下那句：{q} 换成「跳过」/「标成已完成」（问句），{v} 换成「跳过了」/「标成已完成」（后果）
+# The sentence for the second of two clicks: {q} is replaced by "跳过" / "标成已完成" (skip / mark as done, as a question), {v} by "跳过了" / "标成已完成" (skipped / marked as done, as a consequence)
 ASK_Q = {"done": "标成已完成", "skip": "跳过"}
 ASK_V = {"done": "标成已完成", "skip": "跳过了"}
-# 原来不让跳的几种情况（主程序明说不行 hard、测出了问题 found）：现在都能点，第二下按钮上写后果
+# Cases that previously couldn't be skipped (main program explicitly says no: hard; a problem was found: found): now all clickable, with the consequence written on the second button
 HARD_SERVO = "主程序说标定没做完：{v}鸭子也站不起来"
 HARD_IMU = "主程序没确认 IMU 方向：{v}鸭子也站不起来"
 HARD_STUCK = "主程序不让上力（标定或 IMU 方向没过）：{v}鸭子也站不起来"
@@ -110,11 +110,11 @@ FROZEN_UNDO = "确定取消？在调舵机：清单停在调之前的样子，�
 
 
 def fill(text, kind):
-    """把问句 / 后果里的 {q}、{v} 换成这个动作的说法（用 replace：原因里可能带花括号）。"""
+    """Replace {q}, {v} in the question / consequence with this action's wording (using replace: the reason may contain braces)."""
     return text.replace("{q}", ASK_Q[kind]).replace("{v}", ASK_V[kind]) if text else text
 
 
-# ---------------- 指纹 ----------------
+# ---------------- Fingerprints ----------------
 
 def _joints(calib):
     cal = (calib or {}).get("calibration") if isinstance((calib or {}).get("calibration"), dict) else None
@@ -127,7 +127,7 @@ def _hash(obj):
 
 
 def joints_fp(calib):
-    """15 颗的 zero_raw / direction 的指纹；读不到标定文件回 None。"""
+    """Fingerprint of the 15 servos' zero_raw / direction; returns None if the calibration file can't be read."""
     js = _joints(calib)
     if not js:
         return None
@@ -135,7 +135,7 @@ def joints_fp(calib):
 
 
 def mount_fp(source, quat):
-    """芯片 + 安装方向的指纹（四元数取 4 位小数：同一份文件读两次一定一样）。"""
+    """Fingerprint of chip + mount orientation (quaternion to 4 decimals: reading the same file twice is always identical)."""
     if not isinstance(quat, (list, tuple)) or len(quat) != 4:
         return None
     try:
@@ -145,7 +145,7 @@ def mount_fp(source, quat):
 
 
 def full_fp(bus, calib):
-    """标定指纹：关节 + 现在用的 IMU 方向（站起来 / 走过的记录绑它：标定改过以后要重新站、重新走）。"""
+    """Calibration fingerprint: joints + the IMU orientation in use (stood up / walked records are bound to it: after the calibration changes, stand and walk again)."""
     j = joints_fp(calib)
     source, mount = mount_of(bus, calib)
     m = mount_fp(source, (mount or {}).get("quat"))
@@ -154,11 +154,11 @@ def full_fp(bus, calib):
     return _hash([j, m])
 
 
-# ---------------- Studio 自己的舵机标定记录（servo_ops.py:426-441、612-656、735） ----------------
+# ---------------- Studio's own servo calibration records (servo_ops.py:426-441, 612-656, 735) ----------------
 
 def studio_servo_record(state_dir):
-    """非模拟、没撤销的 eeprom-*.json 里，targets 减 bad 的并集；回 {"ids": set, "time": 最近一份的时间字符串}。
-    撤销会把文件改名成 undone-…（不以 eeprom- 开头，自然跳过）；模拟模式的备份在临时目录，这里看不到。"""
+    """Union of targets minus bad in non-simulated, non-undone eeprom-*.json; returns {"ids": set, "time": time string of the latest one}.
+    Undo renames the file to undone-… (doesn't start with eeprom-, so it's naturally skipped); simulation-mode backups are in a temp directory and not visible here."""
     d = os.path.join(state_dir or ".", "servo-calib")
     ids, latest = set(), None
     try:
@@ -182,7 +182,7 @@ def studio_servo_record(state_dir):
     return {"ids": ids, "time": latest}
 
 
-# ---------------- 主板温度：Studio 自己读（照 fork robotd/src/soc.rs 的算法） ----------------
+# ---------------- Board temperature: read by Studio itself (following the algorithm in fork robotd/src/soc.rs) ----------------
 
 def _read_int(path):
     try:
@@ -193,10 +193,10 @@ def _read_int(path):
 
 
 def read_board(thermal_root=THERMAL_ROOT, cpufreq_root=CPUFREQ_ROOT):
-    """主板温度和降频，跟 robotd health 的 cpu_temp_c / cpu_throttle 同一个算法（fork soc.rs:25-170）：
-    温度取所有 thermal_zone 里最热的（≤ 0 °C 的当坏传感器跳过）；频率取被压得最狠的 policy 的
-    scaling_max_freq / cpuinfo_max_freq；level 取类型名含 cpufreq 的 cooling device 里压得最深的。
-    读不到（不是 Linux、电脑上开发）回 None。"""
+    """Board temperature and throttling, same algorithm as robotd health's cpu_temp_c / cpu_throttle (fork soc.rs:25-170):
+    temperature is the hottest of all thermal_zones (≤ 0 °C is skipped as a bad sensor); frequency is the most throttled policy's
+    scaling_max_freq / cpuinfo_max_freq; level is the deepest among cooling devices whose type name contains cpufreq.
+    Returns None if unreadable (not Linux, development on a computer)."""
     try:
         zones = [e for e in os.listdir(thermal_root)]
     except OSError:
@@ -246,9 +246,9 @@ def read_board(thermal_root=THERMAL_ROOT, cpufreq_root=CPUFREQ_ROOT):
 
 
 def read_battery_shutdown(paths=ROBOTD_CONFIGS):
-    """robotd 配置里 [safety] battery_empty_shutdown 写的是什么：True / False；文件读不到、没写这一项回 None
-    （没写时 robotd 默认是开着的：fork robotd-params lib.rs:1804；但我们按「读不到」处理，页面上说「不会自己坐下」，宁可保守）。
-    按顺序找第一个在的文件（fork 的、官方默认的）。"""
+    """What [safety] battery_empty_shutdown says in the robotd config: True / False; returns None if the file can't be read or the item isn't set
+    (when unset robotd defaults to on: fork robotd-params lib.rs:1804; but we treat it as "unreadable", and the page says "won't sit down by itself", erring on the conservative side).
+    Looks for the first file that exists, in order (the fork's, the official default)."""
     import tomllib
     for path in paths:
         try:
@@ -263,29 +263,29 @@ def read_battery_shutdown(paths=ROBOTD_CONFIGS):
     return None
 
 
-# ---------------- 判一步 ----------------
+# ---------------- Judging a step ----------------
 
 def _num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 def _f1(x):
-    """一位小数；不是数字写「?」（记录文件里可能是 null：代码审查 C1）。"""
+    """One decimal place; non-numbers are written as "?" (the record file may contain null: code review C1)."""
     return f"{x:.1f}" if _num(x) else "?"
 
 
 def _row(key, state, text, when=None, actions=(), note=None, hard=None, found=None, ask=None):
-    """hard：主程序明说这一步不行（标定没做完、IMU 方向没确认、不让上力）——标了鸭子也站不起来，「已完成」「跳过」要点两次。
-    found：做过 / 查过、结果不行（测出了问题，审查 D5）——第一个按钮写「重新做」，标的要点两次。
-    hard / found 是带 {v} 的后果（fill 换成「跳过了」/「标成已完成」）。ask：测急停第二下按钮上的那句（带 {q}、{v}，按情况写：审查 D11）。
-    mark：「已完成」「跳过」两个按钮要不要点两次、第二下写什么（with_mark 填）；marked：这一行现在是用户标的（done / skip）。"""
+    """hard: the main program explicitly says this step isn't OK (calibration not finished, IMU orientation not confirmed, torque not allowed) —— even if marked, the duck can't stand up; "Done" / "Skip" take two clicks.
+    found: done / checked, but the result is bad (a problem was found, review D5) —— the first button says "Redo", and marking takes two clicks.
+    hard / found are consequences with {v} (fill replaces it with "跳过了" / "标成已完成"). ask: the sentence on the second e-stop-test button (with {q}, {v}, worded per situation: review D11).
+    mark: whether the "Done" / "Skip" buttons take two clicks and what the second says (filled by with_mark); marked: this row is currently user-marked (done / skip)."""
     return {"key": key, "n": ORDER.index(key) + 1, "title": TITLES[key], "tip": TIPS[key], "state": state,
             "text": text, "when": when, "note": note, "actions": [{"do": d, "label": lab} for d, lab in actions],
             "hard": hard, "found": found, "ask": ask, "go": GO[key], "mark": None, "marked": None}
 
 
 def header_of(inp):
-    """卡片头上的「连上鸭子」（不编号）。kind：ok / absent / connecting / bench / servo / commissioning / stuck_calib / starting / other。"""
+    """The "连上鸭子" (Connect to the duck) on the card header (unnumbered). kind: ok / absent / connecting / bench / servo / commissioning / stuck_calib / starting / other."""
     bus = inp.get("bus") if isinstance(inp.get("bus"), dict) else None
     if inp.get("bench"):
         return {"ok": False, "kind": "bench", "text": "台架模式：不连主程序，清单不检查"}
@@ -303,14 +303,14 @@ def header_of(inp):
         if wait:
             text = wait["text"]
         elif (inp.get("starting_s") or 0) >= STARTING_LONG_S:
-            # 超过 30 秒还报启动阶段：不再说「还在启动」（10-20 真机：旧 fork 的标定模式永远报 configuring_bus）
+            # Still reporting a startup phase after 30 seconds: stop saying "still starting" (10-20 real hardware: the old fork's commissioning mode always reports configuring_bus)
             text = f"主程序一直报「启动中」，超过 {STARTING_LONG_S:.0f} 秒了：{STILL_STARTING}"
         else:
             text = "主程序还在启动"
         return {"ok": False, "kind": "starting", "text": text, "raw": str(err) if err else None}
     if mode == "commissioning":
-        # 标定模式的实时快照（phase 是 ready / moving / read_error / stop_unconfirmed / power_pending）：主程序起来了。
-        # read_error 也算起来了，只是这一拍读舵机出错：照原样把主程序的原话带出来
+        # Commissioning mode's live snapshot (phase is ready / moving / read_error / stop_unconfirmed / power_pending): the main program is up.
+        # read_error also counts as up, just that reading servos failed this tick: pass along the main program's original message as is
         if phase == "read_error":
             return {"ok": False, "kind": "commissioning", "text": "标定模式：主程序起来了，但读舵机出错（看舵机电源和线）",
                     "raw": str(bus.get("last_cycle_error") or err or "") or None}
@@ -321,8 +321,8 @@ def header_of(inp):
 
 
 def _imu_mount_unverified(bus, calib):
-    """主程序明说 IMU 方向没确认吗：busStatus 的 native.imu_mount_verified 或标定文件 mount.verified 是 False。
-    不知道也当 False（只有主程序明说没确认才拦）。"""
+    """Does the main program explicitly say the IMU orientation isn't confirmed: busStatus's native.imu_mount_verified or the calibration file's mount.verified is False.
+    Unknown also counts as False (only block when the main program explicitly says not confirmed)."""
     native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
     _source, mount = mount_of(bus, calib)
     return native.get("imu_mount_verified") is False or (isinstance(mount, dict) and mount.get("verified") is False)
@@ -335,8 +335,8 @@ def servo_row(inp, rec, head):
         return _row("servo", "unk", "连上主程序才判得出", actions=[("servos", "去舵机页")])
     uncal = (calib or {}).get("uncalibrated_joints")
     if head["kind"] == "stuck_calib":
-        # 只有 IMU 明说没确认、而且关节都标了（uncalibrated_joints 是空列表）时，原因在 IMU：
-        # 舵机行不 hard，照正常逻辑往下判；其余情况照旧 hard。
+        # Only when the IMU is explicitly not confirmed and all joints are calibrated (uncalibrated_joints is an empty list) is the cause in the IMU:
+        # the servo row isn't hard and is judged by normal logic; otherwise hard as before.
         if not (_imu_mount_unverified(bus, calib) and isinstance(uncal, list) and not uncal):
             return _row("servo", "no", "主程序不让上力：标定或 IMU 方向没过（它报的是同一句话，分不出是哪个）",
                         actions=[("servos", "去舵机页")], hard=HARD_STUCK)
@@ -365,8 +365,8 @@ def servo_row(inp, rec, head):
     st = inp.get("studio_servo") or {}
     fp = joints_fp(calib)
     if set(SERVO_IDS) <= set(st.get("ids") or ()):
-        # 舵机页标过 15 颗：第一次看到时记下当时的关节指纹（servo_studio，_track 里记），之后指纹变了就要重新核对
-        # （判法表：「并且指纹没变」，代码审查 C9-3）
+        # Servo page calibrated all 15: record the joint fingerprint at first sight (servo_studio, recorded in _track); after that, if the fingerprint changes it must be checked again
+        # (criteria table: "and the fingerprint hasn't changed", code review C9-3)
         ss = rec.get("servo_studio") if isinstance(rec.get("servo_studio"), dict) else None
         if ss and ss.get("src") == st.get("time") and ss.get("fp") == fp:
             return _row("servo", "ok", "舵机页标过；主程序文件里 15 颗都是 2048", when=st.get("time"))
@@ -379,7 +379,7 @@ def servo_row(inp, rec, head):
     if c:
         return _row("servo", "todo", "核对以后主程序的标定文件改过了：确实校过就点「已完成」，或者在舵机页标一遍",
                     actions=[("servos", "去舵机页")])
-    # 以前这里还有个「已经校过，核对一下」：现在三个按钮里的「已完成」就是它（用户 10-20：去做、已完成、跳过）
+    # There used to be an "已经校过，核对一下" (Already calibrated, check it) here: now "Done" among the three buttons is that (user on 10-20: Go do it, Done, Skip)
     return _row("servo", "todo", "主程序文件里写着标过（可能是随包的一号鸭数值或手改的），Studio 这边没有记录："
                 "以前用 Studio 的舵机页校过就点「已完成」", actions=[("servos", "去舵机页")])
 
@@ -390,12 +390,12 @@ def imu_row(inp, rec, head):
     if head["kind"] in ("absent", "connecting", "bench"):
         return _row("imu", "unk", "连上主程序才判得出", actions=[("imu", "去 IMU 页")])
     source, mount = mount_of(bus, calib)
-    # stuck_calib 不在这里拦：主程序明说 IMU 没确认由下面两个 HARD_IMU 分支拦，否则照正常逻辑判（能跳过）
+    # stuck_calib isn't blocked here: the main program explicitly saying IMU not confirmed is blocked by the two HARD_IMU branches below, otherwise judged by normal logic (skippable)
     if head["kind"] == "commissioning" and bus.get("imu_mount_verified") is False:
         return _row("imu", "no", "标定模式下主程序说 IMU 方向没确认", actions=[("imu", "去 IMU 页")], hard=HARD_IMU)
     native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
     if native.get("imu_mount_verified") is False:
-        # busStatus 明说没确认：标定状态读不到也是「没做」，不是「?」（代码审查 C4；待办那条也就不该被藏）
+        # busStatus explicitly says not confirmed: an unreadable calibration status is also "not done", not "?" (code review C4; so that to-do item shouldn't be hidden either)
         return _row("imu", "no", "主程序说 IMU 的安装方向还没确认：装歪了走路会往前冲", actions=[("imu", "去 IMU 页")],
                     hard=HARD_IMU)
     if mount and mount.get("verified") is False:
@@ -418,8 +418,8 @@ def imu_row(inp, rec, head):
 
 
 def _commit_complete(bus, calib):
-    """主程序那边的完成判据（任务 11）：motion_enabled = true、15 颗都 calibrated、正在用的 IMU 那份 verified。
-    从 calibration-status / busStatus 读，跟 imu_row 用的是同一条 mount_of。"""
+    """The main program's completion criteria (task 11): motion_enabled = true, all 15 servos calibrated, and the IMU entry in use verified.
+    Read from calibration-status / busStatus, using the same mount_of as imu_row."""
     cal = (calib or {}).get("calibration") if isinstance(calib, dict) else None
     cal = cal if isinstance(cal, dict) else (calib if isinstance(calib, dict) else {})
     js = _joints(calib)
@@ -430,7 +430,7 @@ def _commit_complete(bus, calib):
 
 
 def commit_row(inp, rec, head):
-    """第 3 步「写进主程序」：完成看主程序文件；没完成时把 CommitService 的准备情况逐项带出去。"""
+    """Step 3 "write to the main program": completion is judged by the main program's file; when not done, bring out CommitService's readiness item by item."""
     bus = inp.get("bus") or {}
     calib = inp.get("calib")
     cv = inp.get("commit") if isinstance(inp.get("commit"), dict) else None
@@ -493,7 +493,7 @@ def pad_row(inp, rec, head):
 
 
 def _current_pad(pad):
-    """现在的手柄 (mac, name)：连着的那只；旁路看到的；都没有时，唯一配过的那只。读不到回 (None, None)。"""
+    """The current gamepad (mac, name): the connected one; the one seen by the side channel; if neither, the only one ever paired. Returns (None, None) if unreadable."""
     if pad is None:
         return None, None
     a = pad.get("active") or {}
@@ -509,20 +509,20 @@ def _current_pad(pad):
 
 
 def _no_physical_pad(pad):
-    """确定没有实体手柄（configd 读得到、一个都没配、旁路也没看到）：只用网页手柄。读不到 configd 不算。"""
+    """Definitely no physical gamepad (configd readable, none paired, side channel saw none either): only the web gamepad is used. configd unreadable doesn't count."""
     return bool(pad and pad.get("known") and not pad.get("attached")
                 and not [p for p in pad.get("pads") or [] if isinstance(p, dict) and p.get("paired")])
 
 
 def _many_unconnected(pad):
-    """配过不止一只手柄、一只都没连：认不出「现在的手柄」是哪只（审查 D11：这时写「先连上一只手柄再测」）。"""
+    """More than one gamepad paired and none connected: can't tell which is "the current gamepad" (review D11: in this case say "connect a gamepad first, then test")."""
     if not pad or pad.get("attached") or (pad.get("active") or {}).get("mac"):
         return 0
     paired = [p for p in pad.get("pads") or [] if isinstance(p, dict) and p.get("paired")]
     return len(paired) if len(paired) >= 2 and not any(p.get("connected") for p in paired) else 0
 
 
-# 测急停的「已完成」「跳过」都要点两次（审查 D11）；{q}、{v} 由 fill 换成这个动作的说法
+# Both "Done" and "Skip" for the e-stop test take two clicks (review D11); {q}, {v} are replaced by fill with this action's wording
 ESTOP_ASK = {"never": "确定{q}？没测过：手柄 Select 能不能停住它没验过",
              "web": "确定{q}？只用网页的话急停是空格 / 顶上红按钮，以后配了手柄要再测",
              "pad": "确定{q}？换了手柄：这只手柄的 Select 没测过",
@@ -538,7 +538,7 @@ def estop_row(inp, rec, head):
     bad_why = f"{first_bad.get('label')}：{first_bad.get('why') or '×'}" if first_bad else None
     many = _many_unconnected(pad)
     if r is None:
-        # 没配实体手柄、只用网页：网页上的急停是空格 / 顶上红按钮（跟遥控卡的卸力同一条路），不经过手柄，用不着测（用户 10-18）
+        # No physical gamepad paired, web only: the web e-stop is space / the red button at the top (same path as the remote card's relax), doesn't go through a gamepad, no test needed (user on 10-18)
         web = _no_physical_pad(pad)
         web_only = "。只用网页的话：空格就是急停，跟顶上红按钮同一条路，不用测；可以跳过这步" if web else ""
         now = f"（配过 {many} 只手柄、现在都没连：先连上一只手柄再测）" if many else (f"（现在测不了：{bad_why}）" if bad_why else "")
@@ -577,7 +577,7 @@ def walk_row(inp, rec, head):
         return _row("walk", "unk", ("站起来过、走过" if w else "站起来过") + "；标定读不到，没法核对改没改过", when=last, actions=go)
     s_ok = s is not None and s.get("fp") == fp
     w_ok = w is not None and w.get("fp") == fp
-    if w_ok:                                   # 用现在的标定走过，当然也站起来过
+    if w_ok:                                   # walked with the current calibration, so of course it has stood up too
         return _row("walk", "ok", "站起来过、走过", when=w.get("at"))
     if (s is not None and not s_ok) or w is not None:
         return _row("walk", "todo", "标定改过以后还没" + ("站过、走过" if not s_ok else "走过"), when=last, actions=go)
@@ -585,7 +585,7 @@ def walk_row(inp, rec, head):
 
 
 def step_fp(key, inp):
-    """(这一步的跳过绑不绑指纹, 现在的指纹)。跟正式记录绑同样的东西；读不到是 None。"""
+    """(whether this step's skip is bound to a fingerprint, the current fingerprint). Bound to the same things as the formal record; None if unreadable."""
     bus = inp.get("bus") or {}
     calib = inp.get("calib")
     if key == "servo":
@@ -594,25 +594,25 @@ def step_fp(key, inp):
         source, mount = mount_of(bus, calib)
         return True, mount_fp(source, (mount or {}).get("quat"))
     if key == "commit":
-        return True, inp.get("fp")             # 标定（关节 + IMU 方向）改过：跳过作废、要重写
+        return True, inp.get("fp")             # calibration (joints + IMU orientation) changed: skip is void, must rewrite
     if key == "estop":
         mac, _ = _current_pad(inp.get("pad"))
         if mac is None and _no_physical_pad(inp.get("pad")):
-            mac = "无实体手柄"            # 只用网页：之后配上手柄，指纹就变了，跳过作废、要测一次
+            mac = "无实体手柄"            # web only (string = "no physical gamepad"): once a gamepad is paired later, the fingerprint changes, the skip is void, and a test is needed
         build = bus.get("build")
         return True, (_hash([mac, build]) if mac and build else None)
     if key == "walk":
         return True, inp.get("fp")
-    return False, None                          # 配手柄：不绑
+    return False, None                          # pair gamepad: not bound
 
 
 FP_WHAT = {"servo": "读不到主程序的标定文件", "imu": "读不到主程序存的 IMU 方向", "commit": "读不到标定",
            "estop": "读不到现在连的是哪只手柄（或主程序版本）", "walk": "读不到标定"}
-BOUND = ("servo", "imu", "commit", "estop", "walk")      # 标记要绑指纹的步（配手柄不绑）
+BOUND = ("servo", "imu", "commit", "estop", "walk")      # steps whose marks are bound to a fingerprint (pair gamepad isn't)
 
 
 def _marks(rec, key):
-    """这一步的「已完成」「跳过」记录：{kind: 记录}（正常最多一种，两种都有时「已完成」优先）。"""
+    """This step's "Done" / "Skip" records: {kind: record} (normally at most one; if both exist, "Done" takes priority)."""
     out = {}
     for kind, rk in KINDS.items():
         d = rec.get(rk) if isinstance(rec.get(rk), dict) else {}
@@ -622,9 +622,9 @@ def _marks(rec, key):
 
 
 def mark_offer(row, bound, fp):
-    """「已完成」「跳过」两个按钮（用户 10-20：每一行任何时候都能点）：要不要点两次、第二下按钮上写什么。
-    原来不让跳的几种都要点两次：测出了问题（found）> 主程序明说不行（hard）> 测急停（按情况那句，审查 D11）>
-    读不到（?）> 指纹读不到。ack 是这一行有的那几种问题：标的时候存进记录，确认过的问题以后不再作废它。"""
+    """The two buttons "Done" and "Skip" (user on 10-20: every row can be clicked at any time): whether two clicks are needed and what the second button says.
+    The cases that previously couldn't be skipped all take two clicks: a problem was found (found) > the main program explicitly says no (hard) > test e-stop (the situation-specific sentence, review D11) >
+    unreadable (?) > fingerprint unreadable. ack is the kinds of problems this row has: stored in the record when marking, and a confirmed problem won't void it later."""
     key = row["key"]
     acks = [k for k in ("found", "hard") if row.get(k)]
     if row["state"] == "unk":
@@ -652,10 +652,10 @@ def mark_offer(row, bound, fp):
 
 
 def with_mark(row, inp, rec):
-    """把用户标的「已完成」「跳过」套到一行上。Studio 自己有记录、判成 ✓ 的不变（只给「重新做」）。
-    有标记、指纹没变 → ✓「你标了已完成」/ ↷「跳过了」（底下真实的情况放进 note）；指纹变了 → ●「标了已完成以后 xx 改过了」。
-    标的时候没确认过的问题后来出现了：主程序明说不行（hard）→ 标的不管用；测出了问题（found）→ 作废（void：tick 删掉它）。
-    没标的行带上 mark：两个按钮要不要点两次、第二下那句（mark_offer）。"""
+    """Apply the user's "Done" / "Skip" mark to a row. Rows backed by Studio's own record and judged ✓ stay unchanged (only offer "Redo").
+    Marked, fingerprint unchanged → ✓ "你标了已完成" (you marked it done) / ↷ "跳过了" (skipped) (the real situation underneath goes in note); fingerprint changed → ● "标了已完成以后 xx 改过了" (xx changed after you marked it done).
+    A problem not confirmed at marking time shows up later: main program explicitly says no (hard) → the mark doesn't help; a problem was found (found) → void (void: tick deletes it).
+    Unmarked rows carry mark: whether the two buttons take two clicks, and the second sentence (mark_offer)."""
     key = row["key"]
     if row["state"] == "ok":
         return row
@@ -674,9 +674,9 @@ def with_mark(row, inp, rec):
             row = dict(row, state="todo", text=f"{CHANGED_WORD[kind]}以后{SKIP_CHANGED[key]}改过了：{row['text']}")
             continue
         out = _row(key, "ok" if kind == "done" else "skip", MARKED_TEXT[kind], when=m.get("at"))
-        out["note"] = row["text"] if row["state"] != "unk" else None   # 底下真实的情况，页面小字写
+        out["note"] = row["text"] if row["state"] != "unk" else None   # the real situation underneath, shown in small print on the page
         out["marked"] = kind
-        for k in ("desc", "commit"):                                  # 第 3 步那张卡片点开还看得到准备情况
+        for k in ("desc", "commit"):                                  # step 3's card still shows readiness when expanded
             if k in row:
                 out[k] = row[k]
         return out
@@ -685,7 +685,7 @@ def with_mark(row, inp, rec):
 
 
 def evaluate(inp, rec):
-    """纯函数：inp 是 Onboarding._inputs() 收好的现场，rec 是记录。回给页面的整张卡。"""
+    """Pure function: inp is the context collected by Onboarding._inputs(), rec is the records. Returns the whole card for the page."""
     head = header_of(inp)
     rows = [servo_row(inp, rec, head), imu_row(inp, rec, head), commit_row(inp, rec, head),
             pad_row(inp, rec, head), estop_row(inp, rec, head), walk_row(inp, rec, head)]
@@ -696,7 +696,7 @@ def evaluate(inp, rec):
             "marked_n": sum(1 for r in rows if r.get("marked") == "done"), "frozen": False}
 
 
-# ---------------- 记录文件逐条校验（代码审查 C1：合法 JSON、但某一条类型不对，不能让整张清单每 0.5 秒出错一次） ----------------
+# ---------------- Validate record file entries one by one (code review C1: valid JSON but one entry of the wrong type must not make the whole checklist error every 0.5 seconds) ----------------
 
 def _opt(x, *types):
     return x is None or (isinstance(x, types) and not isinstance(x, bool))
@@ -719,7 +719,7 @@ CHECKS = {
 
 
 def clean_records(data):
-    """(能用的记录, 丢掉的 [(键, 原因)])。认识的键逐条按 CHECKS 查；pads_seen 只留 字符串 → 字符串；不认识的键原样留着（以后的版本加的）。"""
+    """(usable records, dropped [(key, reason)]). Known keys are checked one by one per CHECKS; pads_seen keeps only string → string; unknown keys are kept as is (added by future versions)."""
     out, bad = {}, []
     for k, v in data.items():
         if k == "v":
@@ -731,8 +731,8 @@ def clean_records(data):
                 bad.append((k, f"不是对象（{type(v).__name__}）"))
             continue
         if k in KINDS.values():
-            # skipped.<步> / done.<步>：at 必须是数字（审查 D10）；fp 是字符串，或者 null（标的时候指纹读不到：
-            # tick 第一次读到时绑上，绑上以后指纹变了照样作废）；ack 是字符串列表（可以没有）
+            # skipped.<step> / done.<step>: at must be a number (review D10); fp is a string, or null (fingerprint unreadable when marking:
+            # bound the first time tick reads it; once bound, a fingerprint change still voids it); ack is a list of strings (optional)
             if not isinstance(v, dict):
                 bad.append((k, f"不是对象（{type(v).__name__}）"))
                 continue
@@ -763,20 +763,20 @@ def clean_records(data):
 
 
 def error_view(why):
-    """判清单整体出错：六行都写「?」和原因（不要永远「还在判…」，代码审查 C1）。"""
+    """Judging the whole checklist failed: all six rows show "?" and the reason (not "还在判…" (still judging…) forever, code review C1)."""
     rows = [_row(k, "unk", f"Studio 判这一步时出错：{why}") for k in ORDER]
     return {"header": {"ok": False, "kind": "error", "text": "清单判的时候出错（看日志里「系统」那几行）", "raw": why},
             "rows": rows, "next": None, "all_done": False, "skipped_n": 0, "marked_n": 0, "frozen": False}
 
 
-# ---------------- 主体 ----------------
+# ---------------- Main ----------------
 
 class Onboarding:
     def __init__(self, state_dir, log, clock=time.monotonic, wall=time.time):
         self.state_dir, self.log = state_dir, log
         self.clock, self.wall = clock, wall
         self._lk = threading.Lock()
-        self._save_lk = threading.Lock()      # 整个写盘过程拿着它：两处同时存时旧的不会后落盘把新的盖掉（代码审查 C9-2）
+        self._save_lk = threading.Lock()      # held through the whole disk write: when two saves happen at once, the old one can't land later and overwrite the new one (code review C9-2)
         self.rec = {}
         self._dirty = False
         self._view = None
@@ -785,25 +785,25 @@ class Onboarding:
         self._walk_last = None
         self._studio = {"ids": set(), "time": None}
         self._studio_at = -1e9
-        self._studio_mtime = None             # servo-calib 目录的 mtime：没变就不重新读文件
-        self._eval_err = None                 # 上一次判清单出错的原因（同一种错只记一次）
-        self._servo = None                    # 最近见到的舵机会话（取消跳过没传时用它判「清单冻着」）
-        self.commit_service = None            # studio/commit.py 的 CommitService（app 接上；第 3 步的准备情况从这里来）
-        self.battery_shutdown = None          # robotd 配置的 [safety] battery_empty_shutdown：True / False / None（读不到）
+        self._studio_mtime = None             # mtime of the servo-calib directory: don't reread files if unchanged
+        self._eval_err = None                 # reason the last checklist judgment failed (the same error is only logged once)
+        self._servo = None                    # the most recently seen servo session (used to judge "checklist frozen" when cancel-skip isn't given one)
+        self.commit_service = None            # CommitService from studio/commit.py (hooked up by app; step 3's readiness comes from here)
+        self.battery_shutdown = None          # [safety] battery_empty_shutdown from the robotd config: True / False / None (unreadable)
         self._cfg_at = -1e9
         self.robotd_configs = ROBOTD_CONFIGS
-        self.cpu_hot = False                  # 主板「有点热」带回差（审查 O8）
-        self.board = None                     # Studio 自己读的主板温度（robotd 不报时兜底）
+        self.cpu_hot = False                  # board "a bit hot", with hysteresis (review O8)
+        self.board = None                     # board temperature read by Studio itself (fallback when robotd doesn't report)
         self._board_ok = os.path.isdir(THERMAL_ROOT)
         self.load()
 
-    # ---- 文件 ----
+    # ---- Files ----
 
     def path(self):
         return os.path.join(self.state_dir or ".", ONBOARD_FILE)
 
     def load(self):
-        """读记录。文件坏了：改名成 .bad 留着（以后查得到），当空的，记一行 warn——不能让总览因为它崩（审查 O6）。"""
+        """Read the records. If the file is broken: rename it to .bad and keep it (so it can be inspected later), treat as empty, log a warn —— the overview must not crash because of it (review O6)."""
         p = self.path()
         try:
             with open(p, encoding="utf-8") as f:
@@ -829,7 +829,7 @@ class Onboarding:
                           hint="多半是手改过或者旧版本写的；那一步会按「没做」重新判，做一次就会重新记")
 
     def save(self):
-        """整份写回（先写临时文件再改名，写一半断电不会把旧的弄坏）。在线程里调；出错只记日志，不抛。"""
+        """Write the whole thing back (write a temp file first, then rename, so a power loss halfway doesn't corrupt the old one). Called in a thread; errors are only logged, not raised."""
         with self._save_lk:
             return self._save_locked()
 
@@ -855,7 +855,7 @@ class Onboarding:
                 raise
         except OSError as e:
             with self._lk:
-                self._dirty = True              # 下一拍再试
+                self._dirty = True              # retry next tick
             self.log.warn("上手清单的记录没存进去", cat="系统", step=self.path(), raw=f"{type(e).__name__}: {e}",
                           hint="state 目录满了或者没权限；不影响站和走，下次再试")
             return False
@@ -871,21 +871,21 @@ class Onboarding:
             self.log.info(say, cat=cat, dedup=False)
         return True
 
-    # ---- 外面来的记录 ----
+    # ---- Records coming from outside ----
 
     def note_estop(self, r):
-        """测急停过了（pad.py 测急停线程里调：只改内存）。r = {ms, mac, name, build}。"""
+        """E-stop test passed (called from the e-stop test thread in pad.py: only changes memory). r = {ms, mac, name, build}."""
         try:
             rec = {"at": self.wall(), "ms": r.get("ms"), "mac": (str(r["mac"]).upper() if r.get("mac") else None),
                    "name": r.get("name"), "build": r.get("build")}
             self._put("estop", rec, say=f"上手清单：记下「测急停过了」（{rec['name'] or rec['mac'] or '手柄'}，主程序 {rec['build']}）",
                       cat="安全")
             return True
-        except Exception:  # noqa: BLE001 —— 测急停线程里，记不上也不能出事
+        except Exception:  # noqa: BLE001 —— in the e-stop test thread, failing to record must not cause trouble
             return False
 
     def note_imu_check(self, c):
-        """IMU 页完整站着校完（imu.py _check 调）：记最近一次核对，不管够不够近（不够近清单写「差 x°」）。"""
+        """Complete standing calibration on the IMU page (called by imu.py _check): record the latest check, whether close enough or not (if not, the checklist says "差 x°" (off by x°))."""
         rec = {"at": self.wall(), "source": c.get("source"), "mount_fp": mount_fp(c.get("source"), c.get("quat")),
                "diff_deg": c.get("diff_deg"), "tilt_deg": c.get("tilt_deg"), "ok": bool(c.get("ok")), "by": c.get("by")}
         if rec["mount_fp"] is None:
@@ -894,7 +894,7 @@ class Onboarding:
                          cat="IMU") or True
 
     def confirm_servo(self, rd, by=None):
-        """「已经校过，核对一下」：主程序文件里 15 颗都标了、zero_raw 全是 2048，才记一笔（指纹绑关节）。不能记就回原因。"""
+        """The "Already calibrated, check it" action: only recorded if all 15 servos are calibrated in the main program's file and zero_raw are all 2048 (fingerprint bound to joints). If it can't be recorded, return the reason."""
         calib = fresh_calib(rd)
         js = _joints(calib)
         if not js:
@@ -912,9 +912,9 @@ class Onboarding:
         return True, None
 
     def mark(self, step, kind, rd, pad=None, servo=None, by=None, confirmed=False):
-        """「已完成」（kind=done，记 done.<步>）/「跳过」（kind=skip，记 skipped.<步>）。按现在的情况重判一遍：
-        要点两次的（主程序明说不行、读不到、测出了问题、测急停、指纹读不到、调舵机时）没带 confirmed 回 (False, 第二下那句)——
-        页面的两步确认不能只靠前端。记下 {at, by, fp, ack}：ack 是第二下确认过的那几种问题；两种标记互斥。"""
+        """Mark "Done" (kind=done, records done.<step>) / "Skip" (kind=skip, records skipped.<step>). Rejudge against the current situation:
+        cases needing two clicks (main program explicitly says no, unreadable, a problem was found, test e-stop, fingerprint unreadable, while tuning servos) without confirmed return (False, the second sentence) ——
+        the page's two-step confirmation can't rely on the front end alone. Record {at, by, fp, ack}: ack is the kinds of problems confirmed by the second click; the two marks are mutually exclusive."""
         if step not in ORDER:
             return False, f"不认识的步骤：{step}"
         if kind not in KINDS:
@@ -936,7 +936,7 @@ class Onboarding:
         offer = row.get("mark") or {}
         ask = (offer.get(kind) or {}).get("ask")
         if inp["servo_session"] and not ask:
-            ask = fill(FROZEN_ASK, kind)             # 调舵机时清单冻着：标了要交还以后才显示（审查 D11 的冻结，现在能点了）
+            ask = fill(FROZEN_ASK, kind)             # checklist frozen while tuning servos: a mark only shows after handback (review D11's freeze, now clickable)
         if ask and confirmed is not True:
             return False, f"要点两次确认：{ask}"
         bound, fp = step_fp(step, inp)
@@ -961,13 +961,13 @@ class Onboarding:
         return self.mark(step, "done", rd, pad, servo, by, confirmed)
 
     def unmark(self, step, kind, by=None, servo=None, confirmed=False):
-        """「取消跳过」/「取消」（已完成的）：删掉那条记录，那一行回到按真实情况判。
-        调舵机时清单冻着：要点两次（取消了要交还以后才显示），没带 confirmed 回 (False, 那句)。"""
+        """The "取消跳过" (Cancel skip) / "Cancel" (for done): delete that record, and the row goes back to being judged by the real situation.
+        Checklist frozen while tuning servos: takes two clicks (a cancel only shows after handback); without confirmed return (False, that sentence)."""
         if step not in ORDER:
             return False, f"不认识的步骤：{step}"
         if kind not in KINDS:
             return False, f"不认识的标法：{kind}"
-        sv = servo if servo is not None else self._servo      # 没传就看 tick / mark 最近见到的那个舵机会话
+        sv = servo if servo is not None else self._servo      # if not passed, use the servo session most recently seen by tick / mark
         if sv is not None and getattr(sv, "state", None) in ("open", "opening") and confirmed is not True:
             return False, f"要点两次确认：{FROZEN_UNDO}"
         with self._lk:
@@ -983,22 +983,22 @@ class Onboarding:
         return self.unmark(step, "skip", by, servo, confirmed)
 
     def user_mark(self, step):
-        """第 step 步现在算数的是不是用户自己标的：done（「已完成」）/ skip（「跳过」）/ None。
-        commit.py 的准备情况用（第 1 步标了 → 「舵机零位」算满足）；读的是上一拍判好的缓存（tick 每 0.5 秒）。"""
+        """Whether what currently counts for step `step` was marked by the user: done ("Done") / skip ("Skip") / None.
+        Used by commit.py's readiness (step 1 marked → "servo zero positions" counts as satisfied); reads the cache judged on the previous tick (tick every 0.5 seconds)."""
         rows = (self._view or {}).get("rows") or []
         r = next((x for x in rows if isinstance(x, dict) and x.get("key") == step), None)
         return r.get("marked") if r else None
 
-    # ---- 读文件：在线程里（app 用 asyncio.to_thread 调），tick 只用缓存（代码审查 C9-1） ----
+    # ---- File reading: in a thread (app calls it with asyncio.to_thread), tick only uses the cache (code review C9-1) ----
 
     def need_board(self, rd):
-        """robotd 没报温度（调试模式、等总线、过期）时才要 Studio 自己读 /sys/class/thermal。在事件循环里调（只看内存）。"""
+        """Studio only needs to read /sys/class/thermal itself when robotd doesn't report temperature (debug mode, waiting for bus, stale). Called in the event loop (only looks at memory)."""
         ha = rd.health.age()
         h = rd.health.value if ha is not None and ha <= MAX_AGE["health"] else None
         return self._board_ok and not (isinstance(h, dict) and _num(h.get("cpu_temp_c")))
 
     def io(self, board=False, now=None):
-        """在线程里调：servo-calib 目录（mtime 变了、或者 10 秒到了才重读）、主板温度（board=True 才读）。不抛。"""
+        """Called in a thread: servo-calib directory (reread only if mtime changed or 10 seconds passed), board temperature (only read if board=True). Doesn't raise."""
         now = self.clock() if now is None else now
         try:
             d = os.path.join(self.state_dir or ".", "servo-calib")
@@ -1009,7 +1009,7 @@ class Onboarding:
             if mt != self._studio_mtime or now - self._studio_at >= STUDIO_SCAN_S:
                 self._studio = studio_servo_record(self.state_dir)
                 self._studio_mtime, self._studio_at = mt, now
-        except Exception:  # noqa: BLE001 —— 读不到就当没有记录
+        except Exception:  # noqa: BLE001 —— if unreadable, treat as no records
             pass
         if board:
             try:
@@ -1022,7 +1022,7 @@ class Onboarding:
             self._cfg_at = now
             self.battery_shutdown = read_battery_shutdown(self.robotd_configs)
 
-    # ---- 每 0.5 秒一次 ----
+    # ---- Once every 0.5 seconds ----
 
     def _inputs(self, rd, pad, servo, now):
         bus = rd.bus.value if isinstance(rd.bus.value, dict) else None
@@ -1031,16 +1031,16 @@ class Onboarding:
         if pad is not None:
             try:
                 pv = pad.onboard_view()
-            except Exception as e:  # noqa: BLE001 —— 手柄后端出错：这一行写「读不到」，别把整张卡弄没
+            except Exception as e:  # noqa: BLE001 —— gamepad backend error: this row says "unreadable", don't make the whole card disappear
                 pv = {"known": False, "error": f"{type(e).__name__}: {e}", "pads": []}
         return {"bench": getattr(rd, "addr", None) == "none", "present": rd.present, "bus": bus, "calib": calib,
                 "servo_session": servo is not None and getattr(servo, "state", None) in ("open", "opening"),
                 "pad": pv, "studio_servo": self._studio, "fp": full_fp(bus, calib),
-                # starting_since 是轮询按真的钟记的：这里也用真的钟（测试里 tick 的 now 是拨出来的）
+                # starting_since is recorded by polling on the real clock: use the real clock here too (in tests tick's now is set manually)
                 "commit": self._commit_view(rd, servo), "starting_s": starting_secs(rd, bus)}
 
     def _commit_view(self, rd, servo):
-        """第 3 步的准备情况（CommitService.view）。读不出来只让这一步显示「?」，别把整张卡弄没。"""
+        """Step 3's readiness (CommitService.view). If it can't be read, only this step shows "?"; don't make the whole card disappear."""
         svc = self.commit_service
         if svc is None:
             return None
@@ -1050,8 +1050,8 @@ class Onboarding:
             return {"ready": False, "items": [], "job": None, "error": f"{type(e).__name__}: {e}"}
 
     def tick(self, rd, pad=None, servo=None, now=None):
-        """判一遍、记该记的（只改内存，不读文件）。回 True = 记录变了，调用方在线程里 save()。
-        主板温度的回差先算、单独 try：判清单出错不能让它停在旧值（代码审查 C1）。"""
+        """Judge once and record what should be recorded (only changes memory, doesn't read files). Returns True = records changed; the caller save()s in a thread.
+        The board-temperature hysteresis is computed first, in its own try: a checklist judgment error must not leave it stuck at the old value (code review C1)."""
         now = self.clock() if now is None else now
         if servo is not None:
             self._servo = servo
@@ -1070,12 +1070,12 @@ class Onboarding:
             if not inp["servo_session"]:
                 self._void_marks(v)
             if inp["servo_session"] and self._view is not None and self._view["header"].get("kind") != "error":
-                # 在舵机页调舵机：主程序按计划停着，各步保留上一次的显示、变灰（审查判法表「在调舵机」一行）。
-                # 「已完成」「跳过」「取消」照样能点，但要点两次：第二下写「要等交还以后才显示」（frozen_ask）
+                # Tuning servos on the servo page: the main program is stopped as planned, each step keeps its last display, grayed out (the "tuning servos" row of the review criteria table).
+                # "Done", "Skip", "Cancel" can still be clicked, but take two clicks: the second says "要等交还以后才显示" (only shows after handback) (frozen_ask)
                 v = dict(self._view, header=v["header"], frozen=True,
                          frozen_ask={"done": fill(FROZEN_ASK, "done"), "skip": fill(FROZEN_ASK, "skip"), "undo": FROZEN_UNDO})
             self._eval_err = None
-        except Exception as e:  # noqa: BLE001 —— 清单出错：五行写「?」和原因，记一行（同一种错只记一次）
+        except Exception as e:  # noqa: BLE001 —— checklist error: the rows show "?" and the reason, log one line (the same error only once)
             why = f"{type(e).__name__}: {e}"[:200]
             if why != self._eval_err:
                 self._eval_err = why
@@ -1087,8 +1087,8 @@ class Onboarding:
             return self._dirty
 
     def _void_marks(self, v):
-        """测出了问题的行（found），之前没确认过这个问题的「跳过」「已完成」作废：从记录里删掉、记一行（审查 D5）。
-        页面这一拍已经按问题显示了。标的时候第二下确认过这个问题的（ack 里有 found）不动。"""
+        """Rows where a problem was found (found): "Skip" / "Done" marks that didn't previously confirm this problem are voided: deleted from the records, one line logged (review D5).
+        The page already shows the problem this tick. Marks whose second click confirmed this problem (found in ack) are left alone."""
         for kind, rk in KINDS.items():
             gone = [r for r in v["rows"] if kind in (r.get("void") or ())]
             if not gone:
@@ -1102,7 +1102,7 @@ class Onboarding:
                       say="上手清单：" + "、".join(f"{r['title']}的{word}作废（{fill(r['found'], kind)}）" for r in gone))
 
     def _bind_marks(self, inp):
-        """标的时候指纹读不到（记的是 null）：第一次读到时绑上现在的指纹，之后变了照样作废（照 C2：读不到不作废）。"""
+        """Fingerprint was unreadable at marking time (recorded null): bind the current fingerprint the first time it's read; after that a change still voids it (per C2: unreadable doesn't void)."""
         for kind, rk in KINDS.items():
             with self._lk:
                 d = dict(self.rec.get(rk) or {}) if isinstance(self.rec.get(rk), dict) else {}
@@ -1119,16 +1119,16 @@ class Onboarding:
                 self._put(rk, d, cat="校准", say=f"上手清单：{'、'.join(named)}的{word}标的时候读不到指纹，现在读到了、绑上")
 
     def _track(self, rd, inp, now):
-        """站起来过、走过、配过哪些手柄（只看 Studio 自己收到的状态：robot.state 要有页面看着才推）。"""
+        """Stood up, walked, which gamepads were paired (only from the state Studio itself receives: robot.state is only pushed while a page is watching)."""
         bus = inp["bus"] or {}
         native = bus.get("native") if isinstance(bus.get("native"), dict) else {}
-        # 数据新不新看真的钟（Sample 记的是 monotonic）；站了多久、走了多久看 now（测试里能拨）。新鲜度跟 state.MAX_AGE 一样
+        # Data freshness uses the real clock (Sample records monotonic); how long it stood / walked uses now (adjustable in tests). Freshness same as state.MAX_AGE
         pa, sa = rd.policies.age(), rd.state.age()
         pol = rd.policies.value if pa is not None and pa <= MAX_AGE["policies"] else None
         st = rd.state.value if sa is not None and sa <= MAX_AGE["state"] else None
         pose = posture(rd.present, inp["bus"], pol, st)
-        # 指纹读不到（robotd 刚重启、刚起来、标定读失败在重试）：不记、不覆盖带指纹的旧记录——不然标定读回来以后
-        # 第 5 步会变成「标定改过以后还没站过」（代码审查 C2）。站的计时、走的累计照样算，读到了马上记
+        # Fingerprint unreadable (robotd just restarted, just came up, calibration read failed and retrying): don't record, don't overwrite the old record that has a fingerprint —— otherwise once the calibration reads back
+        # step 5 would become "standing not done since calibration changed" (code review C2). Standing time and walking accumulation still count, and it's recorded as soon as it's readable
         fp = inp["fp"]
         if pose in STAND and native.get("torque_state_confirmed") is True:
             if self._stand_since is None:
@@ -1149,7 +1149,7 @@ class Onboarding:
                 self._put("walked", {"at": self.wall(), "fp": fp}, say="上手清单：记下「走过」", cat="手柄")
         else:
             self._walk_last = None
-        # 舵机页标过 15 颗、主程序文件里也都是 2048：记下这时的关节指纹，之后变了要重新核对（代码审查 C9-3）
+        # Servo page calibrated all 15 and the main program file is all 2048 too: record the joint fingerprint at this point; if it changes later it must be checked again (code review C9-3)
         stu = inp["studio_servo"] or {}
         js = _joints(inp["calib"])
         jfp = joints_fp(inp["calib"])
@@ -1169,8 +1169,8 @@ class Onboarding:
             self._put("pads_seen", seen)
 
     def _board_tick(self, rd):
-        """主板温度：回差（≥ 80 °C 亮、降到 77 °C 以下才收）；robotd 不报时用 Studio 自己读的（io() 在线程里读好的
-        /sys/class/thermal，鸭子上才有）。"""
+        """Board temperature: hysteresis (on at ≥ 80 °C, cleared only below 77 °C); when robotd doesn't report, use what Studio reads itself (io() reads it in a thread from
+        /sys/class/thermal, only present on the duck)."""
         ha = rd.health.age()
         h = rd.health.value if ha is not None and ha <= MAX_AGE["health"] else None
         c = (h or {}).get("cpu_temp_c") if isinstance(h, dict) else None

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""渲染 Microduck 的装配图 / 爆炸图。
+"""Render Microduck assembly / exploded views.
 
-从 MJCF 直接渲染：4 张常规视图 + 2 张爆炸图 + 1 张分色对照图。
-爆炸图沿运动学链逐级偏移，越靠链末端炸得越远，并标注部件名称与质量。
+Renders directly from the MJCF: 4 standard views + 2 exploded views + 1 color-coded reference view.
+Exploded views offset each level along the kinematic chain, the further toward the end of the chain the further apart, with part names and masses labeled.
 
-用法:
-    python scripts/render_assembly.py <上游 microduck_rl 路径> [输出目录]
+Usage:
+    python scripts/render_assembly.py <upstream microduck_rl path> [output directory]
 """
 import sys, os
 import numpy as np
@@ -13,10 +13,10 @@ import mujoco
 from PIL import Image, ImageDraw, ImageFont
 
 MJCF = "src/mjlab_microduck/robot/microduck/robot_allcollisions.xml"
-STEP = 0.048          # 爆炸图每级偏移量 (m)
+STEP = 0.048          # offset per level in the exploded view (m)
 W, H = 1600, 2100
 
-# 渲染需要更大的离屏帧缓冲和白色天空盒，注入到 MJCF 里
+# Rendering needs a larger offscreen framebuffer and a white skybox, injected into the MJCF
 INJECT = """  <visual>
     <global offwidth="2200" offheight="2600" fovy="42"/>
     <quality shadowsize="4096" offsamples="8"/>
@@ -38,7 +38,7 @@ PAL = [(214,69,65),(240,142,42),(232,196,45),(120,182,66),(48,160,120),(52,152,1
        (60,105,190),(120,90,195),(190,80,175),(225,105,140),(150,110,70),(90,120,140),
        (200,160,90),(70,175,175),(175,175,60)]
 
-# Windows 用微软雅黑；其他平台自行替换成任一中文字体
+# Windows uses Microsoft YaHei; on other platforms substitute any Chinese font
 FONT_CANDIDATES = ["C:/Windows/Fonts/msyh.ttc",
                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
                    "/System/Library/Fonts/PingFang.ttc"]
@@ -75,7 +75,7 @@ def main():
         m = mujoco.MjModel.from_xml_path(tmp)
         d = mujoco.MjData(m)
         d.qpos[:] = 0
-        d.qpos[3] = 1.0                            # 自由关节单位四元数 = 零位基准
+        d.qpos[3] = 1.0                            # free-joint unit quaternion = zero-position reference
         mujoco.mj_forward(m, d)
 
         names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(m.nbody)]
@@ -97,13 +97,13 @@ def main():
 
         vopt = mujoco.MjvOption()
         vopt.geomgroup[:] = 0
-        vopt.geomgroup[2] = 1                      # 只渲染视觉网格
+        vopt.geomgroup[2] = 1                      # render visual meshes only
         r = mujoco.Renderer(m, H, W)
         cam = mujoco.MjvCamera()
         font_path = find_font()
 
         def proj(p, fovy=42.0):
-            """世界坐标 -> 像素坐标，用于画标注引线。"""
+            """World coordinates -> pixel coordinates, for drawing label leader lines."""
             az, el = np.radians(cam.azimuth), np.radians(cam.elevation)
             fwd = np.array([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)])
             cpos = np.array(cam.lookat) - cam.distance * fwd
@@ -159,7 +159,7 @@ def main():
                     if not (0 < x < W and 0 < y < H):
                         continue
                     tx, ty = x + 58, y - 20
-                    for (px, py) in placed:        # 简单避让，防止标签重叠
+                    for (px, py) in placed:        # simple avoidance to keep labels from overlapping
                         if abs(py - ty) < 44 and abs(px - tx) < 430:
                             ty = py + 46
                     placed.append((tx, ty))

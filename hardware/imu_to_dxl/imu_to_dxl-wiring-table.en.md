@@ -200,3 +200,197 @@ Note: in the schematic, X1's `Tri-state` enable pin is **tied to 3.3 V**; the "p
 ## HD-1910-C001 measured parameters (Feetech official product page, pre-sale period)
 
 Feetech made this one specifically for the little duck; the page title is literally "**Open-source duck servo**: serial bus servo, custom-developed for the little duck AI toy".
+Marking on the servo body: **"3-pin interface · TTL serial bus"**.
+
+| Item | Value |
+|---|---|
+| Voltage range | **5 V – 8.4 V** |
+| Stall torque | **10 kg·cm = 0.98 N·m** |
+| Rated load | **3.0 kg·cm = 0.294 N·m** |
+| No-load speed | 0.09 s/60° (110 RPM) |
+| **Standby current** | **21 mA** |
+| **No-load current** | **140 mA** |
+| **Rated current** | **500 mA** |
+| **Stall current** | **1.8 A** |
+| Dimensions | 34 × 20 × 23 mm |
+| Weight | 22.5 ± 2 g |
+| Housing | PA + Fiber |
+
+Its size is in the same class as the XL330 (20×34×26 mm), so it is roughly a mechanical drop-in replacement; its torque is nearly twice that of the XL330-M288 (0.52 N·m).
+
+> ⚠️ Do not apply the electrical parameters from the `HL-2915-C002` spec sheet to this servo; that is a 12 V (9–14 V) model.
+> Only the connector definition and the protocol sections are shared.
+
+### ⚠️ Overcurrent on the J1↔J2 pass-through path
+
+The three wires of J1 / J2 are paralleled one to one, so **if this board sits in the middle of the chain, the current of every downstream servo flows through this board's connectors and copper traces**:
+
+| Condition | Single | ×15 |
+|---|---|---|
+| Standby | 21 mA | 0.3 A |
+| No-load motion | 140 mA | 2.1 A |
+| **Rated load** | **500 mA** | **7.5 A** |
+| Stall | 1.8 A | 27 A |
+
+Yet the **JST EH is rated for only 3 A**.
+
+> F1 (200 mA PPTC) **is not affected**: it sits only in series with this board's own supply path
+> (`VDD_BUS → F1 → VDD_F → U4`), not on the J1→J2 pass-through path.
+
+**Choose one:**
+
+1. **Put this board at the end of the chain** (a leaf node), using only J1, with J2 left empty or connected to only 1 servo; only about 12 mA then flows through this board. **Recommended**
+2. If it must sit in the middle of the chain, route `VDD_BUS` and `GND` from J1 to J2 on the PCB with **wide copper** (≥ 2 mm, or a copper pour),
+   and check that the downstream servo count stays under 3 A
+
+## Feetech connector definition (confirmed by the official spec sheet)
+
+**Source**: Feetech "HL-2915-C002 Serial Servo Specification" A/0, 2026-02-27, page 4, items 6-7.
+
+```
+6-7  Connector and Cable
+     Type             AMP-3
+     Material         PP
+     Length           15CM / 25CM
+     Pin Definition   1  GND
+                      2  Vcc
+                      3  Signal/TTL
+```
+
+**`1=GND / 2=Vcc / 3=Signal`, exactly the same as Dynamixel → the current J1/J2 wiring is correct.**
+
+Supporting evidence: in the `HD-1910-C001.stp` assembly the connector part is named **`AMP-3P`**, and the assembly contains
+`HL-2915-C002-20260409_ASM`; the two models share a platform, so the connector definition is common.
+
+### Other usable entries in the same spec sheet
+
+| Item | Value | Significance |
+|---|---|---|
+| 7-2 Protocol type | Half Duplex Asynchronous, **8bit / 1stop / No Parity** | Same as this board |
+| 7-4 Baud rate | 38400 ~ 1 Mbps, **factory default 1 Mbps** | Same speed as Dynamixel |
+| 7-3 ID range | 0–253, **factory default ID 1** | The 15 servos need their IDs changed one by one; this board uses 200, no conflict |
+| 12 **Signal high level** | **2 V ~ 5 V** | See below |
+| 12 Signal low level | 0.0 V ~ 0.45 V | |
+| 6-6 Angle sensor | 12 Bits magnetic encoder | Magnetic encoder ⇒ **little-endian byte order** |
+
+**Signal levels must be checked in both directions**:
+
+1. This board driving the bus: the `SN74LVC2G241` powered at 3.3 V outputs about 3.3 V, inside the 2–5 V high-level window the servo requires ✅
+2. The servo driving the bus: it may output up to **5 V**; the 74LVC powered at 3.3 V has **5.5 V-tolerant inputs** ✅
+   (choosing LVC rather than LV/HC is exactly what covers this)
+
+> ⚠️ This spec sheet is for the **HL-2915-C002 (12 V, 9–14 V)**, not the HD-1910 (5–8.4 V).
+> **Do not mix the electrical parameters**: supply range, stall current and overvoltage protection thresholds all differ.
+> Only the **connector definition and protocol** sections are shared.
+
+### Background: different Feetech series have different physical layers
+
+Original text from the official memory table manuals of each series (<http://doc.feetech.cn>, endpoint `getQr/{q}`):
+
+| Series | Signaling | Default baud rate |
+|---|---|---|
+| **STS** (magnetic encoder) | **TTL single-wire bus** | **1M** |
+| SCS (potentiometer) | TTL single-wire bus | 1M / 500k |
+| SMS (magnetic encoder) | **RS485** | 115200 |
+| HLS (magnetic encoder) | Not stated | 1M |
+| SHC | CANopen | 125k |
+
+"Feetech = TTL single wire" **only holds for the STS/SCS/HL branch**; SMS is RS485. Check the manual before switching series.
+
+## Automatic protocol detection (no jumpers, no DIP switches)
+
+The two vendors' packet headers are naturally distinguishable; the deciding point is **bytes 3 and 4**:
+
+| | Header | Following | Checksum |
+|---|---|---|---|
+| Dynamixel V2 | `FF FF` | **`FD 00`** | CRC-16 (poly 0x8005) |
+| Feetech STS/SCS | `FF FF` | `ID` + `LENGTH` | `~(ID+LENGTH+INST+params)` |
+
+No ambiguity: byte 3 of a Feetech packet is the ID (which can be 0xFD), but **byte 4, LENGTH, is never 0**
+(the minimum is 2 = instruction + checksum). So `FF FF FD 00` can only be V2.
+
+```
+State: unknown / locked V1 / locked V2
+
+While unknown, on receiving a packet starting with FF FF:
+    if byte[2]==0xFD && byte[3]==0x00:
+        parse as V2, compute CRC-16 → if it passes, one vote for V2
+    else:
+        parse as V1, compute ~sum   → if it passes, one vote for V1
+    3 consecutive matching votes → lock
+
+After locking: parse only with the locked protocol, and reply with the same one
+Fallback: 100 consecutive packets all fail to parse → unlock and detect again
+```
+
+Everything below follows the **original text of Feetech's official "SCS Servo Communication Protocol"**:
+
+- Frame format: **1 start bit + 8 data bits + no parity + 1 stop bit**, 10 bits in total
+- Header: two consecutive `0xFF`
+- ID range **0～253** (`0x00`～`0xFD`), **broadcast ID = 254 (`0xFE`)**
+- Data length **Length = number of parameters N + 2**, so **the minimum is 2 and it is never 0** ← the basis for unambiguous detection
+- Checksum = `~(ID + Length + Instruction + Param1 + … + ParamN)`; if it exceeds 255, take the low byte
+- Sync read `0x82`, sync write `0x83`, PING `0x01`, read `0x02`, write `0x03`
+- ⚠️ **Byte order of multi-byte parameters depends on servo type**: "potentiometer servos are **big-endian** (high byte first), magnetic encoder servos are **little-endian** (low byte first)"
+
+Three key points:
+
+1. **It must lock; do not decide packet by packet**: the bus has noise, and a packet corrupted to look like `FD 00` would make it flip back and forth
+2. **Reply with the same protocol**: not only parsing needs to branch, packet building does too
+3. **Fallback unlock**: switching servo brands does not require reflashing the firmware
+
+The slave ID is **200** on both sides, which does not conflict with the 15 servos (usually numbered 1–15).
+
+> Feetech STS's `Return Delay Time` defaults to 0, and the manual notes "Not functional on STS":
+> the register has no effect, and the reply delay is entirely determined by the firmware.
+
+## Package standard: all resistors and capacitors 0603
+
+All resistors and capacitors use **0603** and D2 uses **SOD-123**; no 0402/SOD-323.
+
+The reason is not hand soldering: the board has the LSM6DSV16X in LGA-14, which needs hot air anyway.
+**The real reason is rework during debugging**: trying the series resistor from 150 Ω down to 33 Ω, removing a pull-up, adding a decoupling capacitor;
+with 0603 a soldering iron does it in seconds. A first-revision board that has never been verified will certainly need a few changes.
+
+Cost: 11 parts take about 16 mm² more, under 2% of the board area. And these 0603 values are all in the LCSC **basic library**
+(10 kΩ `C25804` · 150 Ω `C22808` · 33 Ω `C23140` · 100 nF `C14663`), which saves more on feeder fees than 0402 parts from the extended library.
+
+> C6 (10 µF/25 V) stays 0805; C5 (4.7 µF) and C7 (10 µF) are already 0603.
+
+## Data line protection (following the HAT's approach)
+
+```
+U3.6 (1Y) ──┬─ DXL_DATA ─┬── R5 10k → 3.3V
+U3.5 (2A) ──┘            │
+                         └── R6 150Ω ──┬── DXL_BUS ── J1.3 / J2.3
+                                       │
+                                    D2 5V1
+                                       ⏚
+```
+
+| Part | Function |
+|---|---|
+| **R6 150 Ω** | Source series resistor. Limits short-circuit current and softens edges to reduce EMI. At 1 Mbps the delay is about 3% of a bit time |
+| **D2 5V1** | Clamp. Cathode to `DXL_BUS`, anode to ground |
+
+**The pull-up stays on the buffer side** (R5 before R6): this way, even with no bus plugged in, the `U3.5 (2A)` CMOS input
+has a defined level and does not float. This matches the position of `R32` on the HAT.
+
+> The official HAT uses `R33 150R + TH1 100R` in series, 250 Ω in total, plus a `D4 5V1` clamp
+> (`dynamixel.kicad_sch`). **D2 is the same part number as the HAT's D4 but a different package**: the HAT uses SOD-323 (`C151348`), this board uses SOD-123 (`C151588`) for easier rework.
+> This board uses only 150 Ω because the HAT side already has 250 Ω, and too much series resistance on the bus would slow the edges.
+
+## Three lines of overvoltage defense
+
+1. **F1** PPTC 200mA hold / 24V: current limiting, protects against shorts
+2. **D1** TVS SMF12A: clamping, protects against back-EMF spikes from the servos
+3. **U4** HT7533-1 rated for 30V: even if the first two fail, the LDO itself can withstand it
+
+## Layout notes
+
+- 2-layer board, 45 × 22mm, all SMD parts on the top side
+- The 3 connectors (J1/J2/J3) are lined up along the same edge, through-hole
+- Two M2 mounting holes, 34mm apart (compatible with the original `banana_pcb_locker`)
+- C1/C2 sit right next to U2's Vdd / Vdd_IO pins, with traces as short as possible
+- C4 (100nF) and C5 (4.7µF) sit right next to U1 pin 4; ST DS12992 Fig.13 requires "as close as possible to the pin, or on the back of the PCB directly opposite the pin"
+- Widen the DXL_DATA trace and keep it away from SPI

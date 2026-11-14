@@ -32,7 +32,7 @@ class ProtocolTests(unittest.TestCase):
                          {'listening', 'music', 'rhythm', 'error', 'runtime_root', 'voice_ready', 'last'})
         self.assertFalse(status['status']['listening'])
         self.assertFalse(status['status']['voice_ready'])
-        # 还没听过任何话：last 是空的，而不是一个空壳对象
+        # Nothing heard yet: last is empty, not an empty shell object
         self.assertIsNone(status['status']['last'])
 
     def test_last_command_is_reported_from_voice_without_transcript(self):
@@ -43,7 +43,7 @@ class ProtocolTests(unittest.TestCase):
         self.audio.voice = Voice()
         status = self.hub.status()
         self.assertEqual(status['last'], {'command': 'stand', 'accepted': True, 'age': 0.4, 'seq': 3})
-        self.assertNotIn('text', status['last'])          # 原话不外泄
+        self.assertNotIn('text', status['last'])          # the raw phrase does not leak
 
     def test_stale_last_command_drops_out(self):
         class Voice:

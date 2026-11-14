@@ -13,7 +13,7 @@ from voice_commands import parse_commands,updates_allowed
 
 LOG = logging.getLogger('duck-echo')
 
-# 只在排查时打开：把本次识别到的原话打进日志。默认关，避免日志里留对话内容。
+# Only enable while troubleshooting: logs the phrase recognized this time. Off by default to avoid leaving conversation content in the logs.
 DEBUG_TEXT = os.environ.get('ECHO_DEBUG_TEXT') == '1'
 
 # Keep an unknown-speech alternative and negative/quoted forms. A grammar
@@ -23,10 +23,10 @@ COMMAND_GRAMMAR = [
     '鸭子 坐下', '鸭子 坐下 来', '鸭子 站起来', '鸭子 起立',
     '小 鸭子 坐下', '小 鸭子 站起来', '请 坐下', '请 站起来',
     '坐下 吧', '站起来 吧',
-    # 「鸭鸭」：手机中控约定的唤醒词。写成「鸭 鸭」是因为词表里是单字「鸭」，
-    # 成词的话下面按 model.vosk_model_find_word 过滤时会自己掉出去，不会让整个语法失败
+    # "鸭鸭" (Duckie): the wake word agreed on with the phone web console. It is written as "鸭 鸭" because the vocabulary has the single character "鸭";
+    # as a whole word it would drop out on its own when filtered by model.vosk_model_find_word below, without breaking the whole grammar
     '鸭 鸭 坐下', '鸭 鸭 站起来', '鸭 鸭 走 一小步', '鸭 鸭 停', '鸭 鸭 停 下',
-    # 仍识别「走一小步」以提示改用手机或手柄。明确的停下口令由板载执行。
+    # "走一小步" (take a small step) is still recognized so the user can be told to use the phone or gamepad instead. Explicit stop commands are executed onboard.
     '走 一小步', '走 一步', '往 前 走', '往 前 走 一步', '停', '停 下', '停 下来',
     '不要 坐下', '不要 站起来', '不要 起来', '不要 起立',
     '别 坐下', '别 站起来', '别 起来', '别 起立',
@@ -36,12 +36,12 @@ COMMAND_GRAMMAR = [
     '[unk]',
 ]
 
-# 走一小步 / 停之外还认这些动作：前滚翻、低头捡东西、叫一声、打招呼、点头、摇头、歪头。
-# 每种说法都给成词和拆成单字两种写法：小模型多半是单字词表，成词的话按
-# model.vosk_model_find_word 过滤时会自己掉出去，不会让整个语法失败。
+# Besides taking a small step / stop, these actions are recognized: forward roll, head down to pick something up, quack, greet, nod, shake head, tilt head.
+# Each phrasing is given both as whole words and split into single characters: small models mostly have single-character vocabularies, and whole words
+# would drop out on their own when filtered by model.vosk_model_find_word, without breaking the whole grammar.
 ACTION_PHRASES = {
-    # 「前 滚 翻」实测常被听成「前 捡 前 滚 翻」「翻」。加「滚 翻」一条就够——
-    # 语法表越长，短词越容易被错认出来（09:24 那次「翻 要 歪头」就是多出来的「翻」）。
+    # In hardware tests "前 滚 翻" (forward roll) is often heard as "前 捡 前 滚 翻" or "翻". Adding one entry "滚 翻" is enough:
+    # the longer the grammar, the easier short words get misrecognized (the "翻 要 歪头" at 09:24 was exactly an extra "翻").
     'roulade': ['前滚翻', '前 滚 翻', '翻跟头', '翻 跟 头', '滚 翻'],
     'ground_pick': ['低头捡东西', '低头', '捡东西', '捡 东 西'],
     'chirp': ['叫一声', '叫 一 声', '叫一下', '叫 一 下'],
@@ -53,10 +53,10 @@ ACTION_PHRASES = {
 
 
 def _grammar_entries(phrases):
-    """一个动作的说法 → 语法里要有的几条。
+    """Phrasings for one action → the entries the grammar needs.
 
-    除了原话还要给：唤醒词「鸭 鸭」和称呼「鸭子」前缀、礼貌的「请」、
-    以及「不要 / 别」两种否定式——语法里没有否定式的话，说「不要点头」会被硬凑成「点头」而真的执行。
+    Besides the plain phrase, also provide: the wake word "鸭 鸭" and the form of address "鸭子" (duck) as prefixes, the polite "请" (please),
+    and both negative forms "不要 / 别" (don't): without negative forms in the grammar, saying "不要点头" (don't nod) would be forced into "点头" (nod) and actually executed.
     """
     out = []
     for phrase in phrases:
@@ -84,7 +84,7 @@ class MandarinRecognizer:
 
     @staticmethod
     def _custom_key():
-        """Studio 里上传的自定义指令。读不到返回 None，沿用当前语法。"""
+        """Custom commands uploaded in Studio. Returns None if they cannot be read, keeping the current grammar."""
         try:
             from voice_commands import custom_skills
             return tuple(sorted(custom_skills().items()))
@@ -94,7 +94,7 @@ class MandarinRecognizer:
     def _make_grammar(self, key):
         phrases = list(COMMAND_GRAMMAR)
         for command, _skill in key:
-            # 小模型是单字词表：整词过滤会掉出去，拆成单字再给一条
+            # Small models have single-character vocabularies: whole-word filtering would drop it, so add another entry split into single characters
             phrases.extend(_grammar_entries([command, ' '.join(command)]))
         grammar = [phrase for phrase in dict.fromkeys(phrases)
                    if all(self.model.vosk_model_find_word(word) >= 0 for word in phrase.split())]
@@ -146,15 +146,15 @@ class VoiceControl:
         self.thread.start()
 
     def _record(self, result):
-        """记下「最近一次认出来的指令」。只留指令名和成不成，不留整句话：
-        原话里可能有无关内容，手机页只需要知道它听懂了什么。"""
+        """Record "the most recently recognized command". Keep only the command name and whether it succeeded, not the whole sentence:
+        the raw phrase may contain unrelated content, and the phone page only needs to know what it understood."""
         with self.condition:
             self.last_result = result
             self.last_at = self.clock()
             self.last_seq += 1
 
     def last_view(self):
-        """给控制口 / 手机页看的只读视图：指令名、成没成、多久之前、第几次、失败原因。"""
+        """Read-only view for the control port / phone page: command name, success or not, how long ago, which attempt, failure reason."""
         with self.condition:
             item, at, seq = self.last_result, self.last_at, self.last_seq
         if not isinstance(item, dict):
@@ -167,8 +167,8 @@ class VoiceControl:
                 'accepted': accepted if type(accepted) is bool else None,
                 'age': round(max(0., self.clock() - at), 2),
                 'seq': seq}
-        # 只带 robotd / 执行器给出的公开理由（例如「机器人在坐姿」「舵机反馈不完整」），
-        # 不带识别原话；前端据此说清「为什么没做成」。
+        # Only carry the public reason given by robotd / the executor (e.g. "the robot is sitting", "servo feedback incomplete"),
+        # never the recognized raw phrase; the frontend uses it to explain "why it was not done".
         reason = item.get('reason')
         if isinstance(reason, str) and reason:
             view['reason'] = reason[:160]
@@ -232,12 +232,12 @@ class VoiceControl:
                     self._echo(job)
                     continue
                 result = recognizer.recognize(job[2])
-                # 一段里可能并了好几条口令，按说的顺序逐条做（见 voice_commands.parse_commands）
+                # One segment may merge several commands; execute them one by one in the order spoken (see voice_commands.parse_commands)
                 commands = parse_commands(result.get('text', ''), result.get('confidence', 0))
                 if not self.valid(job):
                     continue
                 # Do not retain arbitrary conversation transcriptions in logs.
-                # 排查「听到了但认不出」时才开：ECHO_DEBUG_TEXT=1，只打本次识别到的文字。
+                # Only enable when troubleshooting "heard but not recognized": ECHO_DEBUG_TEXT=1, logging only the text recognized this time.
                 if DEBUG_TEXT:
                     LOG.info('speech text=%r', str(result.get('text', ''))[:120])
                 LOG.info('speech command=%s confidence=%.2f',
